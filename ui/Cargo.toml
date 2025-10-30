@@ -1,0 +1,12 @@
+[package]
+name = "nettoolskit-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+owo-colors = { workspace = true }
+crossterm = { workspace = true }
+
+[lib]
+name = "nettoolskit_ui"
+path = "src/lib.rs"

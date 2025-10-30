@@ -1,0 +1,23 @@
+[package]
+name = "nettoolskit-commands"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# UI and colors
+owo-colors = { workspace = true }
+nettoolskit-ui = { path = "../ui" }
+
+# Async runtime
+tokio.workspace = true
+
+# CLI argument parsing
+clap.workspace = true
+
+# Telemetry and observability
+nettoolskit-otel = { path = "../otel" }
+tracing = { workspace = true }
+
+[lib]
+name = "nettoolskit_commands"
+path = "src/lib.rs"

@@ -15,6 +15,14 @@ path = "src/lib.rs"
 
 [dependencies]
 # Workspace dependencies
+nettoolskit-commands = { path = "../commands" }
+nettoolskit-ui = { path = "../ui" }
+nettoolskit-async-utils = { path = "../async-utils" }
+nettoolskit-otel = { path = "../otel" }
+nettoolskit-file-search = { path = "../file-search" }
+nettoolskit-ollama = { path = "../ollama" }
+
+# Async and standard dependencies
 anyhow = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
@@ -29,18 +37,14 @@ owo-colors = { workspace = true }
 supports-color = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+handlebars = { workspace = true }
+
+# Tracing and observability
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-handlebars = { workspace = true }
 
 # Additional dependencies
 ctrlc = "3.4"
-
-# Local modules
-nettoolskit-async-utils = { path = "../async-utils" }
-nettoolskit-file-search = { path = "../file-search" }
-nettoolskit-otel = { path = "../otel" }
-nettoolskit-ollama = { path = "../ollama" }
 
 [dev-dependencies]
 tokio-test = "0.4"
