@@ -6,6 +6,7 @@
 use clap::Parser;
 use crate::ExitStatus;
 use owo_colors::OwoColorize;
+use tracing::info;
 
 /// Arguments for the list command.
 ///
@@ -51,6 +52,12 @@ pub struct ListArgs {
 /// }
 /// ```
 pub async fn run(args: ListArgs) -> ExitStatus {
+    info!(
+        filter = ?args.filter,
+        tech = ?args.tech,
+        "Executing list command with filters"
+    );
+
     println!("{}", "📋 Available Templates".bold().blue());
     println!();
 
@@ -80,5 +87,6 @@ pub async fn run(args: ListArgs) -> ExitStatus {
         println!("  {} - {}", name.yellow().bold(), description);
     }
 
+    info!("List command completed successfully");
     ExitStatus::Success
 }

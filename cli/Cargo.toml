@@ -17,6 +17,7 @@ path = "src/lib.rs"
 # Workspace dependencies
 nettoolskit-commands = { path = "../commands" }
 nettoolskit-ui = { path = "../ui" }
+nettoolskit-core = { path = "../core" }
 nettoolskit-async-utils = { path = "../async-utils" }
 nettoolskit-otel = { path = "../otel" }
 nettoolskit-file-search = { path = "../file-search" }

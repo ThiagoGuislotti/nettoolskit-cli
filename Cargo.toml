@@ -1,12 +1,14 @@
 [workspace]
 members = [
     "cli",
+    "core",
     "commands",
     "ui",
     "async-utils",
     "file-search",
     "otel",
     "ollama",
+    "utils",
 ]
 resolver = "2"
 
@@ -34,7 +36,7 @@ strum = { version = "0.25", features = ["derive"] }
 strum_macros = "0.25"
 
 # Color support
-owo-colors = "4"
+owo-colors = "3.5"
 supports-color = "2.1"
 
 # Async utilities

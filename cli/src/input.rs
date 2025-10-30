@@ -1,6 +1,6 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::io::{self, Write};
-use crate::palette::CommandPalette;
+use nettoolskit_ui::CommandPalette;
 use nettoolskit_async_utils::with_timeout;
 
 #[derive(Debug)]

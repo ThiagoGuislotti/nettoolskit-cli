@@ -1,4 +1,5 @@
-use nettoolskit_cli::commands::{SlashCommand, COMMANDS};
+use nettoolskit_commands::SlashCommand;
+use nettoolskit_core::commands::COMMANDS;
 
 #[test]
 fn test_slash_commands_complete() {

@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# Core types
+nettoolskit-core = { path = "../core" }
+
 # UI and colors
 owo-colors = { workspace = true }
 nettoolskit-ui = { path = "../ui" }
@@ -13,6 +16,10 @@ tokio.workspace = true
 
 # CLI argument parsing
 clap.workspace = true
+
+# String utilities for enums
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # Telemetry and observability
 nettoolskit-otel = { path = "../otel" }

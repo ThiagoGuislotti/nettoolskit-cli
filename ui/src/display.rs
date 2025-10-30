@@ -1,5 +1,6 @@
 use owo_colors::{OwoColorize, Rgb};
 use std::env;
+use nettoolskit_utils::string::truncate_directory_with_middle;
 
 /// Global UI color constants
 pub const PRIMARY_COLOR: Rgb = Rgb(155, 114, 255);
@@ -21,25 +22,42 @@ pub fn print_logo() {
 /// and helpful usage tips in a formatted box layout.
 pub fn print_welcome_box() {
     let current_dir = get_current_directory();
-    let max_width = 85;
-    let truncated_dir = truncate_directory(&current_dir, max_width - 20);
+    let box_width = 89; // Total characters in the box line
 
-    println!("╭─────────────────────────────────────────────────────────────────────────────────────────╮");
+    println!("{}", "╭─────────────────────────────────────────────────────────────────────────────────────────╮".color(PRIMARY_COLOR));
     println!(
-        "│ {} {}                                                              │",
+        "{} {} {}                                                              {}",
+        "│".color(PRIMARY_COLOR),
         ">_".color(PRIMARY_COLOR).bold(),
-        format!("NetToolsKit CLI ({})", VERSION).color(WHITE_COLOR).bold()
+        format!("NetToolsKit CLI ({})", VERSION).color(WHITE_COLOR),
+        "│".color(PRIMARY_COLOR)
     );
     println!(
-        "│    {}                                      │",
-        "A comprehensive toolkit for backend development".color(GRAY_COLOR)
+        "{}    {}                                      {}",
+        "│".color(PRIMARY_COLOR),
+        "A comprehensive toolkit for backend development".color(GRAY_COLOR),
+        "│".color(PRIMARY_COLOR)
     );
-    println!("│                                                                                         │");
+    println!("{}", "│                                                                                         │".color(PRIMARY_COLOR));
+
+    // Calculate available width for directory path (leaving 4 spaces before final │)
+    let dir_label = "    directory: ";
+    let available_width = box_width - dir_label.len() - 1 - 4 - 4; // -1 for │, -4 for spaces, -4 for safety margin
+    let truncated_dir = truncate_directory_with_middle(&current_dir, available_width);
+
+    // Calculate padding for directory line to align properly
+    let dir_text_length = dir_label.len() + truncated_dir.len();
+    let padding_needed = box_width - dir_text_length;
+    let padding = " ".repeat(padding_needed.max(4));
+
     println!(
-        "│    directory: {}        │",
-        truncated_dir.color(SECONDARY_COLOR)
+        "{}{}{}{}",
+        "│".color(PRIMARY_COLOR),
+        "    directory: ".color(GRAY_COLOR),
+        truncated_dir.color(WHITE_COLOR),
+        format!("{}│", padding).color(PRIMARY_COLOR)
     );
-    println!("╰─────────────────────────────────────────────────────────────────────────────────────────╯");
+    println!("{}", "╰─────────────────────────────────────────────────────────────────────────────────────────╯".color(PRIMARY_COLOR));
     println!();
     println!();
 }
@@ -87,68 +105,4 @@ pub fn get_current_directory() -> String {
     }
 
     current
-}
-
-/// Truncate directory path intelligently to fit within max_width.
-///
-/// Preserves the beginning and end of the path while truncating the middle
-/// to ensure important context is maintained in limited display space.
-///
-/// # Arguments
-///
-/// * `dir` - The directory path to truncate
-/// * `max_width` - Maximum width allowed for the path
-///
-/// # Returns
-///
-/// Returns a truncated path string that fits within the specified width
-/// while preserving contextual information.
-///
-/// # Examples
-///
-/// ```
-/// use nettoolskit_ui::truncate_directory;
-/// let truncated = truncate_directory("/very/long/path/to/project", 20);
-/// // Returns something like "/very/.../project"
-/// ```
-pub fn truncate_directory(dir: &str, max_width: usize) -> String {
-    if dir.len() <= max_width {
-        return dir.to_string();
-    }
-
-    // Detect directory separator (Windows or Unix)
-    let separator = if dir.contains('\\') { '\\' } else { '/' };
-    let separator_str = separator.to_string();
-
-    // Split path into components
-    let parts: Vec<&str> = dir.split(separator).collect();
-
-    if parts.len() <= 2 {
-        // Can't truncate much, just take the end
-        let ellipsis = "...";
-        let available = max_width.saturating_sub(ellipsis.len());
-        let start_pos = dir.len().saturating_sub(available);
-        return format!("{}{}", ellipsis, &dir[start_pos..]);
-    }
-
-    // Try to preserve first and last parts with ellipsis in middle
-    let first_part = parts[0];
-    let last_part = parts[parts.len() - 1];
-    let ellipsis = "...";
-
-    let base_length = first_part.len() + last_part.len() + ellipsis.len() + 2; // +2 for separators
-
-    if base_length <= max_width {
-        return format!("{}{}{}{}{}", first_part, separator_str, ellipsis, separator_str, last_part);
-    }
-
-    // If still too long, truncate the last part
-    let available_for_last = max_width.saturating_sub(first_part.len() + ellipsis.len() + 2);
-    let truncated_last = if last_part.len() > available_for_last {
-        &last_part[last_part.len().saturating_sub(available_for_last)..]
-    } else {
-        last_part
-    };
-
-    format!("{}{}{}{}{}", first_part, separator_str, ellipsis, separator_str, truncated_last)
 }
