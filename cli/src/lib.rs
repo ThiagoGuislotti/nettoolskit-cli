@@ -170,41 +170,44 @@ fn print_welcome_box() {
 
     println!("{}", box_top.color(PRIMARY_COLOR));
 
-        // Linha 1: Título com versão - exatamente 89 caracteres
+    // Linha 1: Título com versão - content_width menos 2 para as bordas
+    let title_content = format!(">_ NetToolsKit CLI ({})", VERSION);
+    let title_spaces = (content_width - 2).saturating_sub(title_content.len());
+
     print!("{} ", box_side.color(PRIMARY_COLOR));
     print!("{}", ">_ ".color(WHITE_COLOR));
     print!("{}", "NetToolsKit CLI".color(WHITE_COLOR).bold());
     print!(" ({})", VERSION.color(GRAY_COLOR));
-    let title_len = 3 + 15 + 2 + VERSION.len();
-    let title_spaces = content_width.saturating_sub(title_len);
     print!("{}", " ".repeat(title_spaces));
     println!(" {}", box_side.color(PRIMARY_COLOR));
 
-    // Linha 2: Descrição - exatamente 89 caracteres
+    // Linha 2: Descrição - content_width menos 2 para as bordas
+    let desc_content = "   A comprehensive toolkit for backend development";
+    let desc_spaces = (content_width - 2).saturating_sub(desc_content.len());
+
     print!("{} ", box_side.color(PRIMARY_COLOR));
-    print!("   {}", "A powerful toolkit for .NET development".color(GRAY_COLOR));
-    let desc_spaces = content_width - 3 - 39; // espaços restantes
+    print!("{}", "   ".color(GRAY_COLOR));
+    print!("{}", "A comprehensive toolkit for backend development".color(GRAY_COLOR));
     print!("{}", " ".repeat(desc_spaces));
     println!(" {}", box_side.color(PRIMARY_COLOR));
 
-    // Linha 3: Vazia - exatamente 89 caracteres
+    // Linha 3: Vazia - content_width menos 2 para as bordas
     print!("{} ", box_side.color(PRIMARY_COLOR));
-    print!("{}", " ".repeat(content_width));
+    print!("{}", " ".repeat(content_width - 2));
     println!(" {}", box_side.color(PRIMARY_COLOR));
 
-    // Linha 4: Diretório
+    // Linha 4: Diretório - content_width menos 2 para as bordas
     let dir_prefix = "   directory: ";
-    let available_width = content_width.saturating_sub(dir_prefix.len());
+    let available_width = (content_width - 2).saturating_sub(dir_prefix.len());
     let truncated_dir = truncate_directory(&current_dir, available_width);
-    let dir_text = format!("{}{}", dir_prefix, truncated_dir);
-    let dir_padding = content_width.saturating_sub(dir_text.len());
+    let dir_display = format!("   directory: {}", truncated_dir);
+    let dir_spaces = content_width.saturating_sub(dir_display.len());
+
     print!("{} ", box_side.color(PRIMARY_COLOR));
     print!("   {}", "directory:".color(GRAY_COLOR));
     print!(" {}", truncated_dir.color(WHITE_COLOR));
-    print!("{}", " ".repeat(dir_padding));
-    println!(" {}", box_side.color(PRIMARY_COLOR));
-
-    println!("{}", box_bottom.color(PRIMARY_COLOR));
+    print!("{}", " ".repeat(dir_spaces));
+    println!(" {}", box_side.color(PRIMARY_COLOR));    println!("{}", box_bottom.color(PRIMARY_COLOR));
     println!();
 }
 
@@ -262,42 +265,49 @@ async fn run_interactive_loop() -> io::Result<ExitStatus> {
         // Read input with command palette support
         match read_line_with_palette(&mut input_buffer, &mut palette).await? {
             InputResult::Command(cmd) => {
-                cleanup();
-
                 match cmd.as_str() {
                     "/quit" => {
+                        cleanup();
                         println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
                         return Ok(ExitStatus::Success);
                     }
-                    "/help" => {
-                        show_help();
-                    }
+
                     "/list" => {
+                        cleanup();
                         println!("{}", "📋 Listing templates...".color(WHITE_COLOR));
                         // Placeholder - would call actual list command
+                        enable_raw_mode()?;
                     }
                     "/new" => {
+                        cleanup();
                         println!("{}", "🚀 Creating new project...".color(WHITE_COLOR));
                         // Placeholder - would call actual new command
+                        enable_raw_mode()?;
                     }
                     "/check" => {
+                        cleanup();
                         println!("{}", "🔍 Validating...".color(WHITE_COLOR));
                         // Placeholder - would call actual check command
+                        enable_raw_mode()?;
                     }
                     "/render" => {
+                        cleanup();
                         println!("{}", "🎨 Rendering preview...".color(WHITE_COLOR));
                         // Placeholder - would call actual render command
+                        enable_raw_mode()?;
                     }
                     "/apply" => {
+                        cleanup();
                         println!("{}", "⚡ Applying manifest...".yellow());
                         // Placeholder - would call actual apply command
+                        enable_raw_mode()?;
                     }
                     _ => {
+                        cleanup();
                         println!("{}: {}", "Unknown command".red(), cmd);
+                        enable_raw_mode()?;
                     }
                 }
-
-                enable_raw_mode()?;
             }
             InputResult::Text(text) => {
                 cleanup();
@@ -459,27 +469,4 @@ fn handle_key_event(
     }
 
     Ok(None)
-}
-
-
-
-fn show_help() {
-    println!("{}", "📚 NetToolsKit CLI Help".bold().color(WHITE_COLOR));
-    println!();
-    println!("{}", "Available Commands:".bold().color(WHITE_COLOR));
-    println!();
-
-    // Lista com alinhamento e espaçamento
-    for (cmd, desc) in slash_command::COMMANDS {
-        println!("  {:<12} - {}", cmd.color(WHITE_COLOR).bold(), desc.color(GRAY_COLOR));
-        println!(); // Linha extra para espaçamento
-    }
-
-    println!("{}", "Tips:".bold().color(WHITE_COLOR));
-    println!();
-    println!("• Type {} to see the command palette", "/".color(SECONDARY_COLOR));
-    println!("• Use {} and {} to navigate the palette", "↑".color(SECONDARY_COLOR), "↓".color(SECONDARY_COLOR));
-    println!("• Press {} or {} to select a command", "Enter".color(SECONDARY_COLOR), "Tab".color(SECONDARY_COLOR));
-    println!("• Press {} to cancel the palette", "Esc".color(SECONDARY_COLOR));
-    println!("• Press {} to exit", "Ctrl+C".color(SECONDARY_COLOR));
 }
