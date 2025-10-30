@@ -1,0 +1,13 @@
+{{!--
+  Stub value object template.
+  Replace with your domain-specific implementation.
+--}}
+namespace {{namespaceRoot}}.Domain.ValueObjects;
+
+public readonly record struct {{name}}(
+{{#if fields}}
+    {{#each fields}}
+    {{type}} {{name}}{{#unless @last}},{{/unless}}
+    {{/each}}
+{{/if}}
+);

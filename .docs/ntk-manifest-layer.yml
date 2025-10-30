@@ -1,0 +1,41 @@
+# ntk-manifest-layer.yml — Domain-only expansion/refactor in an existing solution
+apiVersion: ntk/v1
+kind: solution
+
+meta: { name: Rent.Service }
+
+conventions:
+  namespaceRoot: Rent.Service
+  targetFramework: net9.0
+  policy: { collision: fail, insertTodoWhenMissing: true, strict: true }
+
+solution: { root: samples/src, slnFile: Rent.Service.sln }
+
+guards:
+  requireExistingProjects: true
+  onMissingProject: fail
+
+projects:
+  Domain: { type: domain, name: Rent.Service.Domain, path: Rent.Service.Domain }
+
+contexts:
+  - name: Rentals
+    aggregates:
+      - name: Rental
+        valueObjects:
+          - name: Plate
+            fields: [ { name: Value, type: string } ]
+        entities: []
+
+templates:
+  mapping:
+  - { artifact: value-object, template: dotnet/domain/value-object.hbs,  dst: "samples/src/Rent.Service.Domain/ValueObjects/{Name}.cs" }
+
+render:
+  rules:
+    - { expand: "contexts[*].aggregates[*].valueObjects[*]", as: value-object }
+
+apply:
+  mode: layer
+  layer:
+    include: [domain]

@@ -1,0 +1,46 @@
+[package]
+name = "nettoolskit-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ntk"
+path = "src/main.rs"
+
+[lib]
+name = "nettoolskit_cli"
+path = "src/lib.rs"
+
+[dependencies]
+# Workspace dependencies
+anyhow = { workspace = true }
+clap = { workspace = true }
+clap_complete = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+owo-colors = { workspace = true }
+supports-color = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+handlebars = { workspace = true }
+
+# Additional dependencies
+ctrlc = "3.4"
+
+# Local modules
+nettoolskit-async-utils = { path = "../async-utils" }
+nettoolskit-file-search = { path = "../file-search" }
+nettoolskit-otel = { path = "../otel" }
+nettoolskit-ollama = { path = "../ollama" }
+
+[dev-dependencies]
+tokio-test = "0.4"

@@ -1,0 +1,56 @@
+# ntk-manifest-feature.yml — Add a new end-to-end feature into an existing solution
+apiVersion: ntk/v1
+kind: solution
+
+meta: { name: Rent.Service }
+
+conventions:
+  namespaceRoot: Rent.Service
+  targetFramework: net9.0
+  policy: { collision: fail, insertTodoWhenMissing: true, strict: true }
+
+solution: { root: samples/src, slnFile: Rent.Service.sln }
+
+guards:
+  requireExistingProjects: true
+  onMissingProject: fail
+
+projects:
+  Domain:         { type: domain,         name: Rent.Service.Domain,         path: Rent.Service.Domain }
+  Application:    { type: application,    name: Rent.Service.Application,    path: Rent.Service.Application }
+  Infrastructure: { type: infrastructure, name: Rent.Service.Infrastructure, path: Rent.Service.Infrastructure }
+  Api:            { type: api,            name: Rent.Service.Api,            path: Rent.Service.Api }
+
+contexts:
+  - name: Rentals
+    aggregates:
+      - name: Fine
+        valueObjects: [ { name: Money, fields: [ { name: Amount, type: int } ] } ]
+        entities: [ { name: Fine, fields: [ { name: Id, type: Guid, key: true }, { name: Amount, type: Money } ] } ]
+        domainEvents: [ { name: FineCalculated } ]
+        repository: { name: IFineRepository, methods: [ { name: Add, args: [ { name: fine, type: Fine } ], returns: void } ] }
+    useCases:
+      - { name: CalculateFine, type: Command, input: [ { name: RentalId, type: Guid }, { name: ReturnDate, type: DateTime } ], output: [ { name: Amount, type: Money } ] }
+
+templates:
+  mapping:
+  - { artifact: value-object,          template: dotnet/domain/value-object.hbs,         dst: "samples/src/Rent.Service.Domain/ValueObjects/{Name}.cs" }
+  - { artifact: entity,                template: dotnet/domain/entity.hbs,               dst: "samples/src/Rent.Service.Domain/Entities/{Name}.cs" }
+  - { artifact: domain-event,          template: dotnet/domain/domain-event.hbs,         dst: "samples/src/Rent.Service.Domain/Events/{Name}.cs" }
+  - { artifact: repository-interface,  template: dotnet/domain/repository-interface.hbs, dst: "samples/src/Rent.Service.Domain/Repositories/{Name}.cs" }
+  - { artifact: usecase-command,       template: dotnet/app/command.hbs,                 dst: "samples/src/Rent.Service.Application/Commands/{Name}/{Name}Handler.cs" }
+  - { artifact: endpoint,              template: dotnet/api/endpoint-minimal.hbs,        dst: "samples/src/Rent.Service.Api/Endpoints/{UseCase}.cs" }
+
+render:
+  rules:
+    - { expand: "contexts[*].aggregates[*].valueObjects[*]", as: value-object }
+    - { expand: "contexts[*].aggregates[*].entities[*]",     as: entity }
+    - { expand: "contexts[*].aggregates[*].domainEvents[*]", as: domain-event }
+    - { expand: "contexts[*].aggregates[*].repository",      as: repository-interface }
+    - { expand: "contexts[*].useCases[?type=='Command'][*]", as: usecase-command }
+
+apply:
+  mode: feature
+  feature:
+    context: Rentals
+    include: [domain, application, api, infrastructure]

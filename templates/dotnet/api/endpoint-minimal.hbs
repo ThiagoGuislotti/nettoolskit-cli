@@ -1,0 +1,25 @@
+{{!--
+  Stub minimal API endpoint template.
+--}}
+using MediatR;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+
+namespace {{namespaceRoot}}.Api.Endpoints;
+
+public static class {{useCase}}Endpoint
+{
+    public static void Map{{useCase}}Endpoint(this IEndpointRouteBuilder routes)
+    {
+        routes.MapPost("/{{useCase}}", async ({{useCase}}Request request, IMediator mediator) =>
+        {
+            {{#if response}}
+            var result = await mediator.Send(new {{useCase}}Command( /* TODO: map request */ ));
+            return Results.Ok(result);
+            {{else}}
+            await mediator.Send(new {{useCase}}Command( /* TODO: map request */ ));
+            return Results.Accepted();
+            {{/if}}
+        });
+    }
+}

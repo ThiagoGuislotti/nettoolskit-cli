@@ -1,0 +1,15 @@
+{{!--
+  Stub repository interface template.
+--}}
+namespace {{namespaceRoot}}.Domain.Repositories;
+
+public interface {{name}}
+{
+{{#if methods}}
+{{#each methods}}
+    {{#if returns}}{{returns}}{{else}}void{{/if}} {{name}}({{#if args}}{{#each args}}{{type}} {{name}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}});
+{{/each}}
+{{else}}
+    // TODO: declare repository methods
+{{/if}}
+}
