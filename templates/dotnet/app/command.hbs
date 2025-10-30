@@ -1,0 +1,35 @@
+{{!--
+  Stub CQRS command template.
+--}}
+using MediatR;
+
+namespace {{namespaceRoot}}.Application.Commands.{{name}};
+
+public record {{name}}Command(
+{{#if input}}
+    {{#each input}}
+    {{type}} {{name}}{{#unless @last}},{{/unless}}
+    {{/each}}
+{{/if}}
+) : IRequest{{#if output}}<{{name}}Result>{{/if}};
+
+{{#if output}}
+public record {{name}}Result(
+    {{#each output}}
+    {{type}} {{name}}{{#unless @last}},{{/unless}}
+    {{/each}}
+);
+{{/if}}
+
+public sealed class {{name}}CommandHandler : IRequestHandler<{{name}}Command{{#if output}}, {{name}}Result{{/if}}>
+{
+    public Task<{{#if output}}{{name}}Result{{else}}Unit{{/if}}> Handle({{name}}Command request, CancellationToken cancellationToken)
+    {
+        // TODO: implement handler logic
+        {{#if output}}
+        return Task.FromResult(new {{name}}Result());
+        {{else}}
+        return Task.FromResult(Unit.Value);
+        {{/if}}
+    }
+}
