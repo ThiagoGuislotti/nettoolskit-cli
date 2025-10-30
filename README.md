@@ -84,7 +84,7 @@ NetToolsKit.CLI/
 │   ├── src/
 │   │   ├── main.rs        # Ponto de entrada
 │   │   ├── lib.rs         # Modo interativo
-│   │   ├── slash_command.rs   # Definição dos comandos
+│   │   ├── commands.rs        # Definição dos comandos CLI
 │   │   ├── command_palette.rs # Paleta interativa
 │   │   └── commands/      # Implementação dos comandos
 │   └── tests/             # Testes

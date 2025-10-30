@@ -1,11 +1,7 @@
-use clap::{CommandFactory, Parser};
-use clap_complete::generate;
+use clap::Parser;
 use nettoolskit_cli::{interactive_mode, ExitStatus};
-
-use std::io;
-
-mod commands;
-use commands::{Commands, GlobalArgs};
+use nettoolskit_commands::{Commands, GlobalArgs};
+use nettoolskit_otel::init_tracing;
 
 /// NetToolsKit CLI
 ///
@@ -31,34 +27,21 @@ async fn main() {
     // Parse command line arguments
     let cli = Cli::parse();
 
-    // Initialize tracing if verbose mode is enabled
-    if cli.global.verbose {
-        tracing_subscriber::fmt()
-            .with_env_filter("nettoolskit=debug")
-            .init();
+    // Initialize tracing using our otel module
+    if let Err(e) = init_tracing(cli.global.verbose) {
+        eprintln!("Warning: Failed to initialize tracing: {}", e);
     }
 
     // Handle subcommands or launch interactive mode
     let exit_status = match cli.subcommand {
-        Some(Commands::List(args)) => {
-            commands::list::run(args).await
-        }
-        Some(Commands::New(args)) => {
-            commands::new::run(args).await
-        }
-        Some(Commands::Check(args)) => {
-            commands::check::run(args).await
-        }
-        Some(Commands::Render(args)) => {
-            commands::render::run(args).await
-        }
-        Some(Commands::Apply(args)) => {
-            commands::apply::run(args).await
-        }
-        Some(Commands::Completion(args)) => {
-            let mut cmd = Cli::command();
-            generate(args.shell, &mut cmd, "ntk", &mut io::stdout());
-            ExitStatus::Success
+        Some(command) => {
+            // Convert commands ExitStatus to CLI ExitStatus
+            let result = nettoolskit_commands::execute_command(command, cli.global).await;
+            match result {
+                nettoolskit_commands::ExitStatus::Success => ExitStatus::Success,
+                nettoolskit_commands::ExitStatus::Error => ExitStatus::Error,
+                nettoolskit_commands::ExitStatus::Interrupted => ExitStatus::Interrupted,
+            }
         }
         None => {
             // Launch interactive mode

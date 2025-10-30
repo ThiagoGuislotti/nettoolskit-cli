@@ -1,3 +1,7 @@
+
+//! The commands are ordered by frequency of use in the enum, which determines their
+//! presentation order in the command palette popup.
+
 use strum::IntoEnumIterator;
 use strum_macros::AsRefStr;
 use strum_macros::EnumIter;
