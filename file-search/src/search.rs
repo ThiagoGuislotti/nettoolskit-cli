@@ -86,6 +86,44 @@ pub fn search_files<P: AsRef<Path>>(
     Ok(results)
 }
 
+/// Search for files asynchronously with parallel processing
+pub async fn search_files_async<P: AsRef<Path>>(
+    root: P,
+    config: &SearchConfig,
+) -> Result<Vec<PathBuf>> {
+    use tokio::task;
+
+    let root = root.as_ref().to_path_buf();
+    let config = config.clone();
+
+    task::spawn_blocking(move || search_files(&root, &config)).await?
+}
+
+/// Search for files in multiple directories concurrently
+pub async fn search_files_concurrent<P: AsRef<Path>>(
+    roots: Vec<P>,
+    config: &SearchConfig,
+) -> Result<Vec<PathBuf>> {
+    use futures::future::join_all;
+
+    let futures: Vec<_> = roots
+        .into_iter()
+        .map(|root| search_files_async(root, config))
+        .collect();
+
+    let results = join_all(futures).await;
+    let mut all_files = Vec::new();
+
+    for result in results {
+        match result {
+            Ok(files) => all_files.extend(files),
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(all_files)
+}
+
 /// Find template files in a directory
 pub fn find_templates<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
     let config = SearchConfig {
@@ -97,6 +135,19 @@ pub fn find_templates<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
     };
 
     search_files(root, &config)
+}
+
+/// Find template files asynchronously
+pub async fn find_templates_async<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
+    let config = SearchConfig {
+        include_patterns: vec!["*.hbs".to_string(), "*.template".to_string()],
+        exclude_patterns: vec!["**/target/**".to_string(), "**/node_modules/**".to_string()],
+        max_depth: Some(10),
+        follow_links: false,
+        include_hidden: false,
+    };
+
+    search_files_async(root, &config).await
 }
 
 /// Find manifest files in a directory

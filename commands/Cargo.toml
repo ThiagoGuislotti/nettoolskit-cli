@@ -14,6 +14,10 @@ nettoolskit-ui = { path = "../ui" }
 # Async runtime
 tokio.workspace = true
 
+# Async utilities
+nettoolskit-async-utils = { path = "../async-utils" }
+futures = { workspace = true }
+
 # CLI argument parsing
 clap.workspace = true
 

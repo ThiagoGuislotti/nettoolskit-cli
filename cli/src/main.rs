@@ -22,7 +22,7 @@ struct Cli {
     pub subcommand: Option<Commands>,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     // Parse command line arguments
     let cli = Cli::parse();
