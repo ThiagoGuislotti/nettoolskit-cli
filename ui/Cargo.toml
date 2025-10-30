@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 owo-colors = { workspace = true }
 crossterm = { workspace = true }
+nettoolskit-utils = { path = "../utils" }
+nettoolskit-core = { path = "../core" }
 
 [lib]
 name = "nettoolskit_ui"

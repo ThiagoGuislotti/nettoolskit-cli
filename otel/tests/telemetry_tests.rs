@@ -3,17 +3,17 @@ use nettoolskit_otel::Metrics;
 #[test]
 fn test_metrics_creation() {
     let metrics = Metrics::new();
-    assert!(metrics.counters().is_empty());
-    assert!(metrics.gauges().is_empty());
+    assert!(metrics.counters_snapshot().is_empty());
+    assert!(metrics.gauges_snapshot().is_empty());
 
     let default_metrics = Metrics::default();
-    assert!(default_metrics.counters().is_empty());
-    assert!(default_metrics.gauges().is_empty());
+    assert!(default_metrics.counters_snapshot().is_empty());
+    assert!(default_metrics.gauges_snapshot().is_empty());
 }
 
 #[test]
 fn test_counter_operations() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     // Test initial state
     assert_eq!(metrics.get_counter("test_counter"), 0);
@@ -35,7 +35,7 @@ fn test_counter_operations() {
 
 #[test]
 fn test_counter_with_string_types() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     // Test with &str
     metrics.increment_counter("str_counter");
@@ -53,7 +53,7 @@ fn test_counter_with_string_types() {
 
 #[test]
 fn test_gauge_operations() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     // Test initial state
     assert_eq!(metrics.get_gauge("test_gauge"), None);
@@ -74,7 +74,7 @@ fn test_gauge_operations() {
 
 #[test]
 fn test_gauge_with_string_types() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     // Test with &str
     metrics.set_gauge("str_gauge", 1.0);
@@ -92,7 +92,7 @@ fn test_gauge_with_string_types() {
 
 #[test]
 fn test_mixed_operations() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     // Mix counters and gauges
     metrics.increment_counter("requests");
@@ -105,13 +105,13 @@ fn test_mixed_operations() {
     assert_eq!(metrics.get_gauge("memory_usage"), Some(0.85));
 
     // Verify collections
-    assert_eq!(metrics.counters().len(), 1);
-    assert_eq!(metrics.gauges().len(), 2);
+    assert_eq!(metrics.counters_snapshot().len(), 1);
+    assert_eq!(metrics.gauges_snapshot().len(), 2);
 }
 
 #[test]
 fn test_collections_access() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     metrics.increment_counter("counter1");
     metrics.increment_counter("counter2");
@@ -120,12 +120,12 @@ fn test_collections_access() {
     metrics.set_gauge("gauge1", 1.0);
     metrics.set_gauge("gauge2", 2.0);
 
-    let counters = metrics.counters();
+    let counters = metrics.counters_snapshot();
     assert_eq!(counters.len(), 2);
     assert_eq!(counters.get("counter1"), Some(&2));
     assert_eq!(counters.get("counter2"), Some(&1));
 
-    let gauges = metrics.gauges();
+    let gauges = metrics.gauges_snapshot();
     assert_eq!(gauges.len(), 2);
     assert_eq!(gauges.get("gauge1"), Some(&1.0));
     assert_eq!(gauges.get("gauge2"), Some(&2.0));
@@ -141,7 +141,7 @@ fn test_nonexistent_keys() {
 
 #[test]
 fn test_debug_format() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
     metrics.increment_counter("test");
     metrics.set_gauge("test_gauge", 1.5);
 
@@ -152,7 +152,7 @@ fn test_debug_format() {
 
 #[test]
 fn test_large_numbers() {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
 
     // Test large counter values
     for _ in 0..1000 {

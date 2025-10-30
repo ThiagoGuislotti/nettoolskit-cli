@@ -66,3 +66,61 @@ pub async fn execute_command(cmd: Commands, _global_args: GlobalArgs) -> ExitSta
         Commands::Apply(args) => apply::run(args).await,
     }
 }
+
+// Slash command definitions for the interactive palette
+use strum::IntoEnumIterator;
+use strum_macros::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
+
+/// Commands that can be invoked by starting a message with a leading slash.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, EnumIter, AsRefStr, IntoStaticStr,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub enum SlashCommand {
+    // DO NOT ALPHA-SORT! Enum order is presentation order in the popup
+    List,
+    New,
+    Check,
+    Render,
+    Apply,
+    Quit,
+}
+
+impl SlashCommand {
+    /// User-visible description shown in the popup.
+    pub fn description(self) -> &'static str {
+        match self {
+            SlashCommand::List => "List available templates",
+            SlashCommand::New => "Create a project from a template",
+            SlashCommand::Check => "Validate a manifest or template",
+            SlashCommand::Render => "Render a template preview",
+            SlashCommand::Apply => "Apply a manifest to an existing solution",
+            SlashCommand::Quit => "Exit NetToolsKit CLI",
+        }
+    }
+
+    /// Command string without the leading '/'.
+    pub fn command(self) -> &'static str {
+        self.into()
+    }
+
+    /// Whether this command can be run while a task is in progress.
+    pub fn available_during_task(self) -> bool {
+        match self {
+            SlashCommand::List
+            | SlashCommand::New
+            | SlashCommand::Check
+            | SlashCommand::Render
+            | SlashCommand::Apply => false,
+            SlashCommand::Quit => true,
+        }
+    }
+}
+
+/// Return all built-in commands in a Vec paired with their command string.
+pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
+    SlashCommand::iter().map(|c| (c.command(), c)).collect()
+}
+
+// Re-export commands from core to maintain API compatibility
+pub use nettoolskit_core::commands::COMMANDS;

@@ -1,5 +1,5 @@
-use crate::commands::COMMANDS;
-use nettoolskit_ui::{GRAY_COLOR, PRIMARY_COLOR};
+use nettoolskit_core::commands::COMMANDS;
+use crate::{GRAY_COLOR, PRIMARY_COLOR};
 use crossterm::{cursor, queue, terminal};
 use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
 use crossterm::terminal::ClearType;
