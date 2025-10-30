@@ -11,11 +11,15 @@ pub struct OllamaClient {
 }
 
 impl OllamaClient {
-    /// Create a new Ollama client
+    /// Create a new Ollama client with optimized settings for concurrent operations
     pub fn new(base_url: Option<String>) -> Self {
         let base_url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(30)) // Reduced timeout for faster failure detection
+            .connect_timeout(Duration::from_secs(5)) // Connection timeout
+            .pool_max_idle_per_host(10) // Enable connection pooling
+            .pool_idle_timeout(Duration::from_secs(90)) // Pool idle timeout
+            .http2_prior_knowledge() // Use HTTP/2 for better multiplexing
             .build()
             .expect("Failed to create HTTP client");
 
@@ -53,6 +57,19 @@ impl OllamaClient {
 
         let generate_response: GenerateResponse = response.json().await?;
         Ok(generate_response)
+    }
+
+    /// Generate multiple completions concurrently
+    pub async fn generate_concurrent(&self, requests: Vec<GenerateRequest>) -> Result<Vec<Result<GenerateResponse>>> {
+        use futures::future::join_all;
+
+        let futures: Vec<_> = requests
+            .iter()
+            .map(|request| self.generate(request))
+            .collect();
+
+        let results = join_all(futures).await;
+        Ok(results)
     }
 }
 

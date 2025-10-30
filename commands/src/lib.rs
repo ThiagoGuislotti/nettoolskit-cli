@@ -24,7 +24,7 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 pub struct GlobalArgs {
     /// Set logging level (off, error, warn, info, debug, trace)
     #[clap(long, global = true, default_value = "info")]
@@ -65,6 +65,27 @@ pub async fn execute_command(cmd: Commands, _global_args: GlobalArgs) -> ExitSta
         Commands::Render(args) => render::run(args).await,
         Commands::Apply(args) => apply::run(args).await,
     }
+}
+
+/// Execute multiple commands concurrently (useful for batch operations)
+pub async fn execute_commands_concurrent(commands: Vec<Commands>, global_args: GlobalArgs) -> Vec<ExitStatus> {
+    use futures::future::join_all;
+
+    let futures: Vec<_> = commands
+        .into_iter()
+        .map(|cmd| execute_command(cmd, global_args.clone()))
+        .collect();
+
+    join_all(futures).await
+}
+
+/// Execute a command with timeout and cancellation support
+pub async fn execute_command_with_timeout(
+    cmd: Commands,
+    global_args: GlobalArgs,
+    timeout: std::time::Duration
+) -> Result<ExitStatus, nettoolskit_async_utils::TimeoutError> {
+    nettoolskit_async_utils::with_timeout(timeout, execute_command(cmd, global_args)).await
 }
 
 // Slash command definitions for the interactive palette

@@ -37,6 +37,50 @@ impl CancellationToken {
             _ = receiver.cancelled() => Err(CancellationError),
         }
     }
+
+    /// Create a child token that gets cancelled when this token is cancelled
+    pub fn child(&self) -> CancellationToken {
+        let child = CancellationToken::new();
+        let child_sender = child.sender.clone();
+        let mut parent_receiver = self.receiver();
+
+        tokio::spawn(async move {
+            parent_receiver.cancelled().await;
+            let _ = child_sender.send(());
+        });
+
+        child
+    }
+
+    /// Run multiple futures concurrently with cancellation support
+    pub async fn with_cancellation_concurrent<T, F>(
+        &self,
+        futures: Vec<F>,
+    ) -> Result<Vec<T>, CancellationError>
+    where
+        F: Future<Output = T>,
+        T: Send + 'static,
+    {
+        use futures::future::join_all;
+
+        let cancellable_futures: Vec<_> = futures
+            .into_iter()
+            .map(|future| self.with_cancellation(future))
+            .collect();
+
+        let results = join_all(cancellable_futures).await;
+
+        // Check if any operation was cancelled
+        let mut final_results = Vec::new();
+        for result in results {
+            match result {
+                Ok(value) => final_results.push(value),
+                Err(CancellationError) => return Err(CancellationError),
+            }
+        }
+
+        Ok(final_results)
+    }
 }
 
 impl Default for CancellationToken {
