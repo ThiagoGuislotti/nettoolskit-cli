@@ -17,7 +17,6 @@ pub enum SlashCommand {
     Check,
     Render,
     Apply,
-    Help,
     Quit,
 }
 
@@ -30,7 +29,6 @@ impl SlashCommand {
             SlashCommand::Check => "Validate a manifest or template",
             SlashCommand::Render => "Render a template preview",
             SlashCommand::Apply => "Apply a manifest to an existing solution",
-            SlashCommand::Help => "Show detailed help",
             SlashCommand::Quit => "Exit NetToolsKit CLI",
         }
     }
@@ -49,7 +47,7 @@ impl SlashCommand {
             | SlashCommand::Check
             | SlashCommand::Render
             | SlashCommand::Apply => false,
-            SlashCommand::Help | SlashCommand::Quit => true,
+            SlashCommand::Quit => true,
         }
     }
 }
@@ -66,6 +64,5 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/render", "Render a template preview"),
     ("/new", "Create a project from a template"),
     ("/apply", "Apply a manifest to an existing solution"),
-    ("/help", "Show detailed help"),
     ("/quit", "Exit NetToolsKit CLI"),
 ];

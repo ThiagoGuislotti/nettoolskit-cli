@@ -109,7 +109,7 @@ impl CommandPalette {
             self.selected = self.matches.len() - 1;
             self.adjust_offset();
         }
-        self.render()
+        self.render_fast()
     }
 
     /// Navega para baixo
@@ -124,7 +124,7 @@ impl CommandPalette {
             self.selected = 0; // Cicla para o primeiro
         }
         self.adjust_offset();
-        self.render()
+        self.render_fast()
     }
 
     /// Home vai ao primeiro item conforme especificação
@@ -135,7 +135,7 @@ impl CommandPalette {
 
         self.selected = 0;
         self.adjust_offset();
-        self.render()
+        self.render_fast()
     }
 
     /// End ao último conforme especificação
@@ -146,7 +146,7 @@ impl CommandPalette {
 
         self.selected = self.matches.len().saturating_sub(1);
         self.adjust_offset();
-        self.render()
+        self.render_fast()
     }
 
 
@@ -299,6 +299,64 @@ impl CommandPalette {
         // Restaura posição original do cursor na linha de entrada
         queue!(io::stdout(), cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1))?;
         // 3) Flush na saída conforme especificação
+        io::stdout().flush()
+    }
+
+    /// Renderização rápida apenas para navegação (sem clear_region)
+    fn render_fast(&self) -> io::Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+
+        // Salva posição atual do cursor
+        let original_cursor_pos = cursor::position().unwrap_or((0, self.y_input));
+
+        // Desenhar apenas as linhas visíveis sem limpar toda a região
+        let visible_items = Self::MAX_VISIBLE_ITEMS.min(self.matches.len());
+        let end_idx = (self.offset + visible_items).min(self.matches.len());
+
+        for i in self.offset..end_idx {
+            let line_idx = i - self.offset;
+            let y_pos = self.y_input + 2 + line_idx as u16;
+
+            if let Some(&match_idx) = self.matches.get(i) {
+                if let Some((cmd, desc)) = COMMANDS.get(match_idx) {
+                    let is_selected = i == self.selected;
+
+                    // Limpa apenas a linha atual antes de desenhar
+                    queue!(
+                        io::stdout(),
+                        cursor::MoveTo(0, y_pos),
+                        terminal::Clear(terminal::ClearType::CurrentLine)
+                    )?;
+
+                    if is_selected {
+                        // Item selecionado - realce com reverse conforme especificação
+                        queue!(
+                            io::stdout(),
+                            SetAttribute(Attribute::Reverse),
+                            Print(format!("› {}  {}", cmd, desc)),
+                            SetAttribute(Attribute::Reset)
+                        )?;
+                    } else {
+                        // Item não selecionado - cores do NetToolsKit
+                        queue!(
+                            io::stdout(),
+                            SetForegroundColor(Color::Rgb { r: GRAY_COLOR.0, g: GRAY_COLOR.1, b: GRAY_COLOR.2 }),
+                            Print("  "),
+                            SetForegroundColor(Color::Rgb { r: PRIMARY_COLOR.0, g: PRIMARY_COLOR.1, b: PRIMARY_COLOR.2 }),
+                            Print(cmd),
+                            SetForegroundColor(Color::Rgb { r: GRAY_COLOR.0, g: GRAY_COLOR.1, b: GRAY_COLOR.2 }),
+                            Print(format!("  {}", desc)),
+                            SetAttribute(Attribute::Reset)
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Restaura posição original do cursor na linha de entrada
+        queue!(io::stdout(), cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1))?;
         io::stdout().flush()
     }
 }
