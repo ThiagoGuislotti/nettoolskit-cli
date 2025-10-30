@@ -3,14 +3,12 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use owo_colors::OwoColorize;
 use std::io;
 
-pub mod palette;
-pub mod commands;
 pub mod input;
 
-use palette::CommandPalette;
-use nettoolskit_ui::{clear_terminal, print_logo, PRIMARY_COLOR};
+use nettoolskit_ui::{clear_terminal, print_logo, PRIMARY_COLOR, CommandPalette};
 use nettoolskit_async_utils::with_timeout;
-use nettoolskit_otel::{init_tracing, Metrics};
+use nettoolskit_otel::{init_tracing_with_config, TracingConfig, Metrics, Timer};
+use tracing::{info, warn, error};
 use nettoolskit_commands::processor::{process_command, process_text, CliExitStatus};
 use input::{read_line_with_palette, InputResult};
 
@@ -32,6 +30,16 @@ impl From<CliExitStatus> for ExitStatus {
     }
 }
 
+impl From<nettoolskit_commands::ExitStatus> for ExitStatus {
+    fn from(status: nettoolskit_commands::ExitStatus) -> Self {
+        match status {
+            nettoolskit_commands::ExitStatus::Success => ExitStatus::Success,
+            nettoolskit_commands::ExitStatus::Error => ExitStatus::Error,
+            nettoolskit_commands::ExitStatus::Interrupted => ExitStatus::Interrupted,
+        }
+    }
+}
+
 impl From<ExitStatus> for std::process::ExitCode {
     fn from(status: ExitStatus) -> Self {
         match status {
@@ -42,17 +50,39 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+impl From<ExitStatus> for i32 {
+    fn from(status: ExitStatus) -> Self {
+        match status {
+            ExitStatus::Success => 0,
+            ExitStatus::Error => 1,
+            ExitStatus::Interrupted => 130,
+        }
+    }
+}
+
 /// Launch the interactive CLI mode
 pub async fn interactive_mode() -> ExitStatus {
-    // Initialize telemetry
-    if let Err(e) = init_tracing(false) {
+    // Initialize telemetry with development configuration
+    let tracing_config = TracingConfig {
+        verbose: false,
+        with_line_numbers: true,
+        ..Default::default()
+    };
+
+    if let Err(e) = init_tracing_with_config(tracing_config) {
         eprintln!("Warning: Failed to initialize tracing: {}", e);
     }
 
-    let mut metrics = Metrics::new();
+    info!("Starting NetToolsKit CLI interactive mode");
+
+    let metrics = Metrics::new();
     metrics.increment_counter("cli_sessions_started");
 
-    clear_terminal().unwrap_or(());
+    let _session_timer = Timer::start("cli_session_duration", metrics.clone());
+
+    if let Err(e) = clear_terminal() {
+        warn!(error = %e, "Failed to clear terminal");
+    }
 
     // Use async-utils for timeout instead of direct tokio
     if let Err(_) = with_timeout(
@@ -60,24 +90,37 @@ pub async fn interactive_mode() -> ExitStatus {
         tokio::time::sleep(std::time::Duration::from_millis(50))
     ).await {
         // Timeout is unlikely but we handle it gracefully
+        info!("Initialization timeout completed (expected)");
     }
 
+    info!("Displaying application logo and UI");
     print_logo();
 
     let result = match run_interactive_loop().await {
         Ok(status) => {
             metrics.increment_counter("cli_sessions_completed");
+            info!(
+                status = ?status,
+                session_counters = ?metrics.counters_snapshot(),
+                "CLI session completed successfully"
+            );
             status
         },
         Err(e) => {
             metrics.increment_counter("cli_sessions_errored");
+            error!(
+                error = %e,
+                session_counters = ?metrics.counters_snapshot(),
+                "CLI session ended with error"
+            );
             eprintln!("{}: {}", "Error".red().bold(), e);
             ExitStatus::Error
         }
     };
 
-    // Log metrics
-    tracing::info!("CLI session ended with status: {:?}", result);
+    // Log final metrics and shutdown
+    metrics.log_summary();
+    info!(final_status = ?result, "NetToolsKit CLI session ended");
     result
 }
 

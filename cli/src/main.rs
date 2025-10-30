@@ -1,5 +1,5 @@
 use clap::Parser;
-use nettoolskit_cli::{interactive_mode, ExitStatus};
+use nettoolskit_cli::interactive_mode;
 use nettoolskit_commands::{Commands, GlobalArgs};
 use nettoolskit_otel::init_tracing;
 
@@ -34,25 +34,10 @@ async fn main() {
 
     // Handle subcommands or launch interactive mode
     let exit_status = match cli.subcommand {
-        Some(command) => {
-            // Convert commands ExitStatus to CLI ExitStatus
-            let result = nettoolskit_commands::execute_command(command, cli.global).await;
-            match result {
-                nettoolskit_commands::ExitStatus::Success => ExitStatus::Success,
-                nettoolskit_commands::ExitStatus::Error => ExitStatus::Error,
-                nettoolskit_commands::ExitStatus::Interrupted => ExitStatus::Interrupted,
-            }
-        }
-        None => {
-            // Launch interactive mode
-            interactive_mode().await
-        }
+        Some(command) => nettoolskit_commands::execute_command(command, cli.global).await.into(),
+        None => interactive_mode().await,
     };
 
     // Exit with appropriate code
-    std::process::exit(match exit_status {
-        ExitStatus::Success => 0,
-        ExitStatus::Error => 1,
-        ExitStatus::Interrupted => 130,
-    });
+    std::process::exit(exit_status.into());
 }

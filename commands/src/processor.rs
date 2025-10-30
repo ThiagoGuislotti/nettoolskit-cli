@@ -1,7 +1,8 @@
 use crate::{ExitStatus, list, new, check, render, apply};
 use owo_colors::OwoColorize;
 use nettoolskit_ui::PRIMARY_COLOR;
-use nettoolskit_otel::Metrics;
+use nettoolskit_otel::{Metrics, Timer};
+use tracing::info;
 
 /// CLI Exit Status type for compatibility with CLI module
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,11 +26,16 @@ pub enum CliExitStatus {
 ///
 /// Returns `CliExitStatus` indicating the result of command execution
 pub async fn process_command(cmd: &str) -> CliExitStatus {
-    let mut metrics = Metrics::new();
+    let metrics = Metrics::new();
+    let timer = Timer::start("command_execution", metrics.clone());
 
-    // Log command usage
-    tracing::info!("Processing command: {}", cmd);
-    metrics.increment_counter(&format!("command_{}_usage", cmd.trim_start_matches('/')));
+    // Log command usage with structured data
+    info!(
+        command = %cmd,
+        command_type = %cmd.trim_start_matches('/'),
+        "Processing CLI command"
+    );
+    metrics.increment_counter(format!("command_{}_usage", cmd.trim_start_matches('/')));
 
     // Execute the appropriate command
     let result = match cmd {
@@ -71,28 +77,27 @@ pub async fn process_command(cmd: &str) -> CliExitStatus {
         }
     };
 
-    // Log result
-    match result {
-        ExitStatus::Success => {
-            tracing::debug!("Command {} completed successfully", cmd);
-            metrics.increment_counter("successful_commands");
-        }
-        ExitStatus::Error => {
-            tracing::error!("Command {} failed", cmd);
-            metrics.increment_counter("failed_commands");
-        }
-        ExitStatus::Interrupted => {
-            tracing::warn!("Command {} was interrupted", cmd);
-            metrics.increment_counter("interrupted_commands");
-        }
-    }
+    // Stop timer and log result with structured data
+    let duration = timer.stop();
 
-    // Convert to CLI ExitStatus
-    match result {
-        ExitStatus::Success => CliExitStatus::Success,
-        ExitStatus::Error => CliExitStatus::Error,
-        ExitStatus::Interrupted => CliExitStatus::Interrupted,
-    }
+    // Log and convert result to CLI status
+    let (status_str, counter_name, cli_status) = match result {
+        ExitStatus::Success => ("success", "successful_commands", CliExitStatus::Success),
+        ExitStatus::Error => ("error", "failed_commands", CliExitStatus::Error),
+        ExitStatus::Interrupted => ("interrupted", "interrupted_commands", CliExitStatus::Interrupted),
+    };
+
+    info!(
+        command = %cmd,
+        duration_ms = duration.as_millis(),
+        status = status_str,
+        "Command execution completed"
+    );
+    metrics.increment_counter(counter_name);
+
+    // Log metrics summary for this command
+    metrics.log_summary();
+    cli_status
 }
 
 /// Process non-command text input from CLI

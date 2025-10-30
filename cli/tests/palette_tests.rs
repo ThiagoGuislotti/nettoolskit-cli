@@ -1,4 +1,4 @@
-use nettoolskit_cli::palette::CommandPalette;
+use nettoolskit_ui::CommandPalette;
 
 #[test]
 fn test_command_palette_new() {
