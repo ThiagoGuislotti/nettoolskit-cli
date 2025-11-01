@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{info, warn, debug, trace};
+use tracing::{debug, info, trace, warn};
 
 /// Performance metrics collector with thread-safe operations
 #[derive(Debug, Default)]
@@ -60,7 +60,10 @@ impl Metrics {
     pub fn record_timing(&self, name: impl Into<String>, duration: Duration) {
         let name = name.into();
         let mut timings = self.timings.lock().unwrap();
-        timings.entry(name.clone()).or_insert_with(Vec::new).push(duration);
+        timings
+            .entry(name.clone())
+            .or_insert_with(Vec::new)
+            .push(duration);
 
         debug!(
             timing = %name,

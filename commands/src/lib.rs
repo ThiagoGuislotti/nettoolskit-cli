@@ -68,7 +68,10 @@ pub async fn execute_command(cmd: Commands, _global_args: GlobalArgs) -> ExitSta
 }
 
 /// Execute multiple commands concurrently (useful for batch operations)
-pub async fn execute_commands_concurrent(commands: Vec<Commands>, global_args: GlobalArgs) -> Vec<ExitStatus> {
+pub async fn execute_commands_concurrent(
+    commands: Vec<Commands>,
+    global_args: GlobalArgs,
+) -> Vec<ExitStatus> {
     use futures::future::join_all;
 
     let futures: Vec<_> = commands
@@ -83,7 +86,7 @@ pub async fn execute_commands_concurrent(commands: Vec<Commands>, global_args: G
 pub async fn execute_command_with_timeout(
     cmd: Commands,
     global_args: GlobalArgs,
-    timeout: std::time::Duration
+    timeout: std::time::Duration,
 ) -> Result<ExitStatus, nettoolskit_async_utils::TimeoutError> {
     nettoolskit_async_utils::with_timeout(timeout, execute_command(cmd, global_args)).await
 }

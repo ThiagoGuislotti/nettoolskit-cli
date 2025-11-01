@@ -5,7 +5,11 @@
 
 /// Detect directory separator (Windows backslash or Unix forward slash)
 fn detect_separator(path: &str) -> char {
-    if path.contains('\\') { '\\' } else { '/' }
+    if path.contains('\\') {
+        '\\'
+    } else {
+        '/'
+    }
 }
 
 /// Create a simple fallback truncation when path components are insufficient
@@ -63,7 +67,10 @@ pub fn truncate_directory(dir: &str, max_width: usize) -> String {
     let base_length = first_part.len() + last_part.len() + ellipsis.len() + 2; // +2 for separators
 
     if base_length <= max_width {
-        return format!("{}{}{}{}{}", first_part, separator, ellipsis, separator, last_part);
+        return format!(
+            "{}{}{}{}{}",
+            first_part, separator, ellipsis, separator, last_part
+        );
     }
 
     // Truncate the last part if still too long
@@ -74,7 +81,10 @@ pub fn truncate_directory(dir: &str, max_width: usize) -> String {
         last_part
     };
 
-    format!("{}{}{}{}{}", first_part, separator, ellipsis, separator, truncated_last)
+    format!(
+        "{}{}{}{}{}",
+        first_part, separator, ellipsis, separator, truncated_last
+    )
 }
 
 /// Truncate a directory path using middle ellipsis with separators.
@@ -113,7 +123,9 @@ pub fn truncate_directory_with_middle(dir: &str, max_width: usize) -> String {
     }
 
     // Filter out empty parts (except root)
-    let parts: Vec<&str> = dir.split(separator).enumerate()
+    let parts: Vec<&str> = dir
+        .split(separator)
+        .enumerate()
         .filter(|(i, part)| *i == 0 || !part.is_empty())
         .map(|(_, part)| part)
         .collect();
@@ -151,7 +163,9 @@ pub fn truncate_directory_with_middle(dir: &str, max_width: usize) -> String {
 
     for i in (0..parts.len()).rev() {
         let part = parts[i];
-        if part.is_empty() { continue; }
+        if part.is_empty() {
+            continue;
+        }
 
         let component_len = if back_parts.is_empty() {
             part.len() // Last component (no separator)

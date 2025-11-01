@@ -8,6 +8,7 @@ owo-colors = { workspace = true }
 crossterm = { workspace = true }
 nettoolskit-utils = { path = "../utils" }
 nettoolskit-core = { path = "../core" }
+once_cell = "1.19"
 
 [lib]
 name = "nettoolskit_ui"

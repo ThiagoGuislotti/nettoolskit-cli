@@ -1143,6 +1143,7 @@ name = "nettoolskit-otel"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "nettoolskit-ui",
  "opentelemetry",
  "opentelemetry_sdk",
  "serde",
@@ -1157,6 +1158,7 @@ dependencies = [
  "crossterm",
  "nettoolskit-core",
  "nettoolskit-utils",
+ "once_cell",
  "owo-colors",
 ]
 

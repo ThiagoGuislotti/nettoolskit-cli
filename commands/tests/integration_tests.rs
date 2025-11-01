@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use nettoolskit_commands::{ExitStatus, list, new};
+    use nettoolskit_commands::{list, new, ExitStatus};
 
     #[tokio::test]
     async fn test_list_command() {

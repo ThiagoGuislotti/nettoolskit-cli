@@ -65,35 +65,50 @@ async fn test_process_quit_command() {
 async fn test_process_list_command() {
     let result = process_command("/list").await;
     // Should complete without panicking
-    assert!(matches!(result, CliExitStatus::Success | CliExitStatus::Error));
+    assert!(matches!(
+        result,
+        CliExitStatus::Success | CliExitStatus::Error
+    ));
 }
 
 #[tokio::test]
 async fn test_process_new_command() {
     let result = process_command("/new").await;
     // Should complete without panicking
-    assert!(matches!(result, CliExitStatus::Success | CliExitStatus::Error));
+    assert!(matches!(
+        result,
+        CliExitStatus::Success | CliExitStatus::Error
+    ));
 }
 
 #[tokio::test]
 async fn test_process_check_command() {
     let result = process_command("/check").await;
     // Should complete without panicking
-    assert!(matches!(result, CliExitStatus::Success | CliExitStatus::Error));
+    assert!(matches!(
+        result,
+        CliExitStatus::Success | CliExitStatus::Error
+    ));
 }
 
 #[tokio::test]
 async fn test_process_render_command() {
     let result = process_command("/render").await;
     // Should complete without panicking
-    assert!(matches!(result, CliExitStatus::Success | CliExitStatus::Error));
+    assert!(matches!(
+        result,
+        CliExitStatus::Success | CliExitStatus::Error
+    ));
 }
 
 #[tokio::test]
 async fn test_process_apply_command() {
     let result = process_command("/apply").await;
     // Should complete without panicking
-    assert!(matches!(result, CliExitStatus::Success | CliExitStatus::Error));
+    assert!(matches!(
+        result,
+        CliExitStatus::Success | CliExitStatus::Error
+    ));
 }
 
 #[tokio::test]
@@ -126,24 +141,26 @@ async fn test_process_malformed_commands() {
 
     for cmd in malformed_commands {
         let result = process_command(cmd).await;
-        assert_eq!(result, CliExitStatus::Error, "Command '{}' should return error", cmd);
+        assert_eq!(
+            result,
+            CliExitStatus::Error,
+            "Command '{}' should return error",
+            cmd
+        );
     }
 }
 
 #[tokio::test]
 async fn test_process_command_whitespace_handling() {
-    let commands_with_whitespace = vec![
-        " /quit",
-        "/quit ",
-        " /quit ",
-        "\t/quit",
-        "/quit\t",
-    ];
+    let commands_with_whitespace = vec![" /quit", "/quit ", " /quit ", "\t/quit", "/quit\t"];
 
     for cmd in commands_with_whitespace {
         let result = process_command(cmd).await;
         // These should be handled gracefully (either success for quit or error for unrecognized)
-        assert!(matches!(result, CliExitStatus::Success | CliExitStatus::Error));
+        assert!(matches!(
+            result,
+            CliExitStatus::Success | CliExitStatus::Error
+        ));
     }
 }
 

@@ -64,7 +64,10 @@ fn test_edge_cases_handling() {
     // Very long limit
     let short_path = "C:\\test";
     assert_eq!(string::truncate_directory(short_path, 1000), short_path);
-    assert_eq!(string::truncate_directory_with_middle(short_path, 1000), short_path);
+    assert_eq!(
+        string::truncate_directory_with_middle(short_path, 1000),
+        short_path
+    );
 
     // Single character paths
     let single = "C";

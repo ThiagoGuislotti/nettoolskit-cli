@@ -1,7 +1,7 @@
 pub mod display;
-pub mod terminal;
 pub mod palette;
+pub mod terminal;
 
 pub use display::*;
-pub use terminal::*;
 pub use palette::*;
+pub use terminal::*;

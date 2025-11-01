@@ -130,13 +130,15 @@ fn test_ui_thread_safety() {
     use std::thread;
 
     // Test UI functions in multi-threaded environment
-    let handles: Vec<_> = (0..3).map(|i| {
-        thread::spawn(move || {
-            let path = format!("/thread/{}/test/path", i);
-            let _truncated = truncate_directory(&path, 10);
-            let _clear = clear_terminal();
+    let handles: Vec<_> = (0..3)
+        .map(|i| {
+            thread::spawn(move || {
+                let path = format!("/thread/{}/test/path", i);
+                let _truncated = truncate_directory(&path, 10);
+                let _clear = clear_terminal();
+            })
         })
-    }).collect();
+        .collect();
 
     for handle in handles {
         handle.join().unwrap();
