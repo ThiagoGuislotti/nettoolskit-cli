@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use nettoolskit_ui::{PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR, SECONDARY_COLOR};
+    use nettoolskit_ui::{GRAY_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR};
 
     #[test]
     fn test_color_constants() {

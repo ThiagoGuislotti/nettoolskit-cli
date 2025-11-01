@@ -1,7 +1,7 @@
-use crate::{ExitStatus, list, new, check, render, apply};
-use owo_colors::OwoColorize;
-use nettoolskit_ui::PRIMARY_COLOR;
+use crate::{apply, check, list, new, render, ExitStatus};
 use nettoolskit_otel::{Metrics, Timer};
+use nettoolskit_ui::PRIMARY_COLOR;
+use owo_colors::OwoColorize;
 use tracing::info;
 
 /// CLI Exit Status type for compatibility with CLI module
@@ -84,7 +84,11 @@ pub async fn process_command(cmd: &str) -> CliExitStatus {
     let (status_str, counter_name, cli_status) = match result {
         ExitStatus::Success => ("success", "successful_commands", CliExitStatus::Success),
         ExitStatus::Error => ("error", "failed_commands", CliExitStatus::Error),
-        ExitStatus::Interrupted => ("interrupted", "interrupted_commands", CliExitStatus::Interrupted),
+        ExitStatus::Interrupted => (
+            "interrupted",
+            "interrupted_commands",
+            CliExitStatus::Interrupted,
+        ),
     };
 
     info!(

@@ -3,10 +3,7 @@ use std::time::Duration;
 use tokio::time;
 
 /// Runs a future with a timeout
-pub async fn with_timeout<T, F>(
-    timeout: Duration,
-    future: F,
-) -> Result<T, TimeoutError>
+pub async fn with_timeout<T, F>(timeout: Duration, future: F) -> Result<T, TimeoutError>
 where
     F: Future<Output = T>,
 {

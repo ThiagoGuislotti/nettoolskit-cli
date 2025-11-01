@@ -1,4 +1,4 @@
-use nettoolskit_ollama::{OllamaClient, GenerateRequest, GenerateResponse};
+use nettoolskit_ollama::{GenerateRequest, GenerateResponse, OllamaClient};
 
 #[test]
 fn test_ollama_client_new() {

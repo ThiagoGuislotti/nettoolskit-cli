@@ -1,5 +1,7 @@
-use nettoolskit_commands::{Commands, list, new, check, render, apply, execute_command, GlobalArgs};
 use clap::Parser;
+use nettoolskit_commands::{
+    apply, check, execute_command, list, new, render, Commands, GlobalArgs,
+};
 
 #[test]
 fn test_commands_enum_debug() {
@@ -53,7 +55,10 @@ async fn test_execute_list_command() {
     let global_args = GlobalArgs::try_parse_from(&["test"]).unwrap();
 
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 }
 
 #[tokio::test]
@@ -62,7 +67,10 @@ async fn test_execute_new_command() {
     let global_args = GlobalArgs::try_parse_from(&["test"]).unwrap();
 
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 }
 
 #[tokio::test]
@@ -71,7 +79,10 @@ async fn test_execute_check_command() {
     let global_args = GlobalArgs::try_parse_from(&["test"]).unwrap();
 
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 }
 
 #[tokio::test]
@@ -80,7 +91,10 @@ async fn test_execute_render_command() {
     let global_args = GlobalArgs::try_parse_from(&["test"]).unwrap();
 
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 }
 
 #[tokio::test]
@@ -89,7 +103,10 @@ async fn test_execute_apply_command() {
     let global_args = GlobalArgs::try_parse_from(&["test"]).unwrap();
 
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 }
 
 #[tokio::test]
@@ -98,13 +115,19 @@ async fn test_commands_with_different_global_args() {
     let global_args = GlobalArgs::try_parse_from(&["test", "--log-level", "debug"]).unwrap();
     let cmd = Commands::List(list::ListArgs::default());
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 
     // Test with config file
     let global_args = GlobalArgs::try_parse_from(&["test", "--config", "test.toml"]).unwrap();
     let cmd = Commands::New(new::NewArgs::default());
     let result = execute_command(cmd, global_args).await;
-    assert!(matches!(result, nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error));
+    assert!(matches!(
+        result,
+        nettoolskit_commands::ExitStatus::Success | nettoolskit_commands::ExitStatus::Error
+    ));
 }
 
 #[test]

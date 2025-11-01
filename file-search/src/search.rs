@@ -31,10 +31,7 @@ impl Default for SearchConfig {
 }
 
 /// Search for files matching the given configuration
-pub fn search_files<P: AsRef<Path>>(
-    root: P,
-    config: &SearchConfig,
-) -> Result<Vec<PathBuf>> {
+pub fn search_files<P: AsRef<Path>>(root: P, config: &SearchConfig) -> Result<Vec<PathBuf>> {
     let root = root.as_ref();
 
     // Build include globset
@@ -153,7 +150,11 @@ pub async fn find_templates_async<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf
 /// Find manifest files in a directory
 pub fn find_manifests<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
     let config = SearchConfig {
-        include_patterns: vec!["*.yml".to_string(), "*.yaml".to_string(), "ntk-*.yml".to_string()],
+        include_patterns: vec![
+            "*.yml".to_string(),
+            "*.yaml".to_string(),
+            "ntk-*.yml".to_string(),
+        ],
         exclude_patterns: vec!["**/target/**".to_string(), "**/node_modules/**".to_string()],
         max_depth: Some(5),
         follow_links: false,

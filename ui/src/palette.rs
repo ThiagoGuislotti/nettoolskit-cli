@@ -1,8 +1,8 @@
-use nettoolskit_core::commands::COMMANDS;
 use crate::{GRAY_COLOR, PRIMARY_COLOR};
-use crossterm::{cursor, queue, terminal};
 use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
 use crossterm::terminal::ClearType;
+use crossterm::{cursor, queue, terminal};
+use nettoolskit_core::commands::COMMANDS;
 use std::cmp::Ordering;
 use std::io::{self, Write};
 
@@ -227,8 +227,6 @@ impl CommandPalette {
         self.render_fast()
     }
 
-
-
     /// Returns the currently selected command.
     ///
     /// Gets the name of the command that is currently highlighted in the palette.
@@ -281,17 +279,15 @@ impl CommandPalette {
         }
 
         // Ordena por score (desc) e depois por nome (asc)
-        scored_matches.sort_by(|a, b| {
-            match b.1.cmp(&a.1) {
-                Ordering::Equal => COMMANDS[a.0].0.cmp(COMMANDS[b.0].0),
-                other => other,
-            }
+        scored_matches.sort_by(|a, b| match b.1.cmp(&a.1) {
+            Ordering::Equal => COMMANDS[a.0].0.cmp(COMMANDS[b.0].0),
+            other => other,
         });
 
         self.matches = scored_matches.into_iter().map(|(idx, _)| idx).collect();
     }
 
-        /// Adjusts the scroll offset to keep the selected item visible within the 8-line window.
+    /// Adjusts the scroll offset to keep the selected item visible within the 8-line window.
     ///
     /// This function ensures that the currently selected command is always visible in the
     /// palette by adjusting the scroll offset when the selection moves outside the visible area.
@@ -369,7 +365,8 @@ impl CommandPalette {
 
         // Limpar apenas as linhas necessárias para evitar flickering (incluindo linha extra de espaçamento)
         let visible_items = Self::MAX_VISIBLE_ITEMS.min(self.matches.len());
-        for i in 0..=visible_items + 1 {  // +1 para linha extra de espaçamento
+        for i in 0..=visible_items + 1 {
+            // +1 para linha extra de espaçamento
             queue!(
                 io::stdout(),
                 cursor::MoveTo(0, self.y_input + 1 + i as u16),
@@ -426,11 +423,23 @@ impl CommandPalette {
                         // Item não selecionado - cores do NetToolsKit (roxo/magenta)
                         queue!(
                             io::stdout(),
-                            SetForegroundColor(Color::Rgb { r: GRAY_COLOR.0, g: GRAY_COLOR.1, b: GRAY_COLOR.2 }),
+                            SetForegroundColor(Color::Rgb {
+                                r: GRAY_COLOR.0,
+                                g: GRAY_COLOR.1,
+                                b: GRAY_COLOR.2
+                            }),
                             Print("  "),
-                            SetForegroundColor(Color::Rgb { r: PRIMARY_COLOR.0, g: PRIMARY_COLOR.1, b: PRIMARY_COLOR.2 }),
+                            SetForegroundColor(Color::Rgb {
+                                r: PRIMARY_COLOR.0,
+                                g: PRIMARY_COLOR.1,
+                                b: PRIMARY_COLOR.2
+                            }),
                             Print(cmd),
-                            SetForegroundColor(Color::Rgb { r: GRAY_COLOR.0, g: GRAY_COLOR.1, b: GRAY_COLOR.2 }),
+                            SetForegroundColor(Color::Rgb {
+                                r: GRAY_COLOR.0,
+                                g: GRAY_COLOR.1,
+                                b: GRAY_COLOR.2
+                            }),
                             Print(format!("  {}", desc)), // Dois espaços entre comando e descrição
                             SetAttribute(Attribute::Reset)
                         )?;
@@ -440,7 +449,10 @@ impl CommandPalette {
         }
 
         // Restaura posição original do cursor na linha de entrada
-        queue!(io::stdout(), cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1))?;
+        queue!(
+            io::stdout(),
+            cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1)
+        )?;
         // 3) Flush output as per specification
         io::stdout().flush()
     }
@@ -493,11 +505,23 @@ impl CommandPalette {
                         // Item não selecionado - cores do NetToolsKit
                         queue!(
                             io::stdout(),
-                            SetForegroundColor(Color::Rgb { r: GRAY_COLOR.0, g: GRAY_COLOR.1, b: GRAY_COLOR.2 }),
+                            SetForegroundColor(Color::Rgb {
+                                r: GRAY_COLOR.0,
+                                g: GRAY_COLOR.1,
+                                b: GRAY_COLOR.2
+                            }),
                             Print("  "),
-                            SetForegroundColor(Color::Rgb { r: PRIMARY_COLOR.0, g: PRIMARY_COLOR.1, b: PRIMARY_COLOR.2 }),
+                            SetForegroundColor(Color::Rgb {
+                                r: PRIMARY_COLOR.0,
+                                g: PRIMARY_COLOR.1,
+                                b: PRIMARY_COLOR.2
+                            }),
                             Print(cmd),
-                            SetForegroundColor(Color::Rgb { r: GRAY_COLOR.0, g: GRAY_COLOR.1, b: GRAY_COLOR.2 }),
+                            SetForegroundColor(Color::Rgb {
+                                r: GRAY_COLOR.0,
+                                g: GRAY_COLOR.1,
+                                b: GRAY_COLOR.2
+                            }),
                             Print(format!("  {}", desc)),
                             SetAttribute(Attribute::Reset)
                         )?;
@@ -507,7 +531,10 @@ impl CommandPalette {
         }
 
         // Restore original cursor position on input line
-        queue!(io::stdout(), cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1))?;
+        queue!(
+            io::stdout(),
+            cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1)
+        )?;
         io::stdout().flush()
     }
 }

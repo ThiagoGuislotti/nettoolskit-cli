@@ -1,5 +1,5 @@
-use nettoolskit_commands::{ExitStatus, GlobalArgs};
 use clap::Parser;
+use nettoolskit_commands::{ExitStatus, GlobalArgs};
 
 #[test]
 fn test_exit_status_success_conversion() {
@@ -61,10 +61,13 @@ fn test_global_args_defaults() {
 fn test_global_args_with_config() {
     let args = GlobalArgs::try_parse_from(&[
         "test",
-        "--log-level", "debug",
-        "--config", "config.toml",
-        "--verbose"
-    ]).unwrap();
+        "--log-level",
+        "debug",
+        "--config",
+        "config.toml",
+        "--verbose",
+    ])
+    .unwrap();
 
     assert_eq!(args.log_level, "debug");
     assert_eq!(args.config, Some("config.toml".to_string()));

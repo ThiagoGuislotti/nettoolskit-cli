@@ -3,8 +3,8 @@
 //! This module handles listing available templates from the registry,
 //! with support for filtering by name patterns and technology stacks.
 
-use clap::Parser;
 use crate::ExitStatus;
+use clap::Parser;
 use owo_colors::OwoColorize;
 use tracing::info;
 

@@ -28,7 +28,12 @@ impl OllamaClient {
 
     /// Check if Ollama is available
     pub async fn is_available(&self) -> bool {
-        match self.client.get(&format!("{}/api/tags", self.base_url)).send().await {
+        match self
+            .client
+            .get(&format!("{}/api/tags", self.base_url))
+            .send()
+            .await
+        {
             Ok(response) => response.status().is_success(),
             Err(_) => false,
         }
@@ -60,7 +65,10 @@ impl OllamaClient {
     }
 
     /// Generate multiple completions concurrently
-    pub async fn generate_concurrent(&self, requests: Vec<GenerateRequest>) -> Result<Vec<Result<GenerateResponse>>> {
+    pub async fn generate_concurrent(
+        &self,
+        requests: Vec<GenerateRequest>,
+    ) -> Result<Vec<Result<GenerateResponse>>> {
         use futures::future::join_all;
 
         let futures: Vec<_> = requests

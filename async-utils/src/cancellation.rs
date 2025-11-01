@@ -1,5 +1,5 @@
-use tokio::sync::broadcast;
 use std::future::Future;
+use tokio::sync::broadcast;
 
 /// A cancellation token that can be used to cancel async operations
 #[derive(Debug, Clone)]

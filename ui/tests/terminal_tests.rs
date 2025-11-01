@@ -20,10 +20,12 @@ fn test_clear_terminal_error_handling() {
         }
         Err(e) => {
             // Error case - expected in test environment
-            assert!(e.kind() == io::ErrorKind::Other ||
-                   e.kind() == io::ErrorKind::Unsupported ||
-                   e.kind() == io::ErrorKind::BrokenPipe ||
-                   e.kind() == io::ErrorKind::NotFound);
+            assert!(
+                e.kind() == io::ErrorKind::Other
+                    || e.kind() == io::ErrorKind::Unsupported
+                    || e.kind() == io::ErrorKind::BrokenPipe
+                    || e.kind() == io::ErrorKind::NotFound
+            );
         }
     }
 }

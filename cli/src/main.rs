@@ -27,15 +27,19 @@ async fn main() {
     // Parse command line arguments
     let cli = Cli::parse();
 
-    // Initialize tracing using our otel module
-    if let Err(e) = init_tracing(cli.global.verbose) {
-        eprintln!("Warning: Failed to initialize tracing: {}", e);
+    let run_interactive = cli.subcommand.is_none();
+
+    if !run_interactive {
+        if let Err(e) = init_tracing(cli.global.verbose) {
+            eprintln!("Warning: Failed to initialize tracing: {}", e);
+        }
     }
 
-    // Handle subcommands or launch interactive mode
     let exit_status = match cli.subcommand {
-        Some(command) => nettoolskit_commands::execute_command(command, cli.global).await.into(),
-        None => interactive_mode().await,
+        Some(command) => nettoolskit_commands::execute_command(command, cli.global)
+            .await
+            .into(),
+        None => interactive_mode(cli.global.verbose).await,
     };
 
     // Exit with appropriate code

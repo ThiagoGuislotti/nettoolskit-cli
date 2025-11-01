@@ -1,4 +1,4 @@
-use nettoolskit_ui::{PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR, GRAY_COLOR, clear_terminal};
+use nettoolskit_ui::{clear_terminal, GRAY_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR};
 use nettoolskit_utils::string::truncate_directory;
 use owo_colors::Rgb;
 

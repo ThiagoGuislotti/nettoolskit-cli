@@ -8,7 +8,8 @@ async fn test_timeout_success() {
     let result = with_timeout(Duration::from_millis(100), async {
         sleep(Duration::from_millis(10)).await;
         "success"
-    }).await;
+    })
+    .await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "success");
@@ -20,7 +21,8 @@ async fn test_timeout_error() {
     let result = with_timeout(Duration::from_millis(50), async {
         sleep(Duration::from_millis(200)).await;
         "never reached"
-    }).await;
+    })
+    .await;
 
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), TimeoutError));
@@ -32,7 +34,8 @@ async fn test_timeout_edge_case() {
     let result = with_timeout(Duration::from_millis(100), async {
         sleep(Duration::from_millis(95)).await;
         42
-    }).await;
+    })
+    .await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 42);
@@ -41,9 +44,7 @@ async fn test_timeout_edge_case() {
 #[tokio::test]
 async fn test_timeout_zero_duration() {
     // Zero timeout should immediately fail
-    let result = with_timeout(Duration::ZERO, async {
-        "instant"
-    }).await;
+    let result = with_timeout(Duration::ZERO, async { "instant" }).await;
 
     // This is a timing-sensitive test, could be either success or timeout
     // depending on scheduler timing
@@ -56,17 +57,12 @@ async fn test_timeout_zero_duration() {
 #[tokio::test]
 async fn test_timeout_with_different_types() {
     // Test with different return types
-    let string_result = with_timeout(Duration::from_millis(100), async {
-        "hello".to_string()
-    }).await;
+    let string_result =
+        with_timeout(Duration::from_millis(100), async { "hello".to_string() }).await;
 
-    let number_result = with_timeout(Duration::from_millis(100), async {
-        123usize
-    }).await;
+    let number_result = with_timeout(Duration::from_millis(100), async { 123usize }).await;
 
-    let vec_result = with_timeout(Duration::from_millis(100), async {
-        vec![1, 2, 3]
-    }).await;
+    let vec_result = with_timeout(Duration::from_millis(100), async { vec![1, 2, 3] }).await;
 
     assert!(string_result.is_ok());
     assert!(number_result.is_ok());

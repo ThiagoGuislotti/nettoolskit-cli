@@ -3,8 +3,8 @@
 //! This module handles validation of manifest files, templates, and project configurations
 //! to ensure they conform to expected schemas and standards.
 
-use clap::Parser;
 use crate::ExitStatus;
+use clap::Parser;
 use owo_colors::OwoColorize;
 
 /// Arguments for the check command.
