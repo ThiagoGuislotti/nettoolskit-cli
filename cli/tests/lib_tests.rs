@@ -1,4 +1,4 @@
-use nettoolskit_cli::{ExitStatus, interactive_mode};
+use nettoolskit_cli::{interactive_mode, ExitStatus};
 use nettoolskit_commands::processor::CliExitStatus;
 
 #[test]
@@ -100,7 +100,7 @@ async fn test_interactive_mode_function_exists() {
     // We can't easily test interactive_mode in unit tests without mocking
     // but we can verify it compiles and has the right signature
     fn check_signature() -> impl std::future::Future<Output = ExitStatus> {
-        interactive_mode()
+        interactive_mode(false)
     }
 
     let _future = check_signature();
@@ -116,7 +116,7 @@ fn test_module_imports() {
     let _status = ExitStatus::Success;
 
     // Should be able to call interactive_mode (returns future)
-    let _future = interactive_mode();
+    let _future = interactive_mode(false);
 
     assert!(true);
 }

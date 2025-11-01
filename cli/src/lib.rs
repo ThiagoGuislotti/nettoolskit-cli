@@ -1,16 +1,18 @@
-
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use owo_colors::OwoColorize;
 use std::io;
 
 pub mod input;
 
-use nettoolskit_ui::{clear_terminal, print_logo, PRIMARY_COLOR, CommandPalette};
-use nettoolskit_async_utils::with_timeout;
-use nettoolskit_otel::{init_tracing_with_config, TracingConfig, Metrics, Timer};
-use tracing::{info, warn, error};
-use nettoolskit_commands::processor::{process_command, process_text, CliExitStatus};
 use input::{read_line_with_palette, InputResult};
+use nettoolskit_async_utils::with_timeout;
+use nettoolskit_commands::processor::{process_command, process_text, CliExitStatus};
+use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
+use nettoolskit_ui::{
+    append_footer_log, begin_interactive_logging, clear_terminal, print_logo, CommandPalette,
+    TerminalLayout, PRIMARY_COLOR,
+};
+use tracing::{error, info, warn};
 
 /// Exit status for the CLI
 #[derive(Debug, Clone, Copy)]
@@ -61,40 +63,58 @@ impl From<ExitStatus> for i32 {
 }
 
 /// Launch the interactive CLI mode
-pub async fn interactive_mode() -> ExitStatus {
+pub async fn interactive_mode(verbose: bool) -> ExitStatus {
+    let mut log_guard = begin_interactive_logging();
+
+    let (layout_failure_notice, _terminal_layout) = match TerminalLayout::initialize() {
+        Ok(layout) => (None, Some(layout)),
+        Err(e) => {
+            let failure_message = format!("Failed to initialize terminal layout: {e}");
+            let _ = append_footer_log(&format!("Warning: {failure_message}"));
+            log_guard.deactivate();
+            if let Err(clear_error) = clear_terminal() {
+                let clear_failure = format!("Failed to clear terminal: {clear_error}");
+                let _ = append_footer_log(&format!("Warning: {clear_failure}"));
+            }
+            print_logo();
+            (Some(failure_message), None)
+        }
+    };
+
     // Initialize telemetry with development configuration
     let tracing_config = TracingConfig {
-        verbose: false,
+        verbose,
         with_line_numbers: true,
         ..Default::default()
     };
 
     if let Err(e) = init_tracing_with_config(tracing_config) {
-        eprintln!("Warning: Failed to initialize tracing: {}", e);
+        let message = format!("Failed to initialize tracing: {}", e);
+        let _ = append_footer_log(&format!("Warning: {message}"));
     }
 
-    info!("Starting NetToolsKit CLI interactive mode");
+    if let Some(failure_message) = layout_failure_notice {
+        warn!("{failure_message}");
+    }
 
     let metrics = Metrics::new();
     metrics.increment_counter("cli_sessions_started");
 
     let _session_timer = Timer::start("cli_session_duration", metrics.clone());
 
-    if let Err(e) = clear_terminal() {
-        warn!(error = %e, "Failed to clear terminal");
-    }
-
     // Use async-utils for timeout instead of direct tokio
     if let Err(_) = with_timeout(
         std::time::Duration::from_millis(50),
-        tokio::time::sleep(std::time::Duration::from_millis(50))
-    ).await {
+        tokio::time::sleep(std::time::Duration::from_millis(50)),
+    )
+    .await
+    {
         // Timeout is unlikely but we handle it gracefully
         info!("Initialization timeout completed (expected)");
     }
 
+    info!("Starting NetToolsKit CLI interactive mode");
     info!("Displaying application logo and UI");
-    print_logo();
 
     let result = match run_interactive_loop().await {
         Ok(status) => {
@@ -105,7 +125,7 @@ pub async fn interactive_mode() -> ExitStatus {
                 "CLI session completed successfully"
             );
             status
-        },
+        }
         Err(e) => {
             metrics.increment_counter("cli_sessions_errored");
             error!(
@@ -134,7 +154,8 @@ async fn run_interactive_loop() -> io::Result<ExitStatus> {
         disable_raw_mode().unwrap_or(());
         println!("\n⚠️  {}", "Interrupted".yellow());
         std::process::exit(130);
-    }).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    })
+    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     loop {
         print!("> ");

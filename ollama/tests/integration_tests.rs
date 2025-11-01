@@ -1,4 +1,4 @@
-use nettoolskit_ollama::{OllamaClient, GenerateRequest, ModelConfig, ModelType};
+use nettoolskit_ollama::{GenerateRequest, ModelConfig, ModelType, OllamaClient};
 
 #[tokio::test]
 async fn test_integration_client_with_model_config() {
@@ -69,7 +69,10 @@ fn test_integration_client_url_handling() {
     let test_cases = vec![
         (None, "localhost:11434"),
         (Some("http://custom:9999".to_string()), "custom:9999"),
-        (Some("https://secure.example.com".to_string()), "secure.example.com"),
+        (
+            Some("https://secure.example.com".to_string()),
+            "secure.example.com",
+        ),
     ];
 
     for (url_input, expected_content) in test_cases {
@@ -121,12 +124,14 @@ fn test_integration_error_handling_scenarios() {
 
     // Missing required fields
     let incomplete_json = r#"{"response": "test"}"#; // Missing 'done' field
-    let result: Result<nettoolskit_ollama::GenerateResponse, _> = serde_json::from_str(incomplete_json);
+    let result: Result<nettoolskit_ollama::GenerateResponse, _> =
+        serde_json::from_str(incomplete_json);
     assert!(result.is_err());
 
     // Empty response handling
     let empty_response = r#"{"response": "", "done": true}"#;
-    let result: Result<nettoolskit_ollama::GenerateResponse, _> = serde_json::from_str(empty_response);
+    let result: Result<nettoolskit_ollama::GenerateResponse, _> =
+        serde_json::from_str(empty_response);
     assert!(result.is_ok());
 
     if let Ok(response) = result {

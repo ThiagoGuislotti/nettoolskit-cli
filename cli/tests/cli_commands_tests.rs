@@ -29,7 +29,10 @@ fn test_slash_command_enum() {
 
     assert_eq!(SlashCommand::List.description(), "List available templates");
     assert_eq!(SlashCommand::Quit.description(), "Exit NetToolsKit CLI");
-    assert_eq!(SlashCommand::New.description(), "Create a project from a template");
+    assert_eq!(
+        SlashCommand::New.description(),
+        "Create a project from a template"
+    );
 }
 
 #[test]

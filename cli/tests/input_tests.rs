@@ -117,7 +117,10 @@ fn test_input_result_all_variants_handled() {
         }
     }
 
-    assert_eq!(handle_result(InputResult::Command("test".to_string())), "command");
+    assert_eq!(
+        handle_result(InputResult::Command("test".to_string())),
+        "command"
+    );
     assert_eq!(handle_result(InputResult::Text("test".to_string())), "text");
     assert_eq!(handle_result(InputResult::Exit), "exit");
 }

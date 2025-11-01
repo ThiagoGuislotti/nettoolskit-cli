@@ -3,8 +3,8 @@
 //! This module handles creating new projects from templates, including
 //! template instantiation, file generation, and project configuration.
 
-use clap::Parser;
 use crate::ExitStatus;
+use clap::Parser;
 use owo_colors::OwoColorize;
 
 /// Arguments for the new command.

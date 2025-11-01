@@ -1,4 +1,4 @@
-use nettoolskit_file_search::{SearchConfig, FileFilters};
+use nettoolskit_file_search::{FileFilters, SearchConfig};
 
 #[test]
 fn test_dotnet_project_detection() {
@@ -59,7 +59,8 @@ fn test_file_extension_matching() {
     // Case sensitivity test - current implementation is case sensitive
     assert!(!FileFilters::is_dotnet_project("Project.CSPROJ"));
     assert!(!FileFilters::is_dotnet_project("project.CsProj"));
-}#[test]
+}
+#[test]
 fn test_template_extensions() {
     // Handlebars templates
     assert!(FileFilters::is_template("component.hbs"));

@@ -3,8 +3,8 @@
 //! This module handles rendering template previews without creating actual files,
 //! allowing users to see what will be generated before project creation.
 
-use clap::Parser;
 use crate::ExitStatus;
+use clap::Parser;
 use owo_colors::OwoColorize;
 
 /// Arguments for the render command.

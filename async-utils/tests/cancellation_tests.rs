@@ -1,4 +1,4 @@
-use nettoolskit_async_utils::{CancellationToken, CancellationError};
+use nettoolskit_async_utils::{CancellationError, CancellationToken};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -17,10 +17,12 @@ async fn test_cancellation_success() {
     let token = CancellationToken::new();
 
     // Fast operation that completes before cancellation
-    let result = token.with_cancellation(async {
-        sleep(Duration::from_millis(10)).await;
-        "completed"
-    }).await;
+    let result = token
+        .with_cancellation(async {
+            sleep(Duration::from_millis(10)).await;
+            "completed"
+        })
+        .await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "completed");
@@ -38,10 +40,12 @@ async fn test_cancellation_cancelled() {
     });
 
     // Long operation that should be cancelled
-    let result = token.with_cancellation(async {
-        sleep(Duration::from_millis(200)).await;
-        "never reached"
-    }).await;
+    let result = token
+        .with_cancellation(async {
+            sleep(Duration::from_millis(200)).await;
+            "never reached"
+        })
+        .await;
 
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), CancellationError));
@@ -73,9 +77,7 @@ async fn test_cancellation_immediate() {
     token.cancel();
 
     // Operation should be cancelled right away
-    let result = token.with_cancellation(async {
-        "immediate"
-    }).await;
+    let result = token.with_cancellation(async { "immediate" }).await;
 
     // This could be either cancelled or completed depending on timing
     match result {
@@ -89,17 +91,11 @@ async fn test_cancellation_with_different_types() {
     let token = CancellationToken::new();
 
     // Test with different return types
-    let string_result = token.with_cancellation(async {
-        "hello".to_string()
-    }).await;
+    let string_result = token.with_cancellation(async { "hello".to_string() }).await;
 
-    let number_result = token.with_cancellation(async {
-        123usize
-    }).await;
+    let number_result = token.with_cancellation(async { 123usize }).await;
 
-    let vec_result = token.with_cancellation(async {
-        vec![1, 2, 3]
-    }).await;
+    let vec_result = token.with_cancellation(async { vec![1, 2, 3] }).await;
 
     assert!(string_result.is_ok());
     assert!(number_result.is_ok());
@@ -119,10 +115,12 @@ async fn test_token_clone() {
     cloned_token.cancel();
 
     // Original token should also be cancelled
-    let result = token.with_cancellation(async {
-        sleep(Duration::from_millis(100)).await;
-        "should be cancelled"
-    }).await;
+    let result = token
+        .with_cancellation(async {
+            sleep(Duration::from_millis(100)).await;
+            "should be cancelled"
+        })
+        .await;
 
     // May be cancelled or completed depending on timing
     match result {

@@ -1,6 +1,6 @@
+use nettoolskit_utils::string::truncate_directory_with_middle;
 use owo_colors::{OwoColorize, Rgb};
 use std::env;
-use nettoolskit_utils::string::truncate_directory_with_middle;
 
 /// Global UI color constants
 pub const PRIMARY_COLOR: Rgb = Rgb(155, 114, 255);
@@ -78,8 +78,14 @@ pub fn print_ascii_logo() {
 
     println!();
     println!();
-    println!("{}", "💡 Tip: Type / to see available commands".color(GRAY_COLOR));
-    println!("{}", "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(GRAY_COLOR));
+    println!(
+        "{}",
+        "💡 Tip: Type / to see available commands".color(GRAY_COLOR)
+    );
+    println!(
+        "{}",
+        "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(GRAY_COLOR)
+    );
     println!();
     println!();
 }

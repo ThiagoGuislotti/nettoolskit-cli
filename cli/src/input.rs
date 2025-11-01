@@ -1,7 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::io::{self, Write};
-use nettoolskit_ui::CommandPalette;
 use nettoolskit_async_utils::with_timeout;
+use nettoolskit_ui::CommandPalette;
+use std::io::{self, Write};
 
 #[derive(Debug)]
 pub enum InputResult {
@@ -12,7 +12,7 @@ pub enum InputResult {
 
 pub async fn read_line_with_palette(
     buffer: &mut String,
-    palette: &mut CommandPalette
+    palette: &mut CommandPalette,
 ) -> io::Result<InputResult> {
     loop {
         // Use async-utils timeout for consistent timeout handling
@@ -23,23 +23,21 @@ pub async fn read_line_with_palette(
                 tokio::time::sleep(std::time::Duration::from_millis(1)).await;
             }
             event::read()
-        }).await {
-            Ok(Ok(event)) => {
-                match event {
-                    Event::Key(key_event) => {
-                        match handle_key_event(key_event, buffer, palette)? {
-                            Some(result) => return Ok(result),
-                            None => continue,
-                        }
+        })
+        .await
+        {
+            Ok(Ok(event)) => match event {
+                Event::Key(key_event) => match handle_key_event(key_event, buffer, palette)? {
+                    Some(result) => return Ok(result),
+                    None => continue,
+                },
+                Event::Resize(_, _) => {
+                    if palette.is_active() {
+                        palette.close()?;
                     }
-                    Event::Resize(_, _) => {
-                        if palette.is_active() {
-                            palette.close()?;
-                        }
-                    }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             Ok(Err(e)) => return Err(e),
             Err(_) => {
                 // Timeout - continue polling

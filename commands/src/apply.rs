@@ -3,8 +3,8 @@
 //! This module handles applying manifest files to existing solutions,
 //! allowing for incremental updates and modifications to project structures.
 
-use clap::Parser;
 use crate::ExitStatus;
+use clap::Parser;
 use owo_colors::OwoColorize;
 
 /// Arguments for the apply command.
