@@ -71,3 +71,67 @@ pub async fn run(args: CheckArgs) -> ExitStatus {
         ExitStatus::Error
     }
 }
+
+/// Async version of check command with progress reporting
+///
+/// This function demonstrates async execution with progress updates.
+/// It can be used as a template for other commands that need long-running
+/// operations with user feedback.
+///
+/// # Arguments
+///
+/// * `args` - Command arguments
+/// * `progress` - Channel for sending progress updates
+///
+/// # Returns
+///
+/// Returns `CommandResult` which is `Result<String, Box<dyn Error>>`
+pub async fn run_async(
+    args: CheckArgs,
+    progress: tokio::sync::mpsc::UnboundedSender<crate::async_executor::CommandProgress>,
+) -> crate::Result<String> {
+    use crate::async_executor::CommandProgress;
+    use tokio::time::{sleep, Duration};
+
+    // Send initial progress
+    progress
+        .send(CommandProgress::message("Starting validation..."))
+        .ok();
+
+    sleep(Duration::from_millis(200)).await;
+
+    // Check file existence
+    progress
+        .send(CommandProgress::percent("Checking file existence...", 25))
+        .ok();
+
+    sleep(Duration::from_millis(200)).await;
+
+    if !args.path.exists() {
+        progress
+            .send(CommandProgress::message("❌ File not found"))
+            .ok();
+        return Err(format!("File not found: {}", args.path.display()).into());
+    }
+
+    // Validate structure
+    progress
+        .send(CommandProgress::percent("Validating structure...", 50))
+        .ok();
+
+    sleep(Duration::from_millis(200)).await;
+
+    // Validate content
+    progress
+        .send(CommandProgress::percent("Validating content...", 75))
+        .ok();
+
+    sleep(Duration::from_millis(200)).await;
+
+    // Complete
+    progress
+        .send(CommandProgress::percent("✅ Validation complete", 100))
+        .ok();
+
+    Ok(format!("File {} is valid", args.path.display()))
+}

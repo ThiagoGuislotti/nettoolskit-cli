@@ -5,6 +5,16 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["nettoolskit-core/legacy-ui"]
+legacy-ui = ["nettoolskit-core/legacy-ui"]
+modern-tui = ["nettoolskit-core/modern-tui"]
+event-driven = ["nettoolskit-core/event-driven"]
+frame-scheduler = ["nettoolskit-core/frame-scheduler"]
+persistent-sessions = ["nettoolskit-core/persistent-sessions"]
+full-tui = ["nettoolskit-core/full-tui"]
+experimental = ["nettoolskit-core/experimental"]
+
 [[bin]]
 name = "ntk"
 path = "src/main.rs"

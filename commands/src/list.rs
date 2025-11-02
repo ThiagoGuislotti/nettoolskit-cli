@@ -90,3 +90,97 @@ pub async fn run(args: ListArgs) -> ExitStatus {
     info!("List command completed successfully");
     ExitStatus::Success
 }
+
+/// Async version of list command with progress reporting
+///
+/// This function demonstrates async execution with progress updates
+/// for listing templates, particularly useful when fetching from
+/// remote registries or scanning large template collections.
+///
+/// # Arguments
+///
+/// * `args` - Command arguments
+/// * `progress` - Channel for sending progress updates
+///
+/// # Returns
+///
+/// Returns `CommandResult` which is `Result<String, Box<dyn Error>>`
+pub async fn run_async(
+    args: ListArgs,
+    progress: tokio::sync::mpsc::UnboundedSender<crate::async_executor::CommandProgress>,
+) -> crate::Result<String> {
+    use crate::async_executor::CommandProgress;
+    use tokio::time::{sleep, Duration};
+
+    info!(
+        filter = ?args.filter,
+        tech = ?args.tech,
+        "Executing async list command with filters"
+    );
+
+    // Send initial progress
+    progress
+        .send(CommandProgress::message("🔍 Scanning for templates..."))
+        .ok();
+    sleep(Duration::from_millis(100)).await;
+
+    // TODO: Replace with actual template registry integration
+    let templates = vec![
+        ("dotnet-api", "ASP.NET Core Web API template"),
+        ("dotnet-webapp", "ASP.NET Core Web Application"),
+        ("dotnet-classlib", ".NET Class Library"),
+        ("dotnet-console", ".NET Console Application"),
+        ("vue-app", "Vue.js Application"),
+        ("react-app", "React Application"),
+    ];
+
+    progress
+        .send(CommandProgress::percent("📦 Loading templates...", 30))
+        .ok();
+    sleep(Duration::from_millis(100)).await;
+
+    let mut result = String::from("📋 Available Templates\n\n");
+    let mut count = 0;
+    let total = templates.len();
+
+    for (idx, (name, description)) in templates.iter().enumerate() {
+        // Apply filters
+        if let Some(ref filter) = args.filter {
+            if !name.contains(filter.as_str()) && !description.contains(filter.as_str()) {
+                continue;
+            }
+        }
+
+        if let Some(ref tech) = args.tech {
+            if !name.starts_with(tech.as_str()) {
+                continue;
+            }
+        }
+
+        // Add to result
+        result.push_str(&format!("  {} - {}\n", name, description));
+        count += 1;
+
+        // Update progress
+        progress
+            .send(CommandProgress::steps(
+                format!("Processing templates... {}/{}", idx + 1, total),
+                idx + 1,
+                total,
+            ))
+            .ok();
+
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    // Final progress
+    progress
+        .send(CommandProgress::percent(
+            format!("✅ Found {} templates", count),
+            100,
+        ))
+        .ok();
+
+    info!(count = count, "Async list command completed successfully");
+    Ok(result)
+}

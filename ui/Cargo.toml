@@ -3,12 +3,26 @@ name = "nettoolskit-ui"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+modern-tui = ["dep:ratatui", "dep:tokio", "dep:futures"]
+event-driven = ["modern-tui"]
+frame-scheduler = ["modern-tui"]
+full-tui = ["modern-tui", "event-driven", "frame-scheduler"]
+
 [dependencies]
-owo-colors = { workspace = true }
-crossterm = { workspace = true }
-nettoolskit-utils = { path = "../utils" }
-nettoolskit-core = { path = "../core" }
+crossterm = { version = "0.28", features = ["event-stream"] }
+owo-colors = "3.5"
+thiserror = "1.0"
+tracing = "0.1"
 once_cell = "1.19"
+nettoolskit-core = { path = "../core" }
+nettoolskit-utils = { path = "../utils" }
+
+# Modern TUI dependencies (optional)
+ratatui = { version = "0.28", optional = true }
+tokio = { version = "1.34", features = ["sync", "time"], optional = true }
+futures = { version = "0.3", optional = true }
 
 [lib]
 name = "nettoolskit_ui"

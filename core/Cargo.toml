@@ -5,6 +5,16 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["legacy-ui"]
+legacy-ui = []              # Current UI (default, stable)
+modern-tui = []             # New Ratatui-based TUI (experimental)
+event-driven = ["modern-tui"] # Event loop (requires modern-tui)
+frame-scheduler = ["modern-tui"] # Frame coalescing (requires modern-tui)
+persistent-sessions = []    # Save/load sessions
+full-tui = ["modern-tui", "event-driven", "frame-scheduler"]
+experimental = ["full-tui", "persistent-sessions"]
+
 [dependencies]
 # Serialization
 serde = { workspace = true }

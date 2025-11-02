@@ -1,11 +1,22 @@
 use clap::Parser;
 
 pub mod apply;
+pub mod async_executor;
 pub mod check;
 pub mod list;
 pub mod new;
 pub mod processor;
+pub mod processor_async;
 pub mod render;
+
+// Re-export commonly used types
+pub use async_executor::{
+    AsyncCommandExecutor, CommandHandle, CommandProgress, CommandResult, ProgressSender,
+};
+
+// Error type for the commands crate
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ExitStatus {
@@ -87,8 +98,11 @@ pub async fn execute_command_with_timeout(
     cmd: Commands,
     global_args: GlobalArgs,
     timeout: std::time::Duration,
-) -> Result<ExitStatus, nettoolskit_async_utils::TimeoutError> {
-    nettoolskit_async_utils::with_timeout(timeout, execute_command(cmd, global_args)).await
+) -> crate::Result<ExitStatus> {
+    match nettoolskit_async_utils::with_timeout(timeout, execute_command(cmd, global_args)).await {
+        Ok(status) => Ok(status),
+        Err(_timeout_err) => Err("Command timed out".into()),
+    }
 }
 
 // Slash command definitions for the interactive palette
