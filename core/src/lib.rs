@@ -6,6 +6,9 @@
 /// Core error types for the application
 pub type Result<T> = anyhow::Result<T>;
 
+/// Feature detection and configuration for opt-in TUI improvements
+pub mod features;
+
 /// Configuration types and utilities
 pub mod config {
     use serde::{Deserialize, Serialize};
@@ -41,3 +44,6 @@ pub mod commands {
         ("/quit", "Exit NetToolsKit CLI"),
     ];
 }
+
+// Re-export commonly used items
+pub use features::Features;
