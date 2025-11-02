@@ -23,7 +23,7 @@ license = "MIT"
 anyhow = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 clap_complete = "4.4"
-tokio = { version = "1.34", features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+tokio = { version = "1.34", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -69,3 +69,14 @@ all = "warn"
 pedantic = "warn"
 nursery = "warn"
 cargo = "warn"
+
+# Feature flags for incremental TUI improvements
+[workspace.metadata.features]
+description = """
+Feature flags control opt-in TUI improvements:
+- legacy-ui: Current UI (default, stable)
+- modern-tui: New Ratatui-based TUI (experimental)
+- event-driven: Event loop architecture (requires modern-tui)
+- frame-scheduler: Frame coalescing optimization (requires modern-tui)
+- persistent-sessions: Save/load sessions (experimental)
+"""

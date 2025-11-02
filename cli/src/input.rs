@@ -1,6 +1,6 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use nettoolskit_async_utils::with_timeout;
-use nettoolskit_ui::CommandPalette;
+use nettoolskit_ui::{append_footer_log, handle_resize, CommandPalette};
 use std::io::{self, Write};
 
 #[derive(Debug)]
@@ -31,7 +31,11 @@ pub async fn read_line_with_palette(
                     Some(result) => return Ok(result),
                     None => continue,
                 },
-                Event::Resize(_, _) => {
+                Event::Resize(width, height) => {
+                    if let Err(err) = handle_resize(width, height) {
+                        let _ =
+                            append_footer_log(&format!("Warning: failed to handle resize: {err}"));
+                    }
                     if palette.is_active() {
                         palette.close()?;
                     }
