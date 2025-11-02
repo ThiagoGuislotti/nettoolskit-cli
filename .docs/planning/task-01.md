@@ -59,4 +59,3 @@ TAREFAS:
 |    directory:  ~\\Documents\\Trabalho\\Pessoal\\Desenvolvimento\\…\\tools\\nettoolskit-cli |
 
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-
