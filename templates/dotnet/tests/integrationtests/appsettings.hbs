@@ -1,0 +1,14 @@
+{
+  "ConnectionStrings": {
+    "PostgreSql": "Host=localhost;Database={{databaseName}};Username=postgres;Password={{databasePassword}};Timeout=5;SSL Mode=Disable;Trust Server Certificate=true;",
+    "RabbitMq": "amqp://admin:{{rabbitmqPassword}}@localhost"
+  },
+  {{#if hasMinioStorage}}
+  "MinioStorageSettings": {
+    "Endpoint": "localhost:9005",
+    "AccessKey": "admin",
+    "SecretKey": "{{minioPassword}}",
+    "UseSSL": false
+  }
+  {{/if}}
+}

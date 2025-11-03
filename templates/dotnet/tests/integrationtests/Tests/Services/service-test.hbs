@@ -1,0 +1,109 @@
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using NUnit.Framework;
+using {{namespace}}.Application.Services;
+using {{namespace}}.IntegrationTests.Assets;
+
+namespace {{namespace}}.IntegrationTests.Tests.Services;
+
+/// <summary>
+/// Integration tests for {{serviceName}} service
+/// </summary>
+[TestFixture]
+[RequiresThread]
+[SetCulture("pt-BR")]
+[Category("Services")]
+public class {{serviceName}}Tests
+{
+    #region Variables
+
+    private ConfigureServices _configureServices;
+    private I{{serviceName}} _service;
+
+    #endregion
+
+    #region SetUp Methods
+
+    /// <summary>
+    /// Sets up test dependencies before each test
+    /// </summary>
+    [SetUp]
+    public void SetUp()
+    {
+        _configureServices = new ConfigureServices();
+        _service = _configureServices.ServiceProvider.GetRequiredService<I{{serviceName}}>();
+    }
+
+    #endregion
+
+    #region Test Methods
+
+    {{#each testMethods}}
+    /// <summary>
+    /// {{description}}
+    /// </summary>
+    {{#if hasTestCase}}
+    [TestCase({{testCaseData}})]
+    {{else}}
+    [Test]
+    {{/if}}
+    [Order({{order}})]
+    public async Task {{methodName}}_{{scenario}}_Should{{expectedResult}}({{parameters}})
+    {
+        // Arrange
+        {{#each arrangeStatements}}
+        {{this}}
+        {{/each}}
+
+        // Act
+        {{#if isAsync}}
+        var result = await _service.{{serviceMethod}}({{actParameters}}).ConfigureAwait(false);
+        {{else}}
+        var result = _service.{{serviceMethod}}({{actParameters}});
+        {{/if}}
+
+        // Assert
+        {{#each assertStatements}}
+        {{this}}
+        {{/each}}
+    }
+
+    {{/each}}
+
+    {{#if hasExceptionTests}}
+    #region Exception Tests
+
+    {{#each exceptionTests}}
+    /// <summary>
+    /// Tests that {{methodName}} throws {{exceptionType}} when {{scenario}}
+    /// </summary>
+    [Test]
+    [Order({{order}})]
+    public void {{methodName}}_{{scenario}}_ShouldThrow{{exceptionType}}()
+    {
+        // Arrange
+        {{#each arrangeStatements}}
+        {{this}}
+        {{/each}}
+
+        // Act
+        {{#if isAsync}}
+        Func<Task> act = async () => await _service.{{serviceMethod}}({{actParameters}}).ConfigureAwait(false);
+        {{else}}
+        Action act = () => _service.{{serviceMethod}}({{actParameters}});
+        {{/if}}
+
+        // Assert
+        {{#if isAsync}}
+        act.Should().ThrowAsync<{{exceptionType}}>(){{#if hasMessage}}.WithMessage("{{message}}"){{/if}};
+        {{else}}
+        act.Should().Throw<{{exceptionType}}>(){{#if hasMessage}}.WithMessage("{{message}}"){{/if}};
+        {{/if}}
+    }
+
+    {{/each}}
+    #endregion
+    {{/if}}
+
+    #endregion
+}

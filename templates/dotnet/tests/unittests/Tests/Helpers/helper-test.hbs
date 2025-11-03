@@ -1,0 +1,123 @@
+using FluentAssertions;
+using {{namespace}}.Domain.Helpers;
+
+namespace {{namespace}}.UnitTests.Tests.Helpers;
+
+/// <summary>
+/// Unit tests for {{helperName}} helper class
+/// </summary>
+[Trait("Helper", "{{helperName}}")]
+public class {{helperName}}Test
+{
+    #region Variables
+
+    private readonly ITestOutputHelper _output;
+
+    #endregion
+
+    #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of {{helperName}}Test
+    /// </summary>
+    /// <param name="output">Test output helper for capturing logs</param>
+    public {{helperName}}Test(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    #endregion
+
+    #region Test Valid Cases
+
+    /// <summary>
+    /// Tests that {{methodName}} with valid input should return expected result
+    /// </summary>
+    {{#each validTestCases}}
+    [Theory]
+    [InlineData({{inlineData}})]
+    {{/each}}
+    public void {{methodName}}_ValidInput_ShouldReturnExpectedResult({{testParameters}})
+    {
+        // Arrange
+        {{#each arrangeStatements}}
+        {{this}}
+        {{/each}}
+
+        // Act
+        var result = {{helperName}}.{{methodName}}({{actParameters}});
+        _output.WriteLine($"Result: {result}");
+
+        // Assert
+        {{#each assertions}}
+        {{this}}
+        {{/each}}
+    }
+
+    #endregion
+
+    #region Test Invalid Cases
+
+    {{#each invalidTestCases}}
+    /// <summary>
+    /// Tests that {{../methodName}} with invalid {{description}} should {{expectedBehavior}}
+    /// </summary>
+    [Theory]
+    [InlineData({{inlineData}})]
+    public void {{../methodName}}_Invalid{{testName}}_Should{{expectedBehavior}}({{parameterType}} {{parameterName}})
+    {
+        // Arrange
+        {{#each arrangeStatements}}
+        {{this}}
+        {{/each}}
+
+        // Act
+        {{#if shouldThrow}}
+        Action act = () => {{../helperName}}.{{../methodName}}({{actParameters}});
+        {{else}}
+        var result = {{../helperName}}.{{../methodName}}({{actParameters}});
+        {{/if}}
+        _output.WriteLine($"Test: {{description}}");
+
+        // Assert
+        {{#if shouldThrow}}
+        act.Should().Throw<{{exceptionType}}>();
+        {{else}}
+        {{#each assertions}}
+        {{this}}
+        {{/each}}
+        {{/if}}
+    }
+
+    {{/each}}
+    #endregion
+
+    {{#if hasEdgeCases}}
+    #region Test Edge Cases
+
+    {{#each edgeCases}}
+    /// <summary>
+    /// Tests edge case: {{description}}
+    /// </summary>
+    [Fact]
+    public void {{testName}}_EdgeCase_ShouldHandleCorrectly()
+    {
+        // Arrange
+        {{#each arrangeStatements}}
+        {{this}}
+        {{/each}}
+
+        // Act
+        var result = {{../helperName}}.{{../methodName}}({{actParameters}});
+        _output.WriteLine($"Edge case result: {result}");
+
+        // Assert
+        {{#each assertions}}
+        {{this}}
+        {{/each}}
+    }
+
+    {{/each}}
+    #endregion
+    {{/if}}
+}
