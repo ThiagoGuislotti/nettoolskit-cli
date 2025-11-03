@@ -4,15 +4,17 @@
 //! - Command palette for interactive command discovery
 //! - Terminal layout management and logging
 //! - ASCII art and branding display
+//! - Color and style formatting utilities
 
-mod ui;
+pub mod display;
+pub mod palette;
+pub mod prompt;
+pub mod style;
+pub mod terminal;
 
-// Re-export all components
-pub use ui::display;
-pub use ui::display::*;
-pub use ui::palette;
-pub use ui::palette::*;
-pub use ui::prompt;
-pub use ui::prompt::*;
-pub use ui::terminal;
-pub use ui::terminal::*;
+// Re-export commonly used items
+pub use display::*;
+pub use palette::*;
+pub use prompt::*;
+pub use style::*;
+pub use terminal::*;
