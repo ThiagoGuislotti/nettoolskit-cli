@@ -18,7 +18,8 @@ const PROMPT_SYMBOL: &str = "> ";
 /// render_prompt().expect("Failed to render prompt");
 /// ```
 pub fn render_prompt() -> io::Result<()> {
-    print!("{}", PROMPT_SYMBOL.white());
+    // Reset terminal attributes first to prevent color bleeding from previous commands
+    print!("\x1b[0m{}", PROMPT_SYMBOL.white());
     io::stdout().flush()
 }
 

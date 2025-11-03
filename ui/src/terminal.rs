@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::ui::display::print_logo;
+use crate::display::print_logo;
 
 /// Clear the terminal screen and move cursor to top-left position.
 ///

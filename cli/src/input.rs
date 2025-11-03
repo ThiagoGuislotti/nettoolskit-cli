@@ -1,6 +1,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use nettoolskit_async_utils::with_timeout;
 use nettoolskit_ui::{append_footer_log, handle_resize, render_prompt_with_command, CommandPalette};
+use owo_colors::OwoColorize;
 use std::io::{self, Write};
 
 #[derive(Debug)]
@@ -66,7 +67,7 @@ fn handle_key_event(
         }
         KeyCode::Char(c) => {
             buffer.push(c);
-            print!("{}", c);
+            print!("{}", c.to_string().white());
             io::stdout().flush()?;
 
             if c == '/' && buffer.len() == 1 {

@@ -1,5 +1,6 @@
-use crate::ui::display::{GRAY_COLOR, PRIMARY_COLOR};
-use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
+use crate::display::{GRAY_COLOR, PRIMARY_COLOR};
+use crate::style::set_fg;
+use crossterm::style::{Attribute, Print, SetAttribute};
 use crossterm::terminal::ClearType;
 use crossterm::{cursor, queue, terminal};
 use nettoolskit_core::commands::COMMANDS;
@@ -421,27 +422,15 @@ impl CommandPalette {
                         )?;
                     } else {
                         // Item não selecionado - cores do NetToolsKit (roxo/magenta)
-                        queue!(
-                            io::stdout(),
-                            SetForegroundColor(Color::Rgb {
-                                r: GRAY_COLOR.0,
-                                g: GRAY_COLOR.1,
-                                b: GRAY_COLOR.2
-                            }),
-                            Print("  "),
-                            SetForegroundColor(Color::Rgb {
-                                r: PRIMARY_COLOR.0,
-                                g: PRIMARY_COLOR.1,
-                                b: PRIMARY_COLOR.2
-                            }),
-                            Print(cmd),
-                            SetForegroundColor(Color::Rgb {
-                                r: GRAY_COLOR.0,
-                                g: GRAY_COLOR.1,
-                                b: GRAY_COLOR.2
-                            }),
-                            Print(format!("  {}", desc)), // Dois espaços entre comando e descrição
-                            SetAttribute(Attribute::Reset)
+                    queue!(
+                        io::stdout(),
+                        set_fg(GRAY_COLOR),
+                        Print("  "),
+                        set_fg(PRIMARY_COLOR),
+                        Print(cmd),
+                        set_fg(GRAY_COLOR),
+                        Print(format!("  {}", desc)), // Dois espaços entre comando e descrição
+                        SetAttribute(Attribute::Reset)
                         )?;
                     }
                 }
@@ -505,23 +494,11 @@ impl CommandPalette {
                         // Item não selecionado - cores do NetToolsKit
                         queue!(
                             io::stdout(),
-                            SetForegroundColor(Color::Rgb {
-                                r: GRAY_COLOR.0,
-                                g: GRAY_COLOR.1,
-                                b: GRAY_COLOR.2
-                            }),
+                            set_fg(GRAY_COLOR),
                             Print("  "),
-                            SetForegroundColor(Color::Rgb {
-                                r: PRIMARY_COLOR.0,
-                                g: PRIMARY_COLOR.1,
-                                b: PRIMARY_COLOR.2
-                            }),
+                            set_fg(PRIMARY_COLOR),
                             Print(cmd),
-                            SetForegroundColor(Color::Rgb {
-                                r: GRAY_COLOR.0,
-                                g: GRAY_COLOR.1,
-                                b: GRAY_COLOR.2
-                            }),
+                            set_fg(GRAY_COLOR),
                             Print(format!("  {}", desc)),
                             SetAttribute(Attribute::Reset)
                         )?;
