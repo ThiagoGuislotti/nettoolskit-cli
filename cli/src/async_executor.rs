@@ -2,10 +2,7 @@
 ///
 /// This module integrates the async executor with the CLI loop,
 /// providing non-blocking command execution with visual progress feedback.
-
-use nettoolskit_commands::{
-    AsyncCommandExecutor, CommandProgress, CommandResult,
-};
+use nettoolskit_commands::{AsyncCommandExecutor, CommandProgress, CommandResult};
 use nettoolskit_ui::PRIMARY_COLOR;
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
@@ -51,10 +48,7 @@ where
 /// This function spawns a command that can be cancelled by the user.
 /// It monitors for cancellation signals and terminates the command
 /// gracefully if requested.
-pub async fn execute_cancellable<F>(
-    executor: &mut AsyncCommandExecutor,
-    future: F,
-) -> CommandResult
+pub async fn execute_cancellable<F>(executor: &mut AsyncCommandExecutor, future: F) -> CommandResult
 where
     F: std::future::Future<Output = CommandResult> + Send + 'static,
 {
@@ -135,9 +129,7 @@ mod tests {
         let mut executor = AsyncCommandExecutor::new();
 
         let result = execute_with_progress(&mut executor, "test", |progress| async move {
-            progress
-                .send(CommandProgress::message("Starting..."))
-                .ok();
+            progress.send(CommandProgress::message("Starting...")).ok();
             sleep(Duration::from_millis(10)).await;
 
             progress
@@ -145,9 +137,7 @@ mod tests {
                 .ok();
             sleep(Duration::from_millis(10)).await;
 
-            progress
-                .send(CommandProgress::message("Done!"))
-                .ok();
+            progress.send(CommandProgress::message("Done!")).ok();
 
             Ok("Test completed".to_string())
         })

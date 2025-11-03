@@ -1,7 +1,6 @@
 /// Example demonstrating the modern Ratatui-based TUI
 ///
 /// Run with: cargo run --features modern-tui --example modern_tui_demo
-
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use nettoolskit_ui::modern::{render_ui, App, Tui};
 use std::io;

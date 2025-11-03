@@ -2,7 +2,6 @@
 ///
 /// Provides non-blocking command execution with progress tracking,
 /// cancellation support, and concurrent command handling.
-
 use std::future::Future;
 use std::pin::Pin;
 use tokio::sync::{mpsc, oneshot};
@@ -14,7 +13,26 @@ pub type CommandResult = crate::Result<String>;
 /// Future that resolves to a command result
 pub type CommandFuture = Pin<Box<dyn Future<Output = CommandResult> + Send>>;
 
-/// Handle to a running command
+/// Handle to a running asynchronous command.
+///
+/// Provides control over command execution, including:
+/// - Waiting for completion
+/// - Polling for results
+/// - Requesting cancellation (if supported)
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use nettoolskit_commands::CommandHandle;
+///
+/// async fn example(mut handle: CommandHandle) {
+///     // Wait for completion
+///     match handle.wait().await {
+///         Ok(result) => println!("Result: {:?}", result),
+///         Err(e) => eprintln!("Command failed: {}", e),
+///     }
+/// }
+/// ```
 pub struct CommandHandle {
     receiver: oneshot::Receiver<CommandResult>,
     cancel_tx: Option<mpsc::Sender<()>>,
@@ -63,7 +81,19 @@ impl CommandHandle {
     }
 }
 
-/// Progress information for a running command
+/// Progress update for a running command.
+///
+/// Provides real-time feedback about command execution progress,
+/// including status messages, completion percentages, and step tracking.
+///
+/// # Examples
+///
+/// ```rust
+/// use nettoolskit_commands::CommandProgress;
+///
+/// let progress = CommandProgress::simple("Processing files...".to_string());
+/// let progress_with_percent = CommandProgress::with_percent("Downloading".to_string(), 75);
+/// ```
 #[derive(Debug, Clone)]
 pub struct CommandProgress {
     /// Current step description
@@ -285,13 +315,19 @@ mod tests {
         let mut executor = AsyncCommandExecutor::new();
 
         let (handle, mut progress_rx) = executor.spawn_with_progress(|progress_tx| async move {
-            progress_tx.send(CommandProgress::percent("Step 1", 33)).ok();
+            progress_tx
+                .send(CommandProgress::percent("Step 1", 33))
+                .ok();
             tokio::time::sleep(Duration::from_millis(10)).await;
 
-            progress_tx.send(CommandProgress::percent("Step 2", 66)).ok();
+            progress_tx
+                .send(CommandProgress::percent("Step 2", 66))
+                .ok();
             tokio::time::sleep(Duration::from_millis(10)).await;
 
-            progress_tx.send(CommandProgress::percent("Step 3", 100)).ok();
+            progress_tx
+                .send(CommandProgress::percent("Step 3", 100))
+                .ok();
 
             Ok("completed with progress".to_string())
         });

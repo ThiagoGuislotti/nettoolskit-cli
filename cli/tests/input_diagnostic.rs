@@ -30,11 +30,7 @@ fn test_crossterm_events_available() {
 #[test]
 fn test_ui_functions_callable() {
     // Test that UI functions exist and can be referenced
-    use nettoolskit_ui::{
-        append_footer_log,
-        handle_resize,
-        CommandPalette,
-    };
+    use nettoolskit_ui::{append_footer_log, handle_resize, CommandPalette};
 
     // These should all be callable (we're just checking they exist)
     let _ = CommandPalette::new();
@@ -56,13 +52,11 @@ fn test_async_utils_available() {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     rt.block_on(async {
-        let result = with_timeout(
-            Duration::from_millis(100),
-            async {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                42
-            }
-        ).await;
+        let result = with_timeout(Duration::from_millis(100), async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            42
+        })
+        .await;
 
         assert!(result.is_ok());
         println!("✅ Async utilities work correctly");

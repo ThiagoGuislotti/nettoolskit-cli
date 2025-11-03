@@ -2,7 +2,6 @@
 ///
 /// This test checks if the input system can properly read characters
 /// and handle basic keyboard events.
-
 use nettoolskit_ui::CommandPalette;
 
 #[test]
@@ -18,8 +17,7 @@ fn test_command_palette_creation() {
 fn test_ui_exports_available() {
     // Test that all UI functions are properly exported
     use nettoolskit_ui::{
-        clear_terminal, print_logo, CommandPalette,
-        PRIMARY_COLOR, GRAY_COLOR, WHITE_COLOR
+        clear_terminal, print_logo, CommandPalette, GRAY_COLOR, PRIMARY_COLOR, WHITE_COLOR,
     };
 
     // Verify color constants are accessible
@@ -34,15 +32,16 @@ fn test_ui_exports_available() {
 }
 
 #[test]
-fn test_legacy_module_accessible() {
-    // Test that legacy module is accessible through re-exports
-    use nettoolskit_ui::legacy;
+fn test_ui_modules_accessible() {
+    // Test that ui modules are accessible through re-exports
+    use nettoolskit_ui::{display, palette, terminal};
 
-    // Should be able to access legacy modules
-    let _colors = (
-        legacy::display::PRIMARY_COLOR,
-        legacy::display::SECONDARY_COLOR,
-    );
+    // Should be able to access ui modules
+    let _colors = (display::PRIMARY_COLOR, display::SECONDARY_COLOR);
+
+    // Verify modules exist
+    let _ = palette::CommandPalette::new();
+    let _ = terminal::TerminalLayout::initialize();
 }
 
 #[cfg(feature = "modern-tui")]

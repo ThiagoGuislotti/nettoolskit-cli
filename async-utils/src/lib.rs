@@ -1,5 +1,28 @@
+//! Async utilities for NetToolsKit CLI
+//!
+//! This crate provides async primitives and utilities for handling
+//! concurrent operations in the CLI application:
+//!
+//! - **Cancellation**: Graceful task cancellation with CancellationToken
+//! - **Timeouts**: Time-bounded operations with configurable limits
+//!
+//! # Examples
+//!
+//! ```rust,no_run
+//! use nettoolskit_async_utils::{with_timeout, CancellationToken};
+//! use std::time::Duration;
+//!
+//! async fn example() -> Result<String, Box<dyn std::error::Error>> {
+//!     // Execute with timeout
+//!     let result = with_timeout(
+//!         async { Ok("completed".to_string()) },
+//!         Duration::from_secs(5)
+//!     ).await?;
+//!     Ok(result)
+//! }
+//! ```
+
 pub mod cancellation;
-/// Async utilities for NetToolsKit CLI
 pub mod timeout;
 
 pub use cancellation::*;

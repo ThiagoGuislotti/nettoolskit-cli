@@ -2,7 +2,6 @@
 ///
 /// This module provides a wrapper around command execution that uses
 /// the async executor for non-blocking operations with progress feedback.
-
 use crate::{async_executor::CommandProgress, check, list};
 use nettoolskit_otel::{Metrics, Timer};
 use owo_colors::OwoColorize;
