@@ -1,0 +1,104 @@
+{{!--
+  NetToolsKit CQRS Command Handler template
+--}}
+using Microsoft.Extensions.Logging;
+using NetToolsKit.Core.Data;
+using NetToolsKit.Core.Responses;
+using NetToolsKit.Core.Utilities;
+using NetToolsKit.EntityFrameworkCore.Repositories;
+using NetToolsKit.Mediator.Abstractions.Commands;
+using {{namespaceRoot}}.Application.Cqrs.Abstractions;
+using {{namespaceRoot}}.Domain.Entities;
+using System.Text;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Commands.Handles;
+
+public class {{name}}CommandHandler : HandlerBase<{{name}}CommandHandler>,
+    ICommandHandler<Create{{name}}Command>,
+    ICommandHandler<Update{{name}}Command>,
+    ICommandHandler<Delete{{name}}Command>
+{
+    #region Constructors
+    public {{name}}CommandHandler(ILoggerFactory loggerFactory,
+        IUnitOfWork unitOfWork)
+        : base(loggerFactory, unitOfWork)
+    {
+    }
+    #endregion
+
+    #region Public Methods/Operators
+    public async Task<Result> Handle(Create{{name}}Command command, CancellationToken cancellationToken)
+    {
+        var repository = _unitOfWork.GetRepository<{{name}}>();
+        var stringBuilder = new StringBuilder();
+
+        var entityExists = await repository.ExistsAsync(src => src.Id == command.Id, cancellationToken).ConfigureAwait(false);
+        if (entityExists)
+            stringBuilder.AppendLine($"{{name}} with Id: [{command.Id}] already exists.");
+
+        if (stringBuilder.Length > 0)
+            return Result.Failure(stringBuilder.ToString());
+
+        var entity = new {{name}}()
+        {
+            Id = command.Id,
+            // TODO: Map other properties
+        };
+
+        var result = await repository
+            .InsertAsync(entity, cancellationToken)
+            .ThenAsync(() => _unitOfWork.CommitAsync(cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+
+        return result;
+    }
+
+    public async Task<Result> Handle(Update{{name}}Command command, CancellationToken cancellationToken)
+    {
+        var repository = _unitOfWork.GetRepository<{{name}}>();
+        var entity = await repository
+            .SearchFirstOrDefaultAsync(
+                querySpecification: new() { ChangeTracker = ChangeTracker.AsNoTracking },
+                predicate: src => src.Id == command.Id,
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        if (entity.IsNullOrEmpty())
+            return Result.Failure($"{{name}} not found for Id: [{command.Id}].");
+
+        entity = entity with
+        {
+            // TODO: Map properties to update
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        var result = await repository
+            .UpdateAsync(entity, cancellationToken)
+            .ThenAsync(() => _unitOfWork.CommitAsync(cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+
+        return result;
+    }
+
+    public async Task<Result> Handle(Delete{{name}}Command command, CancellationToken cancellationToken)
+    {
+        var repository = _unitOfWork.GetRepository<{{name}}>();
+        var entity = await repository
+            .SearchFirstOrDefaultAsync(
+                querySpecification: new() { ChangeTracker = ChangeTracker.AsNoTracking },
+                predicate: src => src.Id == command.Id,
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        if (entity.IsNullOrEmpty())
+            return Result.Failure($"{{name}} not found for Id: [{command.Id}].");
+
+        var result = await repository
+            .DeleteAsync([entity.Id], cancellationToken)
+            .ThenAsync(() => _unitOfWork.CommitAsync(cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+
+        return result;
+    }
+    #endregion
+}

@@ -1,0 +1,54 @@
+using NetToolsKit.AspNetCore.Formatters;
+
+namespace {{namespace}}.Api.Middlewares;
+
+/// <summary>
+/// Extension methods for configuring middleware components
+/// </summary>
+public static class MiddlewareExtensions
+{
+    #region Public Methods/Operators
+
+    /// <summary>
+    /// Adds custom input formatter with model handling
+    /// </summary>
+    /// <param name="services">The service collection</param>
+    /// <returns>IMvcBuilder for fluent configuration</returns>
+    public static IMvcBuilder AddCustomInputFormatter(this IServiceCollection services)
+    {
+        {{#if hasModelHandlers}}
+        CustomInputFormatter.OnModelHandled += ModelHandlers.{{handlerMethodName}};
+        {{/if}}
+
+        return services.AddControllers(options =>
+            options.InputFormatters.Insert(0, new CustomInputFormatter()));
+    }
+
+    {{#if hasExceptionHandling}}
+    /// <summary>
+    /// Adds custom exception handling middleware
+    /// </summary>
+    /// <param name="app">The application builder</param>
+    /// <returns>IApplicationBuilder for fluent configuration</returns>
+    public static IApplicationBuilder UseCustomExceptionHandler(this IApplicationBuilder app)
+    {
+        app.UseMiddleware<ExceptionHandlerMiddleware>();
+        return app;
+    }
+    {{/if}}
+
+    {{#if hasRequestLogging}}
+    /// <summary>
+    /// Adds request/response logging middleware
+    /// </summary>
+    /// <param name="app">The application builder</param>
+    /// <returns>IApplicationBuilder for fluent configuration</returns>
+    public static IApplicationBuilder UseRequestLogging(this IApplicationBuilder app)
+    {
+        app.UseMiddleware<RequestLoggingMiddleware>();
+        return app;
+    }
+    {{/if}}
+
+    #endregion
+}

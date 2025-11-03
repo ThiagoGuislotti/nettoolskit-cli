@@ -1,0 +1,44 @@
+{{!--
+  NetToolsKit CQRS Query Handler template
+--}}
+using Microsoft.Extensions.Logging;
+using NetToolsKit.Core.Data;
+using NetToolsKit.Core.Utilities;
+using NetToolsKit.Mediator.Abstractions.Queries;
+using {{namespaceRoot}}.Application.Cqrs.Abstractions;
+using {{namespaceRoot}}.Application.Models;
+using {{namespaceRoot}}.Domain.Entities;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Querys.Handles;
+
+public sealed class {{name}}QueryHandler : HandlerBase<{{name}}QueryHandler>,
+    IQueryHandler<{{name}}Query, IEnumerable<{{name}}View>>
+{
+    #region Constructors
+    public {{name}}QueryHandler(ILoggerFactory loggerFactory, IUnitOfWork unitOfWork)
+        : base(loggerFactory, unitOfWork)
+    {
+    }
+    #endregion
+
+    #region Public Methods/Operators
+    public async Task<IEnumerable<{{name}}View>> Handle({{name}}Query query, CancellationToken cancellationToken)
+    {
+        var repository = _unitOfWork.GetRepository<{{name}}>();
+        var entities = await repository
+            .SearchAsync(
+                predicate: src =>
+                    (query.Id.IsNullOrEmpty() || src.Id == query.Id),
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        return entities.Select(entity => new {{name}}View
+        {
+            Id = entity.Id,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt,
+            // TODO: Map other properties
+        });
+    }
+    #endregion
+}

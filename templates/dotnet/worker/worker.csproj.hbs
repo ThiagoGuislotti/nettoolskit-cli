@@ -1,0 +1,32 @@
+{{!--
+  NetToolsKit Worker Project (.csproj) template
+--}}
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+	<PropertyGroup>
+		<Authors>{{author}}</Authors>
+		<IsPackable>false</IsPackable>
+		<TargetFramework>{{targetFramework}}</TargetFramework>
+		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="SimpleInjector" Version="{{simpleInjectorVersion}}" />
+		<PackageReference Include="SimpleInjector.Integration.AspNetCore" Version="{{simpleInjectorVersion}}" />
+		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="{{containerToolsVersion}}" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\{{projectName}}.Infrastructure\{{projectName}}.Infrastructure.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="appsettings.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="appsettings.Development.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
+</Project>

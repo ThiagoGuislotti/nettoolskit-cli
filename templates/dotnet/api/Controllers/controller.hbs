@@ -1,0 +1,144 @@
+{{!--
+  NetToolsKit Controller template with full CRUD operations
+--}}
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using NetToolsKit.Core.Utilities;
+using NetToolsKit.Mediator;
+using NetToolsKit.OpenApi.Attributes;
+using {{namespaceRoot}}.Api.Controllers.Abstractions;
+using {{namespaceRoot}}.Api.Responses;
+using {{namespaceRoot}}.Application.Cqrs.Commands;
+using {{namespaceRoot}}.Application.Cqrs.Querys;
+using {{namespaceRoot}}.Application.Models;
+using System.Collections;
+
+namespace {{namespaceRoot}}.Api.Controllers;
+
+[ApiController]
+[Route("{{route}}")]
+public class {{name}}Controller : {{projectName}}ControllerBase<{{name}}Controller>
+{
+    #region Constants
+    private const string ROUTE = "{{route}}";
+    #endregion
+
+    #region Constructors
+    public {{name}}Controller(
+        IConfiguration configuration,
+        IHttpContextAccessor contextAccessor,
+        ILoggerFactory loggerFactory,
+        IMediator mediator)
+        : base(configuration, contextAccessor, loggerFactory, mediator)
+    {
+    }
+    #endregion
+
+    #region Public Methods/Operators
+    /// <summary>
+    /// Create a new {{name}}
+    /// </summary>
+    /// <returns></returns>
+    [HttpPost()]
+    [Authorize(Policy = "read")]
+    [OpenApiOperation(ROUTE)]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest, Type = typeof(MessageResponse))]
+    public async Task<ActionResult> PostAsync(
+        [FromBody] Create{{name}}Command request,
+        CancellationToken cancellationToken)
+    {
+        var response = await _mediator.Send(request, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccess
+            ? CreatedAtRoute(
+                "Get{{name}}ById",
+                new { id = request.Id },
+                null)
+            : BadRequest(new MessageResponse() { Message = response.Message });
+    }
+
+    /// <summary>
+    /// Get all {{name}}s
+    /// </summary>
+    /// <returns></returns>
+    [HttpGet()]
+    [Authorize(Policy = "read")]
+    [OpenApiOperation(ROUTE)]
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(IEnumerable<{{name}}View>))]
+    [ProducesResponseType(StatusCodes.Status400BadRequest, Type = typeof(MessageResponse))]
+    [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(MessageResponse))]
+    public async Task<ActionResult<IEnumerable>> GetAsync(
+        CancellationToken cancellationToken)
+    {
+        var query = new {{name}}Query();
+        var views = await _mediator.Send(query, cancellationToken).ConfigureAwait(false);
+        this.AddPaginationHeader(views);
+        return views.IsNotNullOrEmpty()
+            ? Ok(views)
+            : NotFound(new MessageResponse() { Message = "No {{name}} found" });
+    }
+
+    /// <summary>
+    /// Get {{name}} by id
+    /// </summary>
+    /// <returns></returns>
+    [HttpGet("{id}", Name = "Get{{name}}ById")]
+    [Authorize(Policy = "read")]
+    [OpenApiOperation(ROUTE)]
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof({{name}}View))]
+    [ProducesResponseType(StatusCodes.Status400BadRequest, Type = typeof(MessageResponse))]
+    [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(MessageResponse))]
+    public async Task<ActionResult> GetByIdAsync(
+        [FromRoute] string id,
+        CancellationToken cancellationToken)
+    {
+        var query = new {{name}}Query() { Id = id };
+        var views = await _mediator.Send(query, cancellationToken).ConfigureAwait(false);
+        var view = views.FirstOrDefault();
+        return view.IsNotNullOrEmpty()
+            ? Ok(view)
+            : NotFound(new MessageResponse() { Message = "{{name}} not found" });
+    }
+
+    /// <summary>
+    /// Update {{name}}
+    /// </summary>
+    /// <returns></returns>
+    [HttpPut("{id}")]
+    [Authorize(Policy = "read")]
+    [OpenApiOperation(ROUTE)]
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(MessageResponse))]
+    [ProducesResponseType(StatusCodes.Status400BadRequest, Type = typeof(MessageResponse))]
+    public async Task<ActionResult> PutAsync(
+        [FromBody] Update{{name}}Command request,
+        [FromRoute] string id,
+        CancellationToken cancellationToken)
+    {
+        request = request with { Id = id };
+        var response = await _mediator.Send(request, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccess
+            ? Ok(new MessageResponse() { Message = "{{name}} updated successfully" })
+            : BadRequest(new MessageResponse() { Message = response.Message });
+    }
+
+    /// <summary>
+    /// Delete {{name}}
+    /// </summary>
+    /// <returns></returns>
+    [HttpDelete("{id}")]
+    [Authorize(Policy = "admin")]
+    [OpenApiOperation(ROUTE)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest, Type = typeof(MessageResponse))]
+    public async Task<ActionResult> DeleteAsync(
+        [FromRoute] string id,
+        CancellationToken cancellationToken)
+    {
+        var request = new Delete{{name}}Command() { Id = id };
+        var response = await _mediator.Send(request, cancellationToken).ConfigureAwait(false);
+        return response.IsSuccess
+            ? Ok(new MessageResponse() { Message = "{{name}} deleted successfully" })
+            : BadRequest(new MessageResponse() { Message = response.Message });
+    }
+    #endregion
+}

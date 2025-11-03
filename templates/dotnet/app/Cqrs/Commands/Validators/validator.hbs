@@ -1,0 +1,33 @@
+{{!--
+  NetToolsKit Command Validator template
+--}}
+using FluentValidation;
+using {{namespaceRoot}}.Application.Cqrs.Commands;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Commands.Validators;
+
+public sealed class {{name}}CommandValidator : AbstractValidator<{{name}}Command>
+{
+    #region Constructors
+    public {{name}}CommandValidator()
+    {
+        RuleFor(x => x.Id)
+            .NotEmpty()
+            .WithMessage("Id is required");
+
+{{#if properties}}
+{{#each properties}}
+        RuleFor(x => x.{{name}})
+{{#if required}}
+            .NotEmpty()
+            .WithMessage("{{name}} is required");
+{{else}}
+            // TODO: Add validation rules
+            ;
+{{/if}}
+
+{{/each}}
+{{/if}}
+    }
+    #endregion
+}
