@@ -12,5 +12,7 @@ pub use ui::display;
 pub use ui::display::*;
 pub use ui::palette;
 pub use ui::palette::*;
+pub use ui::prompt;
+pub use ui::prompt::*;
 pub use ui::terminal;
 pub use ui::terminal::*;

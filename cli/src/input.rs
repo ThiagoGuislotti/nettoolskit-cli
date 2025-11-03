@@ -1,7 +1,6 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use nettoolskit_async_utils::with_timeout;
-use nettoolskit_ui::{append_footer_log, handle_resize, CommandPalette};
-use owo_colors::OwoColorize;
+use nettoolskit_ui::{append_footer_log, handle_resize, render_prompt_with_command, CommandPalette};
 use std::io::{self, Write};
 
 #[derive(Debug)]
@@ -112,8 +111,7 @@ fn handle_key_event(
             let selected_cmd = palette.get_selected_command().map(|s| s.to_string());
             palette.close()?;
             if let Some(cmd) = selected_cmd {
-                print!("\r\x1b[K{} {}", "> ".white(), cmd);
-                io::stdout().flush()?;
+                render_prompt_with_command(&cmd)?;
                 buffer.clear();
                 buffer.push_str(&cmd);
             }
