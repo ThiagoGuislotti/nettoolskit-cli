@@ -1,0 +1,62 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using {{namespace}}.Application.DependencyInjections;
+using {{namespace}}.Infrastructure.DependencyInjections;
+
+namespace {{namespace}}.IntegrationTests.Assets;
+
+/// <summary>
+/// Configures services for integration tests
+/// </summary>
+public class ConfigureServices
+{
+    #region Public Properties
+
+    /// <summary>
+    /// Gets the service provider for dependency injection
+    /// </summary>
+    public ServiceProvider ServiceProvider { get; protected set; }
+
+    /// <summary>
+    /// Gets the configuration root
+    /// </summary>
+    public IConfigurationRoot Configuration { get; protected set; }
+
+    #endregion
+
+    #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of ConfigureServices
+    /// </summary>
+    public ConfigureServices()
+    {
+        Configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddEnvironmentVariables()
+            .Build();
+
+        var services = new ServiceCollection();
+
+        var logLevel = LogLevel.Information;
+        services.AddScoped(sp => LoggerFactory.Create(loggingBuilder =>
+        {
+            loggingBuilder
+                .ClearProviders()
+                .SetMinimumLevel(logLevel)
+                .AddConsole();
+        }));
+
+        services.Add{{shortProjectName}}Application()
+            .Add{{shortProjectName}}Infrastructure(Configuration)
+            {{#if hasMassTransit}}
+            .Add{{shortProjectName}}MassTransitPublisherInfrastructure(Configuration)
+            {{/if}};
+
+        ServiceProvider = services.BuildServiceProvider();
+    }
+
+    #endregion
+}

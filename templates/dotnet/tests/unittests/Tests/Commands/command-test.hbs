@@ -1,0 +1,155 @@
+using FluentAssertions;
+using {{namespace}}.Application.Cqrs.Commands;
+using {{namespace}}.Application.Cqrs.Commands.Validators;
+
+namespace {{namespace}}.UnitTests.Tests.Commands;
+
+/// <summary>
+/// Unit tests for {{entityName}} command validators
+/// </summary>
+[Trait("Command", "{{entityName}}")]
+public class {{entityName}}CommandTest
+{
+    #region Variables
+
+    private readonly Create{{entityName}}Validator _create{{entityName}}Validator = new();
+    {{#if hasUpdate}}
+    private readonly Update{{entityName}}Validator _update{{entityName}}Validator = new();
+    {{/if}}
+    private readonly ITestOutputHelper _output;
+
+    #endregion
+
+    #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of {{entityName}}CommandTest
+    /// </summary>
+    /// <param name="output">Test output helper for capturing logs</param>
+    public {{entityName}}CommandTest(ITestOutputHelper output)
+    {
+        // Capturing Output - xUnit:
+        // https://xunit.net/docs/capturing-output
+        _output = output;
+    }
+
+    #endregion
+
+    #region Test Create Valid Cases
+
+    /// <summary>
+    /// Tests that Create{{entityName}} command with valid data should be valid
+    /// </summary>
+    {{#each validTestCases}}
+    [Theory]
+    [InlineData({{inlineData}})]
+    {{/each}}
+    public void Create{{entityName}}_ValidData_ShouldBeValid({{testParameters}})
+    {
+        // Arrange
+        var request = new Create{{entityName}}Command
+        {
+            {{#each properties}}
+            {{name}} = {{parameterName}},
+            {{/each}}
+        };
+
+        // Act
+        var result = _create{{entityName}}Validator.Validate(request);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Test Create Invalid Cases
+
+    {{#each invalidTestCases}}
+    /// <summary>
+    /// Tests that Create{{../entityName}} command with invalid {{propertyName}} should be invalid
+    /// </summary>
+    [Theory]
+    [InlineData({{inlineData}})]
+    public void Create{{../entityName}}_Invalid{{propertyName}}_ShouldBeInvalid({{parameterType}} {{parameterName}})
+    {
+        // Arrange
+        var request = new Create{{../entityName}}Command
+        {
+            {{#each ../defaultProperties}}
+            {{name}} = {{defaultValue}},
+            {{/each}}
+            {{propertyName}} = {{parameterName}}
+        };
+
+        // Act
+        var result = _create{{../entityName}}Validator.Validate(request);
+        _output.WriteLine(result.ToString());
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(x => x.PropertyName == nameof(Create{{../entityName}}Command.{{propertyName}}));
+    }
+
+    {{/each}}
+    #endregion
+
+    {{#if hasUpdate}}
+    #region Test Update Valid Cases
+
+    /// <summary>
+    /// Tests that Update{{entityName}} command with valid data should be valid
+    /// </summary>
+    [Theory]
+    [InlineData({{updateValidInlineData}})]
+    public void Update{{entityName}}_ValidData_ShouldBeValid({{updateTestParameters}})
+    {
+        // Arrange
+        var request = new Update{{entityName}}Command
+        {
+            {{#each updateProperties}}
+            {{name}} = {{parameterName}},
+            {{/each}}
+        };
+
+        // Act
+        var result = _update{{entityName}}Validator.Validate(request);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Test Update Invalid Cases
+
+    {{#each updateInvalidTestCases}}
+    /// <summary>
+    /// Tests that Update{{../entityName}} command with invalid {{propertyName}} should be invalid
+    /// </summary>
+    [Theory]
+    [InlineData({{inlineData}})]
+    public void Update{{../entityName}}_Invalid{{propertyName}}_ShouldBeInvalid({{parameterType}} {{parameterName}})
+    {
+        // Arrange
+        var request = new Update{{../entityName}}Command
+        {
+            {{#each ../updateDefaultProperties}}
+            {{name}} = {{defaultValue}},
+            {{/each}}
+            {{propertyName}} = {{parameterName}}
+        };
+
+        // Act
+        var result = _update{{../entityName}}Validator.Validate(request);
+        _output.WriteLine(result.ToString());
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(x => x.PropertyName == nameof(Update{{../entityName}}Command.{{propertyName}}));
+    }
+
+    {{/each}}
+    #endregion
+    {{/if}}
+}
