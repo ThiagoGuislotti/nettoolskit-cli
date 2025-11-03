@@ -6,8 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [features]
-default = ["legacy-ui"]
-legacy-ui = []              # Current UI (default, stable)
+default = []
 modern-tui = []             # New Ratatui-based TUI (experimental)
 event-driven = ["modern-tui"] # Event loop (requires modern-tui)
 frame-scheduler = ["modern-tui"] # Frame coalescing (requires modern-tui)
