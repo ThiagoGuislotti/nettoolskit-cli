@@ -1,11 +1,22 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+//! Input debugging and validation tests
+//!
+//! This module provides manual testing utilities for validating
+//! the terminal input system behavior.
+
+use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-/// Quick debug test to check input flow
-///
-/// Run this to see what's happening with the input buffer
+use nettoolskit_ui::render_prompt;
 use std::io::{self, Write};
 
-fn main() -> io::Result<()> {
+/// Manual test for debugging input flow
+///
+/// Run with: `cargo test --test input_debug_test -- --ignored --nocapture`
+///
+/// This test is marked as `#[ignore]` because it requires manual interaction
+/// and doesn't run in CI/CD pipelines.
+#[test]
+#[ignore]
+fn test_input_flow_manual() -> io::Result<()> {
     println!("=== INPUT DEBUG TEST ===");
     println!("Type something and press Enter");
     println!("Press Ctrl+C to exit\n");
@@ -14,8 +25,7 @@ fn main() -> io::Result<()> {
 
     let mut buffer = String::new();
 
-    print!("> ");
-    io::stdout().flush()?;
+    render_prompt()?;
 
     loop {
         if event::poll(std::time::Duration::from_millis(100))? {
@@ -56,8 +66,7 @@ fn main() -> io::Result<()> {
                             enable_raw_mode()?;
 
                             buffer.clear();
-                            print!("> ");
-                            io::stdout().flush()?;
+                            render_prompt()?;
                         }
                     }
                     _ => {}

@@ -30,7 +30,7 @@ use nettoolskit_commands::ExitStatus;
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
-    print_logo, CommandPalette, TerminalLayout, PRIMARY_COLOR,
+    print_logo, render_prompt, CommandPalette, TerminalLayout, PRIMARY_COLOR,
 };
 use tracing::{error, info, warn};
 
@@ -175,8 +175,7 @@ async fn run_input_loop(
 
     loop {
         raw_mode.enable()?;
-        print!("> ");
-        std::io::Write::flush(&mut std::io::stdout())?;
+        render_prompt()?;
         input_buffer.clear();
 
         match read_line_with_palette(input_buffer, palette).await? {
