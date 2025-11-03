@@ -1,6 +1,6 @@
 use clap::Parser;
 use nettoolskit_cli::interactive_mode;
-use nettoolskit_commands::{Commands, GlobalArgs};
+use nettoolskit_commands::{Commands, GlobalArgs, ExitStatus};
 use nettoolskit_otel::init_tracing;
 
 /// NetToolsKit CLI
@@ -35,10 +35,8 @@ async fn main() {
         }
     }
 
-    let exit_status = match cli.subcommand {
-        Some(command) => nettoolskit_commands::execute_command(command, cli.global)
-            .await
-            .into(),
+    let exit_status: ExitStatus = match cli.subcommand {
+        Some(command) => nettoolskit_commands::execute_command(command, cli.global).await,
         None => interactive_mode(cli.global.verbose).await,
     };
 

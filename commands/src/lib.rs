@@ -35,6 +35,16 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+impl From<ExitStatus> for i32 {
+    fn from(status: ExitStatus) -> Self {
+        match status {
+            ExitStatus::Success => 0,
+            ExitStatus::Error => 1,
+            ExitStatus::Interrupted => 130,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct GlobalArgs {
     /// Set logging level (off, error, warn, info, debug, trace)

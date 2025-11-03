@@ -56,16 +56,18 @@
 - **Rust source files:** 79
 - **Code duplication:** ~1,097 lines
 - **Duplicate structs:** 2 (GlobalArgs)
+- **Dead code files:** 1 (mod.rs)
 
-### After Cleanup
-- **Rust source files:** 76 (-3 files)
+### After Cleanup (Phase 1 + 2)
+- **Rust source files:** 75 (-4 files)
 - **Code duplication:** 0 lines
 - **Duplicate structs:** 0
+- **Dead code files:** 0
 
 ### Impact
-- **Lines saved:** ~1,097
-- **Files removed:** 3
-- **Space saved:** 39KB
+- **Lines saved:** ~1,168
+- **Files removed:** 4 (3 duplicates + 1 dead code)
+- **Space saved:** 41KB
 - **Build time:** No significant change
 - **Test coverage:** Maintained (100%)
 
