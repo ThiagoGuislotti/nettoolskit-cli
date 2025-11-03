@@ -4,4 +4,5 @@
 /// command palette, display utilities, and terminal management.
 pub mod display;
 pub mod palette;
+pub mod prompt;
 pub mod terminal;
