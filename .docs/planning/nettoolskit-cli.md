@@ -5,8 +5,9 @@
 > Multi‑stack code generator based on **static templates**. CLI written in **Rust**. No Roslyn in this phase. Placeholders with `{{Tokens}}`, collision policy, `--dry-run` with unified diff, and optional insertion of `// TODO` + `NotImplementedException` when optional sections are empty.
 
 **Version**: 0.2.0
-**Status**: Phase 2 (Async Architecture)
+**Status**: Phase 2.3 Complete (40% roadmap) - Moving to Phase 2.4
 **Tests**: 13/13 ✅
+**Next**: Phase 2.4-2.6 (Complete Async) → Phase 3 (Estado e Persistência)
 
 ---
 
@@ -68,6 +69,24 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 -> dynamic area
 >
+
+> /
+
+› /list  List available templates
+  /check  Validate a manifest or template
+  /render  Render a template preview
+  /new  Create a project from a template
+  /apply  Apply a manifest to an existing solution
+  /quit  Exit NetToolsKit CLI
+
+> /lis
+
+› /list  List available templates
+
+> /che
+
+› /check  Validate a manifest or template
+
 -> dynamic area
 
 
@@ -358,6 +377,85 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 ---
 
+### Phase 3: Estado e Persistência 📋 PLANNED
+
+#### Phase 3.1: Rich State Management 📋
+- [ ] `CliState` structure with history, session, config
+- [ ] `HistoryEntry` trait for command/text entries
+- [ ] Arc-based state sharing
+- [ ] State serialization/deserialization
+
+#### Phase 3.2: Session Persistence 📋
+- [ ] Save sessions to disk (JSON format)
+- [ ] Load previous sessions
+- [ ] Session selection UI (resume picker)
+- [ ] Session metadata (id, timestamp, history)
+
+#### Phase 3.3: Frame Scheduler 📋
+- [ ] Frame coalescing implementation
+- [ ] Rate limiting (60 FPS target)
+- [ ] Async-friendly scheduler
+- [ ] Integration with event loop
+
+---
+
+### Phase 4: Funcionalidades Interativas 📋 PLANNED
+
+#### Phase 4.1: Enhanced Input (IMP-3) 📋
+- [ ] Rustyline integration
+- [ ] Command history persistence
+- [ ] Auto-complete for commands
+- [ ] Multi-line editing support
+- [ ] Integration with CommandPalette
+
+#### Phase 4.2: File Picker 📋
+- [ ] Fuzzy finder implementation
+- [ ] Regex support
+- [ ] Real-time filtering
+- [ ] Keyboard navigation
+
+#### Phase 4.3: Status Bar 📋
+- [ ] Status bar widget
+- [ ] Mode indicators
+- [ ] Notifications queue
+- [ ] Resource usage display
+
+#### Phase 4.4: Visual History 📋
+- [ ] History viewer widget
+- [ ] Scroll support
+- [ ] Entry rendering
+- [ ] Search/filter capabilities
+
+---
+
+### Phase 5: Features Avançadas 📋 PLANNED
+
+#### Phase 5.1: Syntax Highlighting 📋
+- [ ] Tree-sitter integration
+- [ ] Language support (Rust, C#, JS/TS)
+- [ ] Theme support
+- [ ] Performance optimization
+
+#### Phase 5.2: Markdown Rendering 📋
+- [ ] Pulldown-cmark integration
+- [ ] Styled rendering
+- [ ] Code block highlighting
+- [ ] Link handling
+
+#### Phase 5.3: Clipboard Integration 📋
+- [ ] Arboard dependency
+- [ ] Copy command output
+- [ ] Paste support
+- [ ] Cross-platform compatibility
+
+#### Phase 5.4: Desktop Notifications 📋
+- [ ] Notification API integration
+- [ ] Focus detection
+- [ ] Configurable triggers
+- [ ] Cross-platform support
+
+---
+
 ## 12. Performance & UX Improvements (Codex-RS Analysis)
 
 ### 12.1 Context
@@ -553,44 +651,63 @@ tokio-stream = "0.1"
 
 ### 12.4 Implementation Roadmap
 
-#### **Phase 1: Foundation** ✅ COMPLETE
-- [x] IMP-1: RawModeGuard.
-- [x] IMP-2: Event-driven architecture.
-- [x] Basic async executor.
-- [x] Progress display.
+#### **Phase 0: Foundation (Analysis & Setup)** ✅ COMPLETE
+- [x] Phase 0.0: Codex CLI Analysis (comparative-analysis-codex-vs-ntk.md).
+- [x] Phase 0.1: Planning & Documentation (master plan + task-phase docs).
+- [x] Phase 0.2: Project Structure.
+- [x] Phase 0.3: Core Abstractions.
 
-**Deliverable:** Responsive CLI with async command execution.
-
----
-
-#### **Phase 2: Core Features** 🔄 IN PROGRESS
-- [x] Async command executor (Phase 2.1).
-- [x] CLI integration (Phase 2.2).
-- [x] First command conversion (Phase 2.3).
-- [ ] Additional commands (Phase 2.4).
-- [ ] Ctrl+C handling (Phase 2.4).
-
-**Deliverable:** Production-ready async commands.
+**Deliverable:** Comprehensive planning and project foundation.
 
 ---
 
-#### **Phase 3: Optimization** 📋 PLANNED
-- [ ] IMP-5: Parallel validation.
-- [ ] Caching system (Phase 2.5).
-- [ ] Enhanced progress bars.
-- [ ] Performance benchmarks.
+#### **Phase 1: Terminal Control** ✅ COMPLETE
+- [x] Phase 1.1: Terminal Abstractions (IMP-1).
+- [x] Phase 1.2: Input System.
+- [x] Phase 1.3: Event Loop.
 
-**Deliverable:** Optimized template operations.
+**Deliverable:** Responsive terminal control with RawModeGuard and EventStream.
 
 ---
 
-#### **Phase 4: Polish** 📋 PLANNED
-- [ ] IMP-3: Rustyline integration.
-- [ ] Persistent history.
-- [ ] Enhanced auto-complete.
-- [ ] Keyboard shortcuts.
+#### **Phase 2: Async Architecture** 🔄 IN PROGRESS (40% roadmap complete)
+- [x] Phase 2.1: Async Executor.
+- [x] Phase 2.2: TUI Integration.
+- [x] Phase 2.3: First Command Async (/health).
+- [ ] Phase 2.4: Additional Commands (/new, /render, /apply).
+- [ ] Phase 2.5: Caching System (LRU cache).
+- [ ] Phase 2.6: Advanced Features (predictive input, config system).
 
-**Deliverable:** Professional UX.
+**Deliverable:** Production-ready async commands with enhanced UX.
+
+---
+
+#### **Phase 3: Estado e Persistência** 📋 PLANNED
+- [ ] Phase 3.1: Rich State Management (CliState, HistoryEntry).
+- [ ] Phase 3.2: Session Persistence (save/load, JSON format).
+- [ ] Phase 3.3: Frame Scheduler (coalescing, 60 FPS).
+
+**Deliverable:** Stateful CLI with persistent sessions and optimized rendering.
+
+---
+
+#### **Phase 4: Funcionalidades Interativas** 📋 PLANNED
+- [ ] Phase 4.1: Enhanced Input (IMP-3: rustyline integration).
+- [ ] Phase 4.2: File Picker (fuzzy finder, real-time preview).
+- [ ] Phase 4.3: Status Bar (notifications, command history).
+- [ ] Phase 4.4: Visual History (syntax highlight, diff view).
+
+**Deliverable:** Professional interactive UX matching Codex CLI.
+
+---
+
+#### **Phase 5: Features Avançadas** 📋 PLANNED
+- [ ] Phase 5.1: Syntax Highlighting (tree-sitter integration).
+- [ ] Phase 5.2: Markdown Rendering (pulldown-cmark).
+- [ ] Phase 5.3: Clipboard Integration (arboard).
+- [ ] Phase 5.4: Desktop Notifications (native system integration).
+
+**Deliverable:** Advanced features achieving full Codex CLI parity (100% roadmap).
 
 ---
 
