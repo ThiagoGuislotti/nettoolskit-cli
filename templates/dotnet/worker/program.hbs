@@ -1,0 +1,86 @@
+{{!--
+  NetToolsKit Worker Program.cs template
+--}}
+using AspectCore.Extensions.DependencyInjection;
+using NetToolsKit.Observability;
+using NetToolsKit.Observability.Settings;
+using NetToolsKit.Observability.Workers;
+using {{namespaceRoot}}.Application.DependencyInjections;
+using {{namespaceRoot}}.Infrastructure.DependencyInjections;
+using Serilog;
+using SimpleInjector;
+using SimpleInjector.Lifestyles;
+using System.Reflection;
+
+#region ConfigurationBuilder
+// Configuração e logs do NetToolsKit
+var configuration = new ConfigurationBuilder()
+            .AddNetToolsKitConfiguration();
+#endregion
+
+#region NetToolsKit Observability Settings
+var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Development";
+var otlpSettings = new OtlpSettings(Assembly.GetEntryAssembly()?.GetName().Name ?? "unknown")
+{
+    Endpoint = configuration.GetConnectionString("Otlp") ?? throw new NullReferenceException("Otlp"),
+    Attributes = new Dictionary<string, object>
+    {
+        ["deployment.environment"] = environment,
+    },
+    MeterNames = ["Microsoft.AspNetCore.Hosting",
+                    "Microsoft.AspNetCore.Server.Kestrel",
+                    "Microsoft.AspNetCore.Http.Connections",
+                    "Microsoft.AspNetCore.Routing",
+                    "Microsoft.AspNetCore.Diagnostics",
+                    "Microsoft.AspNetCore.RateLimiting"],
+    TracingSourceNames = ["NetToolsKit*", "Masstransit"]
+};
+#endregion
+
+try
+{
+    var host = Host.CreateDefaultBuilder(args)
+        .UseServiceProviderFactory(new DynamicProxyServiceProviderFactory())
+        .AddNetToolsKitSerilog((context, service, logger) => logger.AddNetToolsKitSerilogOtlp(otlpSettings))
+        .ConfigureServices((host, services) =>
+        {
+            // Adiciona a configuração global
+            services.AddSingleton(configuration);
+
+            #region SimpleInjector
+            var container = new Container();
+            container.Options.DefaultScopedLifestyle = new AsyncScopedLifestyle();
+            services.UseSimpleInjectorAspNetRequestScoping(container);
+            #endregion
+
+            #region NetToolsKit Observability Configuration
+            // Configuração de observabilidade e TracingInterceptor do NetToolsKit
+            services
+                .AddNetToolsKitMethodTracingInterceptor(
+                    includeNamespaces: ["*Masstransit*", "*FluentValidation*", "*NetToolsKit*"],
+                    excludeNamespaces: ["*{{projectName}}.Worker*"])
+                .AddNetToolsKitObservabilityOtlp(otlpSettings);
+            #endregion
+
+            #region Application Configuration
+            // Adiciona as dependências da aplicação
+            services.Add{{projectName}}Application()
+                .Add{{projectName}}Infrastructure(configuration);
+
+            // Adiciona o serviço de notificação de início da aplicação
+            services.AddHostedService<StartAppNotification>();
+            #endregion
+        })
+        .Build();
+
+    await host.RunAsync().ConfigureAwait(false);
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "[Error: Worker]-[{Environment}] - [{Application}] Erro: {Error}", environment, AppDomain.CurrentDomain.FriendlyName, ex.Message);
+}
+finally
+{
+    Log.Information("{0}", "Shut down complete");
+    Log.CloseAndFlush();
+}

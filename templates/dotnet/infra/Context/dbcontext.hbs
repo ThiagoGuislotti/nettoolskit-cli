@@ -1,0 +1,82 @@
+{{!--
+  NetToolsKit DbContext template
+--}}
+using Microsoft.EntityFrameworkCore;
+using NetToolsKit.Core.Domain.Events;
+using NetToolsKit.Core.Domain.Notifications;
+using NetToolsKit.EntityFrameworkCore.Context;
+using {{namespaceRoot}}.Domain.Entities;
+
+namespace {{namespaceRoot}}.Infrastructure.Context;
+
+public class ApplicationDbContext : NetToolsKitDbContext
+{
+    #region Protected Properties DbSets
+{{#if entities}}
+{{#each entities}}
+    public DbSet<{{name}}> {{pluralName}} { get; set; }
+{{/each}}
+{{/if}}
+    #endregion
+
+    #region Constructors
+    public ApplicationDbContext()
+    {
+    }
+
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : base(options)
+    {
+    }
+    #endregion
+
+    #region Public Methods/Operators
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => base.ConcurrencySaveChangesAsync(true, cancellationToken);
+    #endregion
+
+    #region Protected Methods/Operators
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+            optionsBuilder.UseNpgsql("Host=localhost;Database={{projectName}}Db;Username=postgres;Password=YourPassword;");
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        #region Entity Configuration
+        modelBuilder.Ignore<Notification>();
+        modelBuilder.Ignore<Event>();
+
+{{#if entities}}
+{{#each entities}}
+        modelBuilder.Entity<{{name}}>(builder =>
+        {
+            // TODO: Configure entity relationships and indexes
+        });
+
+{{/each}}
+{{/if}}
+        #endregion
+
+        #region Timestamp Configuration
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            var properties = entityType.ClrType.GetProperties()
+                .Where(p => p.PropertyType == typeof(DateTime)
+                    || p.PropertyType == typeof(DateTime?)
+                    || p.PropertyType == typeof(DateTimeOffset)
+                    || p.PropertyType == typeof(DateTimeOffset?));
+
+            foreach (var property in properties)
+                modelBuilder
+                    .Entity(entityType.Name)
+                    .Property(property.Name)
+                    .HasConversion(
+                        v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                        v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+        }
+        #endregion
+    }
+    #endregion
+}

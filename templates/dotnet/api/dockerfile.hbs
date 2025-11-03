@@ -1,0 +1,63 @@
+{{!--
+  NetToolsKit Dockerfile template for API
+--}}
+#=====================================================================================================================================
+# Args
+ARG VERSION={{dotnetVersion}}
+
+#=====================================================================================================================================
+# Compile
+FROM mcr.microsoft.com/dotnet/sdk:$VERSION AS build
+WORKDIR /src
+
+# Args
+ARG LINUXARQ=linux-musl-x64
+ARG PROJECT_NAME="{{projectName}}.Api"
+
+# Copiar arquivos de configuração
+COPY /.build/ /config/.build/
+
+# Copiar arquivos de configuração da pasta eng
+COPY /eng/ /eng/
+
+COPY Directory.Build.props /
+COPY Directory.Build.targets /
+COPY Nuget.config /config/Nuget.config
+
+# Copiar o código-fonte da aplicação
+COPY /src/  /src/
+COPY /${PROJECT_NAME} /src/${PROJECT_NAME}
+
+# Restore
+WORKDIR "/src/${PROJECT_NAME}"
+RUN dotnet restore --runtime ${LINUXARQ} --configfile "/config/Nuget.config" "${PROJECT_NAME}.csproj"
+
+# Build
+RUN dotnet build "${PROJECT_NAME}.csproj" -c Release -o /app/build
+
+#=====================================================================================================================================
+# Publish
+FROM build AS publish
+RUN dotnet publish "${PROJECT_NAME}.csproj" -c Release -r ${LINUXARQ} -o /app/publish --self-contained false
+
+#=====================================================================================================================================
+# Image base
+FROM mcr.microsoft.com/dotnet/aspnet:$VERSION AS base
+ADD https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb /
+
+# Definir ambiente e instalar dependências
+ARG DOCKER_TAG
+ENV APP_VERSION=$DOCKER_TAG
+RUN dpkg -i packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y aspnetcore-runtime-$VERSION \
+    && rm packages-microsoft-prod.deb
+
+WORKDIR /app
+EXPOSE 80
+EXPOSE 443
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "{{projectName}}.Api.dll"]

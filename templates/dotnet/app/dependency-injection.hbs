@@ -1,0 +1,26 @@
+{{!--
+  NetToolsKit Application Dependency Injection template
+--}}
+using FluentValidation;
+using Microsoft.Extensions.DependencyInjection;
+using NetToolsKit.Extensions.MediatR.Behavior;
+using NetToolsKit.Mediator;
+using System.Reflection;
+
+namespace {{namespaceRoot}}.Application.DependencyInjections;
+
+public static class ServiceCollectionExtensions
+{
+    #region Public Methods/Operators
+    public static IServiceCollection Add{{projectName}}Application(this IServiceCollection services)
+    {
+        // Mediator
+        services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly()));
+
+        // Validation
+        return services
+            .AddValidatorsFromAssembly(Assembly.GetExecutingAssembly())
+            .AddTransient(typeof(IPipelineBehavior<,>), typeof(FluentValidationPipelineBehavior<,>));
+    }
+    #endregion
+}

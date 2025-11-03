@@ -1,0 +1,79 @@
+namespace {{namespace}}.Api.Security;
+
+/// <summary>
+/// Manages authentication tokens and user validation
+/// </summary>
+public static class AuthTokenManager
+{
+    #region Variables
+
+    private static readonly Dictionary<string, string> _refreshTokenStore = new();
+
+    private static readonly List<UserInfo> _users = new()
+    {
+        new("admin@example.com", "admin123", ["read", "write", "admin"]),
+        new("user@example.com", "user123", ["read"])
+    };
+
+    #endregion
+
+    #region Records
+
+    /// <summary>
+    /// Represents user information
+    /// </summary>
+    /// <param name="Name">User name/email</param>
+    /// <param name="Password">User password</param>
+    /// <param name="Roles">User roles</param>
+    public record UserInfo(string Name, string Password, string[] Roles);
+
+    #endregion
+
+    #region Public Methods/Operators
+
+    /// <summary>
+    /// Validates user credentials
+    /// </summary>
+    /// <param name="username">The username</param>
+    /// <param name="password">The password</param>
+    /// <returns>UserInfo if valid, null otherwise</returns>
+    public static UserInfo? ValidateUser(string username, string password)
+    {
+        return _users.FirstOrDefault(u =>
+            u.Name.Equals(username, StringComparison.OrdinalIgnoreCase) &&
+            u.Password == password);
+    }
+
+    /// <summary>
+    /// Stores a refresh token for a user
+    /// </summary>
+    /// <param name="username">The username</param>
+    /// <param name="refreshToken">The refresh token</param>
+    public static void StoreRefreshToken(string username, string refreshToken)
+    {
+        _refreshTokenStore[username] = refreshToken;
+    }
+
+    /// <summary>
+    /// Validates a refresh token for a user
+    /// </summary>
+    /// <param name="username">The username</param>
+    /// <param name="refreshToken">The refresh token to validate</param>
+    /// <returns>True if valid, false otherwise</returns>
+    public static bool ValidateRefreshToken(string username, string refreshToken)
+    {
+        return _refreshTokenStore.TryGetValue(username, out var storedToken) &&
+               storedToken == refreshToken;
+    }
+
+    /// <summary>
+    /// Revokes a refresh token for a user
+    /// </summary>
+    /// <param name="username">The username</param>
+    public static void RevokeRefreshToken(string username)
+    {
+        _refreshTokenStore.Remove(username);
+    }
+
+    #endregion
+}

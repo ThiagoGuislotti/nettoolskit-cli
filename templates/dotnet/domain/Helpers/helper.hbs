@@ -1,0 +1,20 @@
+{{!--
+  NetToolsKit Helper/Utility template
+--}}
+namespace {{namespaceRoot}}.Domain.Helpers;
+
+public static class {{name}}
+{
+{{#if methods}}
+{{#each methods}}
+    public static {{returnType}} {{name}}({{#if parameters}}{{parameters}}{{/if}})
+    {
+        // TODO: Implement helper logic
+        throw new NotImplementedException();
+    }
+
+{{/each}}
+{{else}}
+    // TODO: Define helper methods
+{{/if}}
+}

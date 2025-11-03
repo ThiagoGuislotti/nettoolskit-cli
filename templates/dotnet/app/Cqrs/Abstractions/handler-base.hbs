@@ -1,0 +1,24 @@
+{{!--
+  NetToolsKit Handler Base template
+--}}
+using Microsoft.Extensions.Logging;
+using NetToolsKit.Core.Data;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Abstractions;
+
+public abstract class HandlerBase<T> where T : class
+{
+    #region Variables
+    protected readonly ILogger<T> _logger;
+    protected readonly IUnitOfWork _unitOfWork;
+    #endregion
+
+    #region Constructors
+    protected HandlerBase(ILoggerFactory loggerFactory, IUnitOfWork unitOfWork)
+    {
+        var logger = loggerFactory?.CreateLogger<T>() ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    }
+    #endregion
+}

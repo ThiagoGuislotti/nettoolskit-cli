@@ -1,0 +1,172 @@
+{{!--
+  NetToolsKit Program.cs for API template
+--}}
+using NetToolsKit.AspNetCore.Helpers;
+using NetToolsKit.Module.Authentication.DependencyInjections;
+using NetToolsKit.Module.Authentication.Models;
+using NetToolsKit.Observability;
+using NetToolsKit.Observability.Settings;
+using {{namespaceRoot}}.Application.DependencyInjections;
+using {{namespaceRoot}}.Infrastructure.DependencyInjections;
+using Scalar.AspNetCore;
+using System.Reflection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+#region Configuração Inicial do Builder
+// Carrega configurações globais do NetToolsKit
+var configuration = new ConfigurationBuilder()
+    .AddNetToolsKitConfiguration();
+
+// Adiciona configuração de ambiente
+builder.Configuration.AddConfiguration(configuration);
+#endregion
+
+#region Configuração de Observabilidade (Tracing, Logs, Métricas)
+// Interceptação automática de métodos para rastreamento (Tracing)
+builder.AddNetToolsKitMethodTracingInterceptor(
+    includeNamespaces: ["*Masstransit*", "*FluentValidation*", "*NetToolsKit*"],
+    excludeNamespaces: ["*Swagger*", "*Swashbuckle*"]);
+
+// Configuração de OTLP (OpenTelemetry) para rastreamento e logs
+var otlpSettings = new OtlpSettings(builder.Environment.ApplicationName)
+{
+    Endpoint = configuration.GetConnectionString("Otlp") ?? throw new NullReferenceException("Otlp"),
+    Attributes = new Dictionary<string, object>
+    {
+        ["deployment.environment"] = builder.Environment.EnvironmentName.ToLowerInvariant(),
+    },
+    MeterNames = [
+        "Microsoft.AspNetCore.Hosting",
+        "Microsoft.AspNetCore.Server.Kestrel",
+        "Microsoft.AspNetCore.Http.Connections",
+        "Microsoft.AspNetCore.Routing",
+        "Microsoft.AspNetCore.Diagnostics",
+        "Microsoft.AspNetCore.RateLimiting"
+    ],
+    TracingSourceNames = ["NetToolsKit*", "Masstransit"]
+};
+
+// Integra Serilog e Observabilidade via NetToolsKit
+builder.AddNetToolsKitSerilogOtlp((context, service, logger) => logger.AddNetToolsKitSerilogOtlp(otlpSettings));
+builder.Services.AddNetToolsKitObservabilityOtlp(otlpSettings);
+#endregion
+
+#region Configuração de Serviços ASP.NET Core
+// Serviços auxiliares e extensões NetToolsKit
+builder.AddNetToolsKitRateLimiterCacheService();
+
+builder.Services
+    .AddNetToolsKitApplicationModelProvider()
+    .AddNetToolsKitCommonInfraServices()
+    .AddNetToolsKitTransactionData()
+    .AddNetToolsKitLoggerFlags(_ => new LoggerFlags { RequestFlag = true, ResponseFlag = true });
+
+// Documentação OpenAPI (Swagger + Scalar)
+builder.Services
+    .AddSwaggerGenNewtonsoftSupport()
+    .AddNetToolsKitSwaggerGen(
+        documentInfo: new("{{projectName}}", Assembly.GetExecutingAssembly().GetName().Name, "v1.0.0"),
+        entryAssembly: Assembly.GetEntryAssembly(),
+        setupAction: options => options
+            .AddNetToolsKitApiKeyAuthentication()
+            .AddNetToolsKitBearerAuthentication());
+
+// Extensões para Controllers
+builder.Services
+    .AddEndpointsApiExplorer()
+    .AddNetToolsKitControllersHeaderValidation()
+    .AddNetToolsKitNewtonsoftJson();
+
+// CORS - Política permitindo tudo
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", builder =>
+    {
+        builder.AllowAnyOrigin()
+               .AllowAnyMethod()
+               .AllowAnyHeader();
+    });
+});
+
+// HttpContextAccessor para acesso a informações do Request
+builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+// Configurações extras OpenAPI
+builder.Services.AddNetToolsKitOpenApi();
+#endregion
+
+#region Configuração dos Serviços do Projeto
+// Injeção de dependências da Aplicação e Infraestrutura
+builder.Services.Add{{projectName}}Application()
+    .Add{{projectName}}Infrastructure(configuration);
+#endregion
+
+#region Configuração de Autenticação e Autorização
+// Configuração de autenticação JWT
+builder.Services
+    .AddNetToolsKitMemoryCacheService()
+    .AddNetToolsKitJwtAuthentication(configuration.GetOptions<JwtTokenConfig>(nameof(JwtTokenConfig)));
+
+// Configuração de políticas de autorização
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("read", policy => policy.RequireRole("admin", "read"))
+    .AddPolicy("admin", policy => policy.RequireRole("admin"));
+#endregion
+
+var app = builder.Build();
+
+#region Configuração de Documentação
+// Habilita UIs de documentação
+app.MapOpenApi();
+app.MapScalarApiReference();
+app.AddNetToolsKitSwagger();
+#endregion
+
+#region Configuração de Middlewares NetToolsKit
+// Middlewares de segurança, rastreamento, correlação e exceções
+app.UseNetToolsKitAdminSafeListMiddleware()
+    .UseWhen(
+        static context =>
+            !context.Request.Path.StartsWithSegments("/openapi", StringComparison.OrdinalIgnoreCase) &&
+            !context.Request.Path.StartsWithSegments("/scalar", StringComparison.OrdinalIgnoreCase) &&
+            !context.Request.Path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase),
+        static builderApp => builderApp.UseNetToolsKitLoggerMiddleware())
+    .UseNetToolsKitCorrelationIdMiddleware()
+    .UseNetToolsKitExceptionMiddleware();
+#endregion
+
+#region Configuração do Pipeline ASP.NET
+// Configura HTTPS, autorização, CORS e mapeamento de controllers
+app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+app.UseCors("AllowAll");
+#endregion
+
+#region Configuração Autenticação JWT
+app.ConfigureNetToolsKitJwtAuthentication();
+#endregion
+
+#region Configuração health check
+app.MapHealthChecks("/health");
+#endregion
+
+#region Ciclo de Vida da Aplicação
+// Logs para eventos de ciclo de vida: Inicialização, Parada e Interrupção
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStarted.Register(() => app.Logger.LogInformation("[Start:WebApi]-[{Environment}] - [{Application}]", app.Environment.EnvironmentName, AppDomain.CurrentDomain.FriendlyName));
+lifetime.ApplicationStopping.Register(() => app.Logger.LogInformation("[Stopping:WebApi]-[{Environment}] - [{Application}]", app.Environment.EnvironmentName, AppDomain.CurrentDomain.FriendlyName));
+lifetime.ApplicationStopped.Register(() => app.Logger.LogInformation("[Stopped:WebApi]-[{Environment}] - [{Application}]", app.Environment.EnvironmentName, AppDomain.CurrentDomain.FriendlyName));
+#endregion
+
+try
+{
+    await app.RunAsync().ConfigureAwait(false);
+}
+catch (Exception ex)
+{
+    app.Logger.LogCritical("[Error: WebApi]-[{Environment}] - [{Application}] Erro: {Error}", app.Environment.EnvironmentName, AppDomain.CurrentDomain.FriendlyName, ex.Message);
+    throw;
+}

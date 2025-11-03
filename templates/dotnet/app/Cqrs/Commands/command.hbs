@@ -1,0 +1,23 @@
+{{!--
+  NetToolsKit CQRS Command template
+--}}
+using NetToolsKit.Mediator.Abstractions.Commands;
+using Newtonsoft.Json;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Commands;
+
+public sealed record {{name}}Command : ICommand
+{
+    #region Public Properties
+    [JsonProperty("id")]
+    public required string Id { get; init; }
+
+{{#if properties}}
+{{#each properties}}
+    [JsonProperty("{{jsonName}}")]
+    public required {{type}} {{name}} { get; init; }
+
+{{/each}}
+{{/if}}
+    #endregion
+}

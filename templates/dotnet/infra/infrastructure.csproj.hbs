@@ -1,0 +1,25 @@
+{{!--
+  NetToolsKit Infrastructure Project (.csproj) template
+--}}
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<Authors>{{author}}</Authors>
+		<IsPackable>false</IsPackable>
+		<TargetFramework>{{targetFramework}}</TargetFramework>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="{{efCoreVersion}}">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+			<TreatAsUsed>true</TreatAsUsed>
+		</PackageReference>
+		<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="{{npgsqlVersion}}" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\{{projectName}}.Application\{{projectName}}.Application.csproj" />
+	</ItemGroup>
+
+</Project>

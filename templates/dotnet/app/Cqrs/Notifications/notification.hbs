@@ -1,0 +1,19 @@
+{{!--
+  NetToolsKit Notification template
+--}}
+using NetToolsKit.Mediator.Abstractions.Notifications;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Notifications;
+
+public sealed record {{name}}Notification : INotification
+{
+    #region Public Properties
+    public required string TransactionId { get; init; }
+
+{{#if properties}}
+{{#each properties}}
+    public required {{type}} {{name}} { get; init; }
+{{/each}}
+{{/if}}
+    #endregion
+}

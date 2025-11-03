@@ -1,0 +1,31 @@
+{{!--
+  NetToolsKit Event Handler template
+--}}
+using Microsoft.Extensions.Logging;
+using NetToolsKit.Core.Data;
+using NetToolsKit.Mediator.Abstractions.Events;
+using {{namespaceRoot}}.Application.Cqrs.Abstractions;
+using {{namespaceRoot}}.Application.Cqrs.Events;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Events.Handles;
+
+public sealed class {{name}}EventHandler : HandlerBase<{{name}}EventHandler>,
+    IEventHandler<{{name}}Event>
+{
+    #region Constructors
+    public {{name}}EventHandler(ILoggerFactory loggerFactory, IUnitOfWork unitOfWork)
+        : base(loggerFactory, unitOfWork)
+    {
+    }
+    #endregion
+
+    #region Public Methods/Operators
+    public async Task Handle({{name}}Event @event, CancellationToken cancellationToken)
+    {
+        // TODO: Implement event handling logic
+        _logger.LogInformation("Handling {{name}}Event: {@Event}", @event);
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+    #endregion
+}

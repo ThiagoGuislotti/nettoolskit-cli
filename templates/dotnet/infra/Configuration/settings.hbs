@@ -1,0 +1,15 @@
+{{!--
+  NetToolsKit Configuration Settings template
+--}}
+namespace {{namespaceRoot}}.Infrastructure.Configuration;
+
+public sealed record {{name}}Settings
+{
+{{#if properties}}
+{{#each properties}}
+    public required {{type}} {{name}} { get; init; }
+{{/each}}
+{{else}}
+    // TODO: Define configuration properties
+{{/if}}
+}

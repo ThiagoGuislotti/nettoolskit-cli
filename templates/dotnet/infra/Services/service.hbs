@@ -1,0 +1,40 @@
+{{!--
+  NetToolsKit Service Implementation template
+--}}
+using Microsoft.Extensions.Logging;
+using {{namespaceRoot}}.Application.Services;
+
+namespace {{namespaceRoot}}.Infrastructure.Services;
+
+public sealed class {{name}}Service : I{{name}}Service
+{
+    #region Variables
+    private readonly ILogger<{{name}}Service> _logger;
+    #endregion
+
+    #region Constructors
+    public {{name}}Service(ILogger<{{name}}Service> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    #endregion
+
+    #region Public Methods/Operators
+{{#if methods}}
+{{#each methods}}
+    public async Task{{#if returnType}}<{{returnType}}>{{/if}} {{name}}Async({{#if parameters}}{{parameters}}, {{/if}}CancellationToken cancellationToken = default)
+    {
+        // TODO: Implement service logic
+        {{#if returnType}}
+        throw new NotImplementedException();
+        {{else}}
+        await Task.CompletedTask.ConfigureAwait(false);
+        {{/if}}
+    }
+
+{{/each}}
+{{else}}
+    // TODO: Implement service methods
+{{/if}}
+    #endregion
+}

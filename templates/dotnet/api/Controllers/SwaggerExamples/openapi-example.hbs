@@ -1,0 +1,42 @@
+using NetToolsKit.OpenApi.Examples;
+using NetToolsKit.Swagger.Examples;
+using {{namespace}}.Application.Cqrs.Commands;
+using {{namespace}}.Domain.Enums;
+
+namespace {{namespace}}.Api.Controllers.SwaggerExamples;
+
+/// <summary>
+/// Provides OpenAPI/Swagger examples for {{entityName}} commands
+/// </summary>
+public sealed class {{commandName}}Example : OpenApiSwaggerExampleProvider<{{commandName}}>
+{
+    #region Public Methods/Operators
+
+    /// <summary>
+    /// Gets example instances of {{commandName}}
+    /// </summary>
+    public override IEnumerable<OpenApiExample<{{commandName}}>> GetExamples()
+    {
+        yield return OpenApiExample<{{commandName}}>.Create(
+            "Valid Example",
+            new {{commandName}}
+            {
+                {{#each properties}}
+                {{name}} = {{exampleValue}},
+                {{/each}}
+            });
+
+        {{#if hasAlternativeExample}}
+        yield return OpenApiExample<{{commandName}}>.Create(
+            "Alternative Example",
+            new {{commandName}}
+            {
+                {{#each alternativeProperties}}
+                {{name}} = {{exampleValue}},
+                {{/each}}
+            });
+        {{/if}}
+    }
+
+    #endregion
+}
