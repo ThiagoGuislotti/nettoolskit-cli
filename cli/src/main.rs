@@ -1,6 +1,6 @@
 use clap::Parser;
 use nettoolskit_cli::interactive_mode;
-use nettoolskit_commands::{Commands, GlobalArgs, ExitStatus};
+use nettoolskit_commands::{Commands, ExitStatus, GlobalArgs};
 use nettoolskit_otel::init_tracing;
 
 /// NetToolsKit CLI

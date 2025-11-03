@@ -1,9 +1,27 @@
+//! NetToolsKit CLI application entry point and orchestration
+//!
+//! This crate coordinates the main CLI application logic, including:
+//! - Interactive command input and execution
+//! - Terminal event handling and rendering
+//! - Integration between UI, commands, and telemetry layers
+//!
+//! # Features
+//!
+//! - **modern-tui**: Enable modern ratatui-based terminal interface
+//!
+//! # Architecture
+//!
+//! The CLI follows a layered architecture:
+//! - Input layer: Handles user input and command palette
+//! - Execution layer: Async command processing with progress tracking
+//! - Rendering layer: Terminal output and layout management
+
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use owo_colors::OwoColorize;
 use std::io;
 
-pub mod input;
 pub mod async_executor;
+pub mod input;
 
 use input::{read_line_with_palette, InputResult};
 use nettoolskit_async_utils::with_timeout;
@@ -15,9 +33,6 @@ use nettoolskit_ui::{
     print_logo, CommandPalette, TerminalLayout, PRIMARY_COLOR,
 };
 use tracing::{error, info, warn};
-
-#[cfg(feature = "modern-tui")]
-use nettoolskit_ui::modern::{handle_events, EventResult, Tui, EventStream, handle_events_stream};
 
 struct RawModeGuard {
     active: bool,
@@ -141,209 +156,11 @@ async fn run_interactive_loop() -> io::Result<ExitStatus> {
     let mut input_buffer = String::new();
     let mut palette = CommandPalette::new();
 
-    #[cfg(feature = "modern-tui")]
-    {
-        if std::env::var("NTK_USE_MODERN_TUI").is_ok() {
-            info!("Using modern TUI with 16ms event polling");
-            return run_modern_loop(&mut input_buffer, &mut palette).await;
-        }
-    }
-
-    info!("Using legacy TUI with 50ms event polling");
-    run_legacy_loop(&mut input_buffer, &mut palette).await
+    info!("Starting interactive loop");
+    run_input_loop(&mut input_buffer, &mut palette).await
 }
 
-/// Check if a command should use async execution
-#[cfg(feature = "modern-tui")]
-fn is_async_command(cmd: &str) -> bool {
-    std::env::var("NTK_USE_ASYNC_EXECUTOR").is_ok()
-        && (cmd.starts_with("/check-async") || cmd.starts_with("/list-async"))
-}
-
-#[cfg(feature = "modern-tui")]
-async fn run_modern_loop(
-    input_buffer: &mut String,
-    palette: &mut CommandPalette,
-) -> io::Result<ExitStatus> {
-    // Check if event stream mode is enabled (Phase 1.3)
-    let use_event_stream = std::env::var("NTK_USE_EVENT_STREAM").is_ok();
-
-    if use_event_stream {
-        info!("Using event stream (Phase 1.3 - zero CPU idle)");
-        run_modern_loop_with_stream(input_buffer, palette).await
-    } else {
-        info!("Using event polling (Phase 1.2 - 16ms polling)");
-        run_modern_loop_with_polling(input_buffer, palette).await
-    }
-}
-
-/// Modern loop with event stream (Phase 1.3) - zero CPU when idle
-#[cfg(feature = "modern-tui")]
-async fn run_modern_loop_with_stream(
-    input_buffer: &mut String,
-    palette: &mut CommandPalette,
-) -> io::Result<ExitStatus> {
-    use nettoolskit_commands::processor_async::process_async_command;
-
-    let mut tui = Tui::new()?;
-
-    // Print initial prompt before entering raw mode
-    print!("> ");
-    std::io::Write::flush(&mut std::io::stdout())?;
-
-    tui.enter()?;
-
-    let mut events = EventStream::new();
-
-    let exit_status = loop {
-        match handle_events_stream(input_buffer, palette, &mut events).await? {
-            EventResult::Command(cmd) => {
-                tui.exit()?;
-                if cmd == "/quit" {
-                    break ExitStatus::Success;
-                }
-
-                // Check if async execution is enabled and command supports it
-                let status = if is_async_command(&cmd) {
-                    // Use async executor with progress
-                    match process_async_command(&cmd).await {
-                        Ok(output) => {
-                            println!("\n{}", output);
-                            ExitStatus::Success
-                        }
-                        Err(e) => {
-                            eprintln!("\n{}: {}", "Error".red().bold(), e);
-                            ExitStatus::Error
-                        }
-                    }
-                } else {
-                    // Use standard synchronous execution
-                    process_command(&cmd).await.into()
-                };
-
-                if matches!(status, ExitStatus::Success) && cmd == "/quit" {
-                    break status;
-                }
-                if matches!(status, ExitStatus::Interrupted) {
-                    break status;
-                }
-
-                // Print new prompt BEFORE re-entering raw mode
-                print!("\n> ");
-                std::io::Write::flush(&mut std::io::stdout())?;
-                input_buffer.clear();
-
-                tui.enter()?;
-            }
-            EventResult::Text(text) => {
-                tui.exit()?;
-                process_text(&text);
-
-                // Print new prompt BEFORE re-entering raw mode
-                print!("\n> ");
-                std::io::Write::flush(&mut std::io::stdout())?;
-                input_buffer.clear();
-
-                tui.enter()?;
-            }
-            EventResult::Exit => {
-                tui.exit()?;
-                println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
-                break ExitStatus::Interrupted;
-            }
-            EventResult::Continue => {
-                // Keep looping
-            }
-        }
-    };
-
-    tui.exit()?;
-    Ok(exit_status)
-}
-
-/// Modern loop with polling (Phase 1.2) - 16ms polling
-#[cfg(feature = "modern-tui")]
-async fn run_modern_loop_with_polling(
-    input_buffer: &mut String,
-    palette: &mut CommandPalette,
-) -> io::Result<ExitStatus> {
-    use nettoolskit_commands::processor_async::process_async_command;
-
-    let mut tui = Tui::new()?;
-
-    // Print initial prompt before entering raw mode
-    print!("> ");
-    std::io::Write::flush(&mut std::io::stdout())?;
-
-    tui.enter()?;
-
-    let exit_status = loop {
-        match handle_events(input_buffer, palette).await? {
-            EventResult::Command(cmd) => {
-                tui.exit()?;
-                if cmd == "/quit" {
-                    break ExitStatus::Success;
-                }
-
-                // Check if async execution is enabled and command supports it
-                let status = if is_async_command(&cmd) {
-                    // Use async executor with progress
-                    match process_async_command(&cmd).await {
-                        Ok(output) => {
-                            println!("\n{}", output);
-                            ExitStatus::Success
-                        }
-                        Err(e) => {
-                            eprintln!("\n{}: {}", "Error".red().bold(), e);
-                            ExitStatus::Error
-                        }
-                    }
-                } else {
-                    // Use standard synchronous execution
-                    process_command(&cmd).await.into()
-                };
-
-                if matches!(status, ExitStatus::Success) && cmd == "/quit" {
-                    break status;
-                }
-                if matches!(status, ExitStatus::Interrupted) {
-                    break status;
-                }
-
-                // Print new prompt BEFORE re-entering raw mode
-                print!("\n> ");
-                std::io::Write::flush(&mut std::io::stdout())?;
-                input_buffer.clear();
-
-                tui.enter()?;
-            }
-            EventResult::Text(text) => {
-                tui.exit()?;
-                process_text(&text);
-
-                // Print new prompt BEFORE re-entering raw mode
-                print!("\n> ");
-                std::io::Write::flush(&mut std::io::stdout())?;
-                input_buffer.clear();
-
-                tui.enter()?;
-            }
-            EventResult::Exit => {
-                tui.exit()?;
-                println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
-                break ExitStatus::Interrupted;
-            }
-            EventResult::Continue => {
-                // Keep looping
-            }
-        }
-    };
-
-    tui.exit()?;
-    Ok(exit_status)
-}
-
-async fn run_legacy_loop(
+async fn run_input_loop(
     input_buffer: &mut String,
     palette: &mut CommandPalette,
 ) -> io::Result<ExitStatus> {
