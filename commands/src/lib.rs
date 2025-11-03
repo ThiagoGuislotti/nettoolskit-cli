@@ -1,4 +1,20 @@
+//! Command processing and execution for NetToolsKit CLI
+//!
+//! This crate provides the core command processing logic, including:
+//! - Command parsing and validation
+//! - Async command execution with progress tracking
+//! - Template rendering and application
+//! - Exit status handling
+//!
+//! # Architecture
+//!
+//! Commands follow a processor pattern where each command type has its own
+//! dedicated module. The `processor` module coordinates command execution,
+//! while `async_executor` handles long-running operations with progress feedback.
+
 use clap::Parser;
+
+mod error;
 
 pub mod apply;
 pub mod async_executor;
@@ -9,19 +25,25 @@ pub mod processor;
 pub mod processor_async;
 pub mod render;
 
+// Re-export error types
+pub use error::{CommandError, Result};
+
 // Re-export commonly used types
 pub use async_executor::{
     AsyncCommandExecutor, CommandHandle, CommandProgress, CommandResult, ProgressSender,
 };
 
-// Error type for the commands crate
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Result<T> = std::result::Result<T, Error>;
-
+/// Exit status codes for command execution.
+///
+/// Represents the outcome of a command execution, convertible to
+/// standard exit codes for shell integration.
 #[derive(Debug, Clone, Copy)]
 pub enum ExitStatus {
+    /// Command executed successfully (exit code 0)
     Success,
+    /// Command failed with an error (exit code 1)
     Error,
+    /// Command was interrupted by user (exit code 130 - SIGINT)
     Interrupted,
 }
 
@@ -45,6 +67,10 @@ impl From<ExitStatus> for i32 {
     }
 }
 
+/// Global arguments available across all commands.
+///
+/// These options can be specified with any command and control
+/// cross-cutting concerns like logging and configuration.
 #[derive(Debug, Clone, Parser)]
 pub struct GlobalArgs {
     /// Set logging level (off, error, warn, info, debug, trace)
@@ -60,6 +86,10 @@ pub struct GlobalArgs {
     pub verbose: bool,
 }
 
+/// Available CLI commands.
+///
+/// Each variant corresponds to a top-level command that can be
+/// executed from the CLI. Commands are parsed using clap's derive API.
 #[derive(Debug, Parser)]
 pub enum Commands {
     /// List available templates
@@ -119,7 +149,14 @@ pub async fn execute_command_with_timeout(
 use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter, EnumString, IntoStaticStr};
 
-/// Commands that can be invoked by starting a message with a leading slash.
+/// Slash commands for interactive command palette.
+///
+/// These commands can be invoked by typing a leading slash (/) in the
+/// interactive prompt. The enum order determines presentation order in the popup.
+///
+/// # Note
+///
+/// Do not alphabetically sort! Enum order is intentional for UX.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, EnumIter, AsRefStr, IntoStaticStr,
 )]

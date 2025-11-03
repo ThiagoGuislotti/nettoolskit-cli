@@ -29,6 +29,9 @@ strum_macros = { workspace = true }
 nettoolskit-otel = { path = "../otel" }
 tracing = { workspace = true }
 
+# Error handling
+thiserror = { workspace = true }
+
 [lib]
 name = "nettoolskit_commands"
 path = "src/lib.rs"

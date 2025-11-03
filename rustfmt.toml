@@ -1,0 +1,2 @@
+edition = "2021"
+# Match Codex rustfmt configuration for consistent code style

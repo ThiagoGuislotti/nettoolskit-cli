@@ -15,9 +15,9 @@ fn test_feature_detection() {
     let desc = features.description();
     assert!(!desc.is_empty());
 
-    // Default should be legacy UI (unless compiled with modern-tui feature)
+    // Default should be standard UI (unless compiled with modern-tui feature)
     if !cfg!(feature = "modern-tui") {
-        assert!(!features.use_modern_tui, "Legacy UI should be default");
+        assert!(!features.use_modern_tui, "Standard UI should be default");
     }
 }
 
@@ -41,7 +41,7 @@ fn test_feature_description_formatting() {
     };
 
     let desc = features.description();
-    assert_eq!(desc, "default (legacy UI)");
+    assert_eq!(desc, "default");
 
     let features = Features {
         use_modern_tui: true,

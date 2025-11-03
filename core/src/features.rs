@@ -13,7 +13,7 @@ use std::env;
 /// 3. Config file: `~/.config/nettoolskit/config.toml`
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Features {
-    /// Use modern Ratatui-based TUI instead of legacy printf-style UI
+    /// Use modern Ratatui-based TUI instead of standard printf-style UI
     pub use_modern_tui: bool,
 
     /// Use event-driven architecture instead of polling loop
@@ -38,7 +38,7 @@ impl Features {
     /// Priority order:
     /// 1. Environment variables (highest)
     /// 2. Compile-time features
-    /// 3. Default (legacy UI)
+    /// 3. Default (standard UI)
     pub fn detect() -> Self {
         let compile_time = Self::from_compile_time();
         let env_override = Self::from_env();
@@ -98,8 +98,6 @@ impl Features {
 
         if self.use_modern_tui {
             features.push("modern-tui");
-        } else {
-            features.push("legacy-ui");
         }
 
         if self.use_event_driven {
@@ -114,8 +112,8 @@ impl Features {
             features.push("persistent-sessions");
         }
 
-        if features.len() == 1 && features[0] == "legacy-ui" {
-            "default (legacy UI)".to_string()
+        if features.is_empty() {
+            "default".to_string()
         } else {
             features.join(", ")
         }
@@ -124,14 +122,21 @@ impl Features {
     /// Print feature status to stdout
     pub fn print_status(&self) {
         tracing::info!("NetToolsKit CLI Features:");
-        tracing::info!("  Modern TUI: {}", if self.use_modern_tui { "✅" } else { "❌" });
+        tracing::info!(
+            "  Modern TUI: {}",
+            if self.use_modern_tui { "✅" } else { "❌" }
+        );
         tracing::info!(
             "  Event-Driven: {}",
             if self.use_event_driven { "✅" } else { "❌" }
         );
         tracing::info!(
             "  Frame Scheduler: {}",
-            if self.use_frame_scheduler { "✅" } else { "❌" }
+            if self.use_frame_scheduler {
+                "✅"
+            } else {
+                "❌"
+            }
         );
         tracing::info!(
             "  Persistent Sessions: {}",
@@ -161,7 +166,7 @@ mod tests {
     #[test]
     fn test_default_features() {
         let features = Features::default();
-        // Should default to legacy UI
+        // Should default to standard UI
         assert!(!features.use_modern_tui || cfg!(feature = "modern-tui"));
     }
 
@@ -189,7 +194,7 @@ mod tests {
             use_frame_scheduler: false,
             use_persistent_sessions: false,
         };
-        assert_eq!(features.description(), "default (legacy UI)");
+        assert_eq!(features.description(), "default");
 
         let features = Features {
             use_modern_tui: true,

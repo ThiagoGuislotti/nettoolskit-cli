@@ -1,4 +1,4 @@
-use crate::legacy::display::{GRAY_COLOR, PRIMARY_COLOR};
+use crate::ui::display::{GRAY_COLOR, PRIMARY_COLOR};
 use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
 use crossterm::terminal::ClearType;
 use crossterm::{cursor, queue, terminal};
