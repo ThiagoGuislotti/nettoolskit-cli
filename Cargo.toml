@@ -75,9 +75,10 @@ cargo = "warn"
 [workspace.metadata.features]
 description = """
 Feature flags control opt-in TUI improvements:
-- legacy-ui: Current UI (default, stable)
 - modern-tui: New Ratatui-based TUI (experimental)
 - event-driven: Event loop architecture (requires modern-tui)
 - frame-scheduler: Frame coalescing optimization (requires modern-tui)
 - persistent-sessions: Save/load sessions (experimental)
+
+Default: Standard UI (stable)
 """

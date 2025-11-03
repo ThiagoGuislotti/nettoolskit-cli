@@ -6,8 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [features]
-default = ["nettoolskit-core/legacy-ui"]
-legacy-ui = ["nettoolskit-core/legacy-ui"]
+default = []
 modern-tui = ["nettoolskit-core/modern-tui"]
 event-driven = ["nettoolskit-core/event-driven"]
 frame-scheduler = ["nettoolskit-core/frame-scheduler"]
