@@ -1,0 +1,186 @@
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using NetToolsKit.Mediator;
+using NetToolsKit.Observability.Loggers.Extensions;
+using NUnit.Framework;
+using {{namespace}}.Application.Cqrs.Commands;
+using {{namespace}}.Application.Cqrs.Querys;
+using {{namespace}}.IntegrationTests.Assets;
+
+namespace {{namespace}}.IntegrationTests.Tests.Commands;
+
+/// <summary>
+/// Integration tests for {{entityName}} command handlers
+/// </summary>
+[TestFixture]
+[RequiresThread]
+[SetCulture("pt-BR")]
+[Category("Commands")]
+public class {{entityName}}HandlerTest
+{
+    #region Variables
+
+    private ConfigureServices _configureServices;
+    private IMediator _mediator;
+
+    #endregion
+
+    #region SetUp Methods
+
+    /// <summary>
+    /// Sets up test dependencies before each test
+    /// </summary>
+    [SetUp]
+    public void SetUp()
+    {
+        _configureServices = new ConfigureServices();
+        _mediator = _configureServices.ServiceProvider.GetRequiredService<IMediator>();
+    }
+
+    #endregion
+
+    #region Test Methods
+
+    /// <summary>
+    /// Tests that Create{{entityName}} command returns success
+    /// </summary>
+    [Test]
+    [Order(1)]
+    public async Task Create_{{entityName}}_ReturnTrue()
+    {
+        // Arrange
+        var command = new Create{{entityName}}Command
+        {
+            {{#each createProperties}}
+            {{name}} = {{testValue}},
+            {{/each}}
+        };
+
+        // Act
+        var result = await _mediator.Send(command).ConfigureAwait(false);
+        ConsoleLogger.WriteLine(result);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    {{#if hasUpdate}}
+    /// <summary>
+    /// Tests that Update{{entityName}} command returns success
+    /// </summary>
+    [Test]
+    [Order(2)]
+    public async Task Update_{{entityName}}_ReturnTrue()
+    {
+        // Arrange
+        var command = new Update{{entityName}}Command
+        {
+            {{#each updateProperties}}
+            {{name}} = {{testValue}},
+            {{/each}}
+        };
+
+        // Act
+        var result = await _mediator.Send(command).ConfigureAwait(false);
+        ConsoleLogger.WriteLine(result);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+    }
+    {{/if}}
+
+    /// <summary>
+    /// Tests that GetById{{entityName}} query returns success
+    /// </summary>
+    [Test]
+    [Order({{getByIdOrder}})]
+    public async Task GetById_{{entityName}}_ReturnTrue()
+    {
+        // Arrange
+        var query = new {{entityName}}Query
+        {
+            {{#each queryProperties}}
+            {{name}} = {{testValue}},
+            {{/each}}
+        };
+
+        // Act
+        var result = await _mediator.Send(query).ConfigureAwait(false);
+        ConsoleLogger.WriteLine(result);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Tests that GetAll{{entityName}}s query returns success
+    /// </summary>
+    [Test]
+    [Order({{getAllOrder}})]
+    public async Task GetAll_{{entityName}}s_ReturnTrue()
+    {
+        // Arrange
+        var query = new {{entityName}}Query();
+
+        // Act
+        var result = await _mediator.Send(query).ConfigureAwait(false);
+        ConsoleLogger.WriteLine(result);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNull();
+    }
+
+    {{#if hasDelete}}
+    /// <summary>
+    /// Tests that Delete{{entityName}} command returns success
+    /// </summary>
+    [Test]
+    [Order({{deleteOrder}})]
+    public async Task Delete_{{entityName}}_ReturnTrue()
+    {
+        // Arrange
+        var command = new Delete{{entityName}}Command
+        {
+            {{#each deleteProperties}}
+            {{name}} = {{testValue}},
+            {{/each}}
+        };
+
+        // Act
+        var result = await _mediator.Send(command).ConfigureAwait(false);
+        ConsoleLogger.WriteLine(result);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+    }
+    {{/if}}
+
+    {{#each customTests}}
+    /// <summary>
+    /// {{description}}
+    /// </summary>
+    [Test]
+    [Order({{order}})]
+    public async Task {{testName}}()
+    {
+        // Arrange
+        {{#each arrangeStatements}}
+        {{this}}
+        {{/each}}
+
+        // Act
+        {{#each actStatements}}
+        {{this}}
+        {{/each}}
+
+        // Assert
+        {{#each assertStatements}}
+        {{this}}
+        {{/each}}
+    }
+
+    {{/each}}
+    #endregion
+}

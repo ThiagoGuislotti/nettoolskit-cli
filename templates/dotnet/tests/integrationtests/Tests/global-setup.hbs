@@ -1,0 +1,144 @@
+using Ductus.FluentDocker.Builders;
+using Ductus.FluentDocker.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using NUnit.Framework;
+using {{namespace}}.Infrastructure.Context;
+using {{namespace}}.IntegrationTests.Assets;
+
+namespace {{namespace}}.IntegrationTests.Tests;
+
+/// <summary>
+/// Global setup for integration tests - initializes Docker containers and database
+/// </summary>
+[SetUpFixture]
+public class GlobalSetup
+{
+    #region Variables
+
+    private ICompositeService? _compositeService;
+
+    #endregion
+
+    #region OneTimeSetUp Methods
+
+    /// <summary>
+    /// Runs before any tests - starts Docker containers and initializes database
+    /// </summary>
+    [OneTimeSetUp]
+    public async Task RunBeforeAnyTestsAsync()
+    {
+        try
+        {
+            var currentDirectory = Path.GetFullPath(Path.Combine(
+                Directory.GetCurrentDirectory(),
+                "..", "..", "..", "..",
+                "{{dockerPath}}"));
+
+            var serviceName = "{{serviceName}}";
+
+            var builder = new Builder()
+                .UseContainer()
+                .UseCompose()
+                .ServiceName(serviceName);
+
+            {{#if hasPostgres}}
+            builder.FromFile(Path.Combine(currentDirectory, "services/databases/docker-compose-postgres.yaml"));
+            {{/if}}
+            {{#if hasRabbitMq}}
+            builder.FromFile(Path.Combine(currentDirectory, "services/messaging/docker-compose-rabbitmq.yaml"));
+            {{/if}}
+            {{#if hasMinio}}
+            builder.FromFile(Path.Combine(currentDirectory, "services/storage/docker-compose-minio.yaml"));
+            {{/if}}
+            {{#if hasRedis}}
+            builder.FromFile(Path.Combine(currentDirectory, "services/cache/docker-compose-redis.yaml"));
+            {{/if}}
+
+            builder.WithResolvedEnvironment(Path.Combine(currentDirectory, ".env"));
+
+            var healthCheckServices = new List<string>();
+            {{#if hasPostgres}}
+            healthCheckServices.Add($"postgres-{serviceName}");
+            {{/if}}
+            {{#if hasRabbitMq}}
+            healthCheckServices.Add($"rabbitmq-{serviceName}");
+            {{/if}}
+            {{#if hasMinio}}
+            healthCheckServices.Add($"minio-{serviceName}");
+            {{/if}}
+            {{#if hasRedis}}
+            healthCheckServices.Add($"redis-{serviceName}");
+            {{/if}}
+
+            builder.WithHealthCheck([.. healthCheckServices], 30000);
+
+            _compositeService = builder
+                .RemoveOrphans()
+                .Build()
+                .Start();
+
+            using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var cancellationToken = cancellationTokenSource.Token;
+
+            // Wait for services to be ready
+            var dbTask = WaitForDbContextAsync(cancellationToken);
+
+            var completedDbTask = await Task.WhenAny(dbTask, Task.Delay(Timeout.Infinite, cancellationToken))
+                .ConfigureAwait(false);
+
+            if (completedDbTask != dbTask)
+                Assert.Ignore("Test ignored due to failure connecting to services.");
+
+            await Task.WhenAll(dbTask);
+        }
+        catch (Exception ex)
+        {
+            Assert.Ignore($"Error configuring docker-compose: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Runs after all tests - disposes Docker containers
+    /// </summary>
+    [OneTimeTearDown]
+    public void RunAfterAllTests()
+    {
+        _compositeService?.Dispose();
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    /// <summary>
+    /// Waits for database context to be ready
+    /// </summary>
+    private static async Task WaitForDbContextAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var configureServices = new ConfigureServices();
+
+                using var scope = configureServices.ServiceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                await dbContext.Database.EnsureDeletedAsync(cancellationToken).ConfigureAwait(false);
+                await dbContext.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+
+                if (await dbContext.Database.CanConnectAsync(cancellationToken))
+                    return;
+            }
+            catch
+            {
+                // Ignore and retry
+            }
+
+            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    #endregion
+}
