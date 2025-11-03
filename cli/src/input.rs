@@ -3,6 +3,8 @@ use nettoolskit_async_utils::with_timeout;
 use nettoolskit_ui::{append_footer_log, handle_resize, render_prompt_with_command, CommandPalette};
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum InputResult {
@@ -14,8 +16,14 @@ pub enum InputResult {
 pub async fn read_line_with_palette(
     buffer: &mut String,
     palette: &mut CommandPalette,
+    interrupted: &Arc<AtomicBool>,
 ) -> io::Result<InputResult> {
     loop {
+        // Check if interrupted before polling
+        if interrupted.load(Ordering::SeqCst) {
+            return Ok(InputResult::Exit);
+        }
+
         // Use async-utils timeout for consistent timeout handling
         let poll_timeout = std::time::Duration::from_millis(50);
 
@@ -28,7 +36,7 @@ pub async fn read_line_with_palette(
         .await
         {
             Ok(Ok(event)) => match event {
-                Event::Key(key_event) => match handle_key_event(key_event, buffer, palette)? {
+                Event::Key(key_event) => match handle_key_event(key_event, buffer, palette, interrupted)? {
                     Some(result) => return Ok(result),
                     None => continue,
                 },
@@ -56,6 +64,7 @@ fn handle_key_event(
     key: KeyEvent,
     buffer: &mut String,
     palette: &mut CommandPalette,
+    interrupted: &Arc<AtomicBool>,
 ) -> io::Result<Option<InputResult>> {
     if key.kind != KeyEventKind::Press {
         return Ok(None);
@@ -63,6 +72,8 @@ fn handle_key_event(
 
     match key.code {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Set the interrupted flag and return Exit
+            interrupted.store(true, Ordering::SeqCst);
             return Ok(Some(InputResult::Exit));
         }
         KeyCode::Char(c) => {

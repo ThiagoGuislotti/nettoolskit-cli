@@ -210,7 +210,20 @@ impl TerminalLayoutInner {
     }
 
     fn reset_scroll_region(&self) -> io::Result<()> {
-        reset_scroll_region_full()
+        // Move cursor to bottom before resetting scroll region
+        // This prevents cursor from jumping to top when scroll region is reset
+        let (_, height) = terminal::size()?;
+        let mut stdout = io::stdout();
+
+        // Move cursor to last line of terminal
+        execute!(stdout, cursor::MoveTo(0, height.saturating_sub(1)))?;
+
+        // Now reset scroll region
+        reset_scroll_region_full()?;
+
+        // Ensure cursor stays at bottom
+        execute!(stdout, cursor::MoveTo(0, height.saturating_sub(1)))?;
+        stdout.flush()
     }
 
     fn ensure_scroll_region(&self) -> io::Result<()> {

@@ -19,6 +19,8 @@
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use owo_colors::OwoColorize;
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub mod async_executor;
 pub mod input;
@@ -165,11 +167,12 @@ async fn run_input_loop(
     palette: &mut CommandPalette,
 ) -> io::Result<ExitStatus> {
     let mut raw_mode = RawModeGuard::new()?;
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_fallback = interrupted.clone();
 
+    // Fallback handler for Ctrl+C when raw mode is not active
     ctrlc::set_handler(move || {
-        disable_raw_mode().unwrap_or(());
-        println!("\n⚠️  {}", "Interrupted".yellow());
-        std::process::exit(130);
+        interrupted_fallback.store(true, Ordering::SeqCst);
     })
     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
@@ -178,7 +181,7 @@ async fn run_input_loop(
         render_prompt()?;
         input_buffer.clear();
 
-        match read_line_with_palette(input_buffer, palette).await? {
+        match read_line_with_palette(input_buffer, palette, &interrupted).await? {
             InputResult::Command(cmd) => {
                 raw_mode.disable()?;
                 if cmd == "/quit" {
@@ -205,8 +208,13 @@ async fn run_input_loop(
             }
             InputResult::Exit => {
                 raw_mode.disable()?;
-                println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
-                return Ok(ExitStatus::Interrupted);
+                // Check if this was triggered by Ctrl+C
+                if interrupted.load(Ordering::SeqCst) {
+                    println!("\n⚠️  {}", "Interrupted".yellow());
+                } else {
+                    println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
+                }
+                return Ok(ExitStatus::Success);
             }
         }
 
