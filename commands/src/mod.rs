@@ -25,20 +25,8 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
-#[derive(Debug, Parser)]
-pub struct GlobalArgs {
-    /// Set logging level (off, error, warn, info, debug, trace)
-    #[clap(long, global = true, default_value = "info")]
-    pub log_level: String,
-
-    /// Path to configuration file
-    #[clap(long, global = true)]
-    pub config: Option<String>,
-
-    /// Enable verbose output
-    #[clap(short, long, global = true)]
-    pub verbose: bool,
-}
+// Re-export GlobalArgs from lib.rs to avoid duplication
+pub use crate::GlobalArgs;
 
 #[derive(Debug, Parser)]
 pub enum Commands {
