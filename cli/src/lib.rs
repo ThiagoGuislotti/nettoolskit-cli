@@ -7,7 +7,8 @@ pub mod async_executor;
 
 use input::{read_line_with_palette, InputResult};
 use nettoolskit_async_utils::with_timeout;
-use nettoolskit_commands::processor::{process_command, process_text, CliExitStatus};
+use nettoolskit_commands::processor::{process_command, process_text};
+use nettoolskit_commands::ExitStatus;
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
@@ -17,54 +18,6 @@ use tracing::{error, info, warn};
 
 #[cfg(feature = "modern-tui")]
 use nettoolskit_ui::modern::{handle_events, EventResult, Tui, EventStream, handle_events_stream};
-
-/// Exit status for the CLI
-#[derive(Debug, Clone, Copy)]
-pub enum ExitStatus {
-    Success,
-    Error,
-    Interrupted,
-}
-
-impl From<CliExitStatus> for ExitStatus {
-    fn from(status: CliExitStatus) -> Self {
-        match status {
-            CliExitStatus::Success => ExitStatus::Success,
-            CliExitStatus::Error => ExitStatus::Error,
-            CliExitStatus::Interrupted => ExitStatus::Interrupted,
-        }
-    }
-}
-
-impl From<nettoolskit_commands::ExitStatus> for ExitStatus {
-    fn from(status: nettoolskit_commands::ExitStatus) -> Self {
-        match status {
-            nettoolskit_commands::ExitStatus::Success => ExitStatus::Success,
-            nettoolskit_commands::ExitStatus::Error => ExitStatus::Error,
-            nettoolskit_commands::ExitStatus::Interrupted => ExitStatus::Interrupted,
-        }
-    }
-}
-
-impl From<ExitStatus> for std::process::ExitCode {
-    fn from(status: ExitStatus) -> Self {
-        match status {
-            ExitStatus::Success => std::process::ExitCode::SUCCESS,
-            ExitStatus::Error => std::process::ExitCode::FAILURE,
-            ExitStatus::Interrupted => std::process::ExitCode::from(130),
-        }
-    }
-}
-
-impl From<ExitStatus> for i32 {
-    fn from(status: ExitStatus) -> Self {
-        match status {
-            ExitStatus::Success => 0,
-            ExitStatus::Error => 1,
-            ExitStatus::Interrupted => 130,
-        }
-    }
-}
 
 struct RawModeGuard {
     active: bool,

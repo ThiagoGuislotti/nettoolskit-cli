@@ -4,14 +4,6 @@ use nettoolskit_ui::PRIMARY_COLOR;
 use owo_colors::OwoColorize;
 use tracing::info;
 
-/// CLI Exit Status type for compatibility with CLI module
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CliExitStatus {
-    Success,
-    Error,
-    Interrupted,
-}
-
 /// Process slash commands from CLI and return appropriate status
 ///
 /// This function handles the mapping between CLI slash commands and the actual
@@ -24,8 +16,8 @@ pub enum CliExitStatus {
 ///
 /// # Returns
 ///
-/// Returns `CliExitStatus` indicating the result of command execution
-pub async fn process_command(cmd: &str) -> CliExitStatus {
+/// Returns `ExitStatus` indicating the result of command execution
+pub async fn process_command(cmd: &str) -> ExitStatus {
     let metrics = Metrics::new();
     let timer = Timer::start("command_execution", metrics.clone());
 
@@ -81,14 +73,10 @@ pub async fn process_command(cmd: &str) -> CliExitStatus {
     let duration = timer.stop();
 
     // Log and convert result to CLI status
-    let (status_str, counter_name, cli_status) = match result {
-        ExitStatus::Success => ("success", "successful_commands", CliExitStatus::Success),
-        ExitStatus::Error => ("error", "failed_commands", CliExitStatus::Error),
-        ExitStatus::Interrupted => (
-            "interrupted",
-            "interrupted_commands",
-            CliExitStatus::Interrupted,
-        ),
+    let (status_str, counter_name) = match result {
+        ExitStatus::Success => ("success", "successful_commands"),
+        ExitStatus::Error => ("error", "failed_commands"),
+        ExitStatus::Interrupted => ("interrupted", "interrupted_commands"),
     };
 
     info!(
@@ -101,7 +89,7 @@ pub async fn process_command(cmd: &str) -> CliExitStatus {
 
     // Log metrics summary for this command
     metrics.log_summary();
-    cli_status
+    result
 }
 
 /// Process non-command text input from CLI
