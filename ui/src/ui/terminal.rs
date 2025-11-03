@@ -365,7 +365,13 @@ fn apply_scroll_region(top: u16, bottom: u16) -> io::Result<()> {
     }
 
     let mut stdout = io::stdout();
+    // Save cursor position before applying scroll region
+    let cursor_pos = cursor::position().unwrap_or((0, top));
+
     write!(stdout, "\x1b[{};{}r", top + 1, bottom + 1)?;
+
+    // Restore cursor position after applying scroll region
+    execute!(stdout, cursor::MoveTo(cursor_pos.0, cursor_pos.1))?;
     stdout.flush()
 }
 
