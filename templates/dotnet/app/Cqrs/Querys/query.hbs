@@ -1,0 +1,20 @@
+{{!--
+  NetToolsKit CQRS Query template
+--}}
+using NetToolsKit.Mediator.Abstractions.Queries;
+using {{namespaceRoot}}.Application.Models;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Querys;
+
+public sealed record {{name}}Query : IQuery<IEnumerable<{{name}}View>>
+{
+    #region Public Properties
+    public string? Id { get; init; }
+
+{{#if properties}}
+{{#each properties}}
+    public {{type}}? {{name}} { get; init; }
+{{/each}}
+{{/if}}
+    #endregion
+}

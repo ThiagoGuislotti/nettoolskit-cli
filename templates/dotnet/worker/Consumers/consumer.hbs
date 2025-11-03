@@ -1,0 +1,33 @@
+{{!--
+  NetToolsKit MassTransit Consumer template
+--}}
+using MassTransit;
+using Microsoft.Extensions.Logging;
+using {{namespaceRoot}}.Application.Cqrs.Events;
+
+namespace {{namespaceRoot}}.Worker.Consumers;
+
+public sealed class {{name}}Consumer : IConsumer<{{name}}Event>
+{
+    #region Variables
+    private readonly ILogger<{{name}}Consumer> _logger;
+    #endregion
+
+    #region Constructors
+    public {{name}}Consumer(ILogger<{{name}}Consumer> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    #endregion
+
+    #region Public Methods/Operators
+    public async Task Consume(ConsumeContext<{{name}}Event> context)
+    {
+        _logger.LogInformation("Consuming {{name}}Event: {@Event}", context.Message);
+
+        // TODO: Implement consumer logic
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+    #endregion
+}

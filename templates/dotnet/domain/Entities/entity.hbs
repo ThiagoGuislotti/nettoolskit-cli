@@ -1,0 +1,23 @@
+{{!--
+  NetToolsKit Entity template
+--}}
+using {{namespaceRoot}}.Domain.Entities.Abstractions;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace {{namespaceRoot}}.Domain.Entities;
+
+[Table("{{tableName}}")]
+public record {{name}} : BaseEntity
+{
+    #region Public Properties
+{{#if properties}}
+{{#each properties}}
+    [{{#if required}}Required{{else}}{{/if}}]
+    [Column("{{columnName}}")]
+    public {{#if required}}required {{/if}}{{type}} {{name}} { get; init; }
+
+{{/each}}
+{{/if}}
+    #endregion
+}

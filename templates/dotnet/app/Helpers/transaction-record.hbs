@@ -1,0 +1,23 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Newtonsoft.Json;
+
+namespace {{namespace}}.Application.Helpers;
+
+/// <summary>
+/// Base record for transaction tracking across application layers
+/// </summary>
+public abstract record TransactionRecord
+{
+    #region Public Properties
+
+    /// <summary>
+    /// Gets the unique transaction identifier
+    /// This property is set by the CustomInputFormatter middleware
+    /// and is excluded from model binding and JSON serialization
+    /// </summary>
+    [BindNever]
+    [JsonIgnore]
+    public Guid TransactionId { get; init; } = Guid.Empty;
+
+    #endregion
+}

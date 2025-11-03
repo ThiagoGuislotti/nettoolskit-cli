@@ -1,0 +1,27 @@
+{{!--
+  NetToolsKit View Model template
+--}}
+using Newtonsoft.Json;
+
+namespace {{namespaceRoot}}.Application.Models;
+
+public sealed record {{name}}View
+{
+    #region Public Properties
+    [JsonProperty("id")]
+    public required string Id { get; init; }
+
+{{#if properties}}
+{{#each properties}}
+    [JsonProperty("{{jsonName}}")]
+    public required {{type}} {{name}} { get; init; }
+
+{{/each}}
+{{/if}}
+    [JsonProperty("createdAt")]
+    public DateTime CreatedAt { get; init; }
+
+    [JsonProperty("updatedAt")]
+    public DateTime? UpdatedAt { get; init; }
+    #endregion
+}

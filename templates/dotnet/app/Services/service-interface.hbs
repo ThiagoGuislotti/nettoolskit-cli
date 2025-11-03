@@ -1,0 +1,15 @@
+{{!--
+  NetToolsKit Service Interface template
+--}}
+namespace {{namespaceRoot}}.Application.Services;
+
+public interface I{{name}}Service
+{
+{{#if methods}}
+{{#each methods}}
+    Task{{#if returnType}}<{{returnType}}>{{/if}} {{name}}Async({{#if parameters}}{{parameters}}{{/if}}CancellationToken cancellationToken = default);
+{{/each}}
+{{else}}
+    // TODO: Define service methods
+{{/if}}
+}

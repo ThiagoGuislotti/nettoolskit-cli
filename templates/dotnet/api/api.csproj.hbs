@@ -1,0 +1,52 @@
+{{!--
+  NetToolsKit API Project (.csproj) template
+--}}
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<!-- Configurações Gerais -->
+	<PropertyGroup>
+		<Authors>{{author}}</Authors>
+		<IsPackable>false</IsPackable>
+		<TargetFramework>{{targetFramework}}</TargetFramework>
+		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+
+		<!-- Otimização de velocidade -->
+		<OptimizationPreference>Speed</OptimizationPreference>
+
+		<!-- Remove suporte a APIs antigas e inseguras -->
+		<EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+		<EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
+	</PropertyGroup>
+
+	<!-- Configurações específicas para Release -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+
+		<!-- Remove recursos de debugging para produção -->
+		<DebuggerSupport>false</DebuggerSupport>
+		<MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+		<StackTraceSupport>false</StackTraceSupport>
+
+		<!-- Suprime warnings de trimming em produção -->
+		<SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="{{aspNetCoreVersion}}" />
+		<PackageReference Include="Scalar.AspNetCore" Version="{{scalarVersion}}" />
+		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="{{containerToolsVersion}}" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\{{projectName}}.Infrastructure\{{projectName}}.Infrastructure.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="appsettings.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="appsettings.Development.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,33 @@
+{{!--
+  NetToolsKit Controller Base template
+--}}
+using Microsoft.AspNetCore.Mvc;
+using NetToolsKit.Mediator;
+
+namespace {{namespaceRoot}}.Api.Controllers.Abstractions;
+
+public abstract class {{projectName}}ControllerBase<T> : ControllerBase where T : ControllerBase
+{
+    #region Variables
+    protected readonly IConfiguration _configuration;
+    protected readonly IHttpContextAccessor _contextAccessor;
+    protected readonly ILogger<T> _logger;
+    protected readonly IMediator _mediator;
+    #endregion
+
+    #region Constructors
+    protected {{projectName}}ControllerBase(
+        IConfiguration configuration,
+        IHttpContextAccessor contextAccessor,
+        ILoggerFactory loggerFactory,
+        IMediator mediator)
+    {
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _contextAccessor = contextAccessor ?? throw new ArgumentNullException(nameof(contextAccessor));
+        _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+
+        var logger = loggerFactory?.CreateLogger<T>() ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    #endregion
+}

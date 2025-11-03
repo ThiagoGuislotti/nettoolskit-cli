@@ -1,0 +1,15 @@
+{{!--
+  NetToolsKit Enum template
+--}}
+namespace {{namespaceRoot}}.Domain.Enums;
+
+public enum {{name}}
+{
+{{#if values}}
+{{#each values}}
+    {{name}} = {{value}}{{#unless @last}},{{/unless}}
+{{/each}}
+{{else}}
+    // TODO: Define enum values
+{{/if}}
+}

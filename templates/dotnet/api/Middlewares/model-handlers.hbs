@@ -1,0 +1,49 @@
+using NetToolsKit.AspNetCore.Formatters;
+using {{namespace}}.Application.Helpers;
+
+namespace {{namespace}}.Api.Middlewares;
+
+/// <summary>
+/// Handlers for custom model processing
+/// </summary>
+public static class ModelHandlers
+{
+    #region Public Methods/Operators
+
+    /// <summary>
+    /// Handles transaction record models by setting transaction ID
+    /// </summary>
+    /// <param name="context">The model handling context</param>
+    public static void HandleTransactionRecord(ModelHandlingContext context)
+    {
+        if (context.Model is TransactionRecord record)
+        {
+            var transactionId = Guid.NewGuid();
+
+            // Use reflection to set the TransactionId property
+            var property = record.GetType().GetProperty(nameof(TransactionRecord.TransactionId));
+            if (property?.CanWrite == true)
+            {
+                property.SetValue(record, transactionId);
+            }
+
+            context.HttpContext.Items["TransactionId"] = transactionId;
+        }
+    }
+
+    {{#if hasCustomHandlers}}
+    {{#each customHandlers}}
+    /// <summary>
+    /// {{description}}
+    /// </summary>
+    /// <param name="context">The model handling context</param>
+    public static void {{handlerName}}(ModelHandlingContext context)
+    {
+        {{handlerBody}}
+    }
+
+    {{/each}}
+    {{/if}}
+
+    #endregion
+}

@@ -1,0 +1,95 @@
+{{!--
+  NetToolsKit Project README template
+--}}
+# {{projectName}}
+
+{{description}}
+
+## Architecture
+
+This project follows Clean Architecture principles with the following layers:
+
+- **Domain**: Core business logic and entities
+- **Application**: Use cases, CQRS commands/queries, and business rules
+- **Infrastructure**: Data access, external services, and infrastructure concerns
+- **Api**: RESTful API endpoints and presentation layer
+- **Worker**: Background processing and message consumers
+
+## Technologies
+
+- .NET {{targetFramework}}
+- Entity Framework Core
+- MediatR (CQRS pattern)
+- FluentValidation
+- NetToolsKit Libraries
+- PostgreSQL
+- OpenTelemetry
+- Swagger/Scalar (API Documentation)
+
+## Getting Started
+
+### Prerequisites
+
+- .NET SDK {{targetFramework}} or higher
+- PostgreSQL
+- Docker (optional)
+
+### Configuration
+
+Update `appsettings.json` with your connection strings:
+
+```json
+{
+  "ConnectionStrings": {
+    "PostgreSql": "Host=localhost;Database={{projectName}}Db;Username=postgres;Password=yourpassword",
+    "Otlp": "http://localhost:4317"
+  }
+}
+```
+
+### Running the Application
+
+```bash
+# Run API
+dotnet run --project src/{{projectName}}.Api
+
+# Run Worker
+dotnet run --project src/{{projectName}}.Worker
+```
+
+### Database Migrations
+
+```bash
+# Add migration
+dotnet ef migrations add InitialCreate --project src/{{projectName}}.Infrastructure --startup-project src/{{projectName}}.Api
+
+# Update database
+dotnet ef database update --project src/{{projectName}}.Infrastructure --startup-project src/{{projectName}}.Api
+```
+
+## API Documentation
+
+Once running, access the API documentation at:
+- Swagger: `http://localhost:5000/swagger`
+- Scalar: `http://localhost:5000/scalar/v1`
+
+## Project Structure
+
+```
+{{projectName}}/
+├── src/
+│   ├── {{projectName}}.Api/           # REST API
+│   ├── {{projectName}}.Application/   # Business logic
+│   ├── {{projectName}}.Domain/        # Domain entities
+│   ├── {{projectName}}.Infrastructure/# Data access
+│   └── {{projectName}}.Worker/        # Background jobs
+└── README.md
+```
+
+## License
+
+{{license}}
+
+## Author
+
+{{author}}

@@ -1,0 +1,24 @@
+{{!--
+  NetToolsKit Event template
+--}}
+using NetToolsKit.Core.Domain.Events;
+
+namespace {{namespaceRoot}}.Application.Cqrs.Events;
+
+public sealed record {{name}}Event : Event
+{
+    #region Public Properties
+{{#if properties}}
+{{#each properties}}
+    public required {{type}} {{name}} { get; init; }
+{{/each}}
+{{/if}}
+    #endregion
+
+    #region Constructors
+    public {{name}}Event()
+    {
+        AggregateId = Ulid.NewUlid().ToString();
+    }
+    #endregion
+}
