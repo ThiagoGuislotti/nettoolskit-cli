@@ -3,10 +3,10 @@ use nettoolskit_core::commands::COMMANDS;
 
 #[test]
 fn test_slash_commands_complete() {
-    // Verifica se todos os comandos estão presentes
+    // Verify that all commands are present
     assert_eq!(COMMANDS.len(), 6);
 
-    // Verifica comandos específicos
+    // Verify specific commands
     assert!(COMMANDS.iter().any(|(cmd, _)| cmd == &"/list"));
     assert!(COMMANDS.iter().any(|(cmd, _)| cmd == &"/quit"));
     assert!(COMMANDS.iter().any(|(cmd, _)| cmd == &"/new"));
@@ -37,10 +37,10 @@ fn test_slash_command_enum() {
 
 #[test]
 fn test_command_availability_during_task() {
-    // Quit deve estar sempre disponível
+    // Quit should always be available
     assert!(SlashCommand::Quit.available_during_task());
 
-    // Comandos de modificação não devem estar disponíveis durante tarefas
+    // Modification commands should not be available during tasks
     assert!(!SlashCommand::New.available_during_task());
     assert!(!SlashCommand::Apply.available_during_task());
     assert!(!SlashCommand::List.available_during_task());

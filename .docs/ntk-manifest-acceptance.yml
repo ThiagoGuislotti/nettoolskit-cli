@@ -1,0 +1,157 @@
+# ntk-manifest-acceptance.yml - Acceptance manifest mirroring samples/src
+apiVersion: ntk/v1
+kind: solution
+
+meta:
+  name: Rent.Service
+  description: Acceptance manifest aligned with samples/src structure
+
+conventions:
+  namespaceRoot: Rent.Service
+  targetFramework: net9.0
+  policy:
+    collision: overwrite
+    insertTodoWhenMissing: true
+    strict: true
+
+solution:
+  root: samples/src
+  slnFile: Rent.Service.sln
+
+guards:
+  requireExistingProjects: false
+  onMissingProject: skip
+
+projects:
+  Domain: { type: domain, name: Rent.Service.Domain, path: Rent.Service.Domain }
+  Application: { type: application, name: Rent.Service.Application, path: Rent.Service.Application }
+  Infrastructure: { type: infrastructure, name: Rent.Service.Infrastructure, path: Rent.Service.Infrastructure }
+  Api: { type: api, name: Rent.Service.Api, path: Rent.Service.Api }
+  Worker: { type: worker, name: Rent.Service.Worker, path: Rent.Service.Worker }
+
+contexts:
+  - name: Rentals
+    aggregates:
+      - name: Rental
+        valueObjects:
+          - name: Money
+            fields:
+              - { name: Amount, type: decimal }
+              - { name: Currency, type: string }
+          - name: Location
+            fields:
+              - { name: Latitude, type: double }
+              - { name: Longitude, type: double }
+        enums:
+          - name: RentalStatus
+            values:
+              - { name: Pending, value: 0 }
+              - { name: Active, value: 1 }
+              - { name: Completed, value: 2 }
+              - { name: Cancelled, value: 3 }
+        entities:
+          - name: Rental
+            fields:
+              - { name: Id, type: Guid, key: true }
+              - { name: StartDate, type: DateTime }
+              - { name: EndDate, type: DateTime }
+              - { name: RentalPrice, type: Money }
+              - { name: PickupLocation, type: Location }
+              - { name: DropoffLocation, type: Location }
+              - { name: Status, type: RentalStatus }
+        domainEvents:
+          - { name: RentalCreated }
+          - { name: RentalCompleted }
+        repository:
+          name: IRentalRepository
+          methods:
+            - { name: AddAsync, args: [ { name: rental, type: Rental } ], returns: Task }
+            - { name: UpdateAsync, args: [ { name: rental, type: Rental } ], returns: Task }
+            - { name: GetByIdAsync, args: [ { name: rentalId, type: Guid } ], returns: Task<Rental?> }
+    useCases:
+      - name: CreateRental
+        type: Command
+        input:
+          - { name: CustomerId, type: Guid }
+          - { name: VehicleId, type: Guid }
+          - { name: StartDate, type: DateTime }
+          - { name: EndDate, type: DateTime }
+          - { name: Amount, type: decimal }
+          - { name: Currency, type: string }
+        output:
+          - { name: RentalId, type: Guid }
+      - name: CompleteRental
+        type: Command
+        input:
+          - { name: RentalId, type: Guid }
+          - { name: DropoffLatitude, type: double }
+          - { name: DropoffLongitude, type: double }
+        output:
+          - { name: Status, type: RentalStatus }
+  - name: Fleet
+    aggregates:
+      - name: Vehicle
+        entities:
+          - name: Vehicle
+            fields:
+              - { name: Id, type: Guid, key: true }
+              - { name: Plate, type: string }
+              - { name: Model, type: string }
+              - { name: Odometer, type: int }
+              - { name: Status, type: VehicleStatus }
+        enums:
+          - name: VehicleStatus
+            values:
+              - { name: Available, value: 0 }
+              - { name: InMaintenance, value: 1 }
+              - { name: Rented, value: 2 }
+        domainEvents:
+          - { name: VehicleRegistered }
+          - { name: VehicleMaintenanceScheduled }
+        repository:
+          name: IVehicleRepository
+          methods:
+            - { name: RegisterAsync, args: [ { name: vehicle, type: Vehicle } ], returns: Task }
+            - { name: ScheduleMaintenanceAsync, args: [ { name: vehicleId, type: Guid }, { name: date, type: DateTime } ], returns: Task }
+    useCases:
+      - name: RegisterVehicle
+        type: Command
+        input:
+          - { name: Plate, type: string }
+          - { name: Model, type: string }
+          - { name: Odometer, type: int }
+        output:
+          - { name: VehicleId, type: Guid }
+      - name: ScheduleMaintenance
+        type: Command
+        input:
+          - { name: VehicleId, type: Guid }
+          - { name: ScheduledDate, type: DateTime }
+        output:
+          - { name: ConfirmationNumber, type: string }
+
+templates:
+  mapping:
+    - { artifact: value-object, template: dotnet/src/domain/value-object.hbs, dst: "samples/src/Rent.Service.Domain/ValueObjects/{Name}.cs" }
+    - { artifact: entity, template: dotnet/src/domain/entity.hbs, dst: "samples/src/Rent.Service.Domain/Entities/{Name}.cs" }
+    - { artifact: domain-event, template: dotnet/src/domain/domain-event.hbs, dst: "samples/src/Rent.Service.Domain/Events/{Name}.cs" }
+    - { artifact: repository-interface, template: dotnet/src/domain/repository-interface.hbs, dst: "samples/src/Rent.Service.Application/Repositories/{Name}.cs" }
+    - { artifact: enum, template: dotnet/src/domain/Enums/enum.hbs, dst: "samples/src/Rent.Service.Domain/Enums/{Name}.cs" }
+    - { artifact: usecase-command, template: dotnet/src/app/Cqrs/Commands/command.hbs, dst: "samples/src/Rent.Service.Application/Commands/{Name}/{Name}Command.cs" }
+    - { artifact: endpoint, template: dotnet/src/api/endpoint-minimal.hbs, dst: "samples/src/Rent.Service.Api/Endpoints/{UseCase}.cs" }
+
+render:
+  rules:
+    - { expand: "contexts[*].aggregates[*].valueObjects[*]", as: value-object }
+    - { expand: "contexts[*].aggregates[*].entities[*]", as: entity }
+    - { expand: "contexts[*].aggregates[*].domainEvents[*]", as: domain-event }
+    - { expand: "contexts[*].aggregates[*].repository", as: repository-interface }
+    - { expand: "contexts[*].aggregates[*].enums[*]", as: enum }
+    - { expand: "contexts[*].useCases[?type=='Command'][*]", as: usecase-command }
+    - { expand: "contexts[*].useCases[?type=='Command'][*]", as: endpoint }
+
+apply:
+  mode: feature
+  feature:
+    context: Rentals
+    include: [domain]

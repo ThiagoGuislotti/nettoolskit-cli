@@ -37,7 +37,7 @@ pub use async_executor::{
 ///
 /// Represents the outcome of a command execution, convertible to
 /// standard exit codes for shell integration.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitStatus {
     /// Command executed successfully (exit code 0)
     Success,
