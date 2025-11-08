@@ -32,6 +32,18 @@ tracing = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 
+# Serialization and templating
+serde = { workspace = true }
+serde_yaml = "0.9"
+serde_json = { workspace = true }
+handlebars = { workspace = true }
+once_cell = "1.19"
+regex = "1.10"
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+
 [lib]
 name = "nettoolskit_commands"
 path = "src/lib.rs"

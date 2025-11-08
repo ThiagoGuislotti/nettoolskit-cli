@@ -139,11 +139,11 @@ impl CommandPalette {
         self.query = new_query.to_string();
         self.update_matches();
 
-        // Seleção reposicionada para 0 conforme critérios de aceite
+        // Reset selection to 0 as per acceptance criteria
         self.selected = 0;
         self.offset = 0;
 
-        // Latência de atualização ≤ 1 frame de terminal
+        // Update latency ≤ 1 terminal frame
         self.render()
     }
 
@@ -263,23 +263,23 @@ impl CommandPalette {
         let mut scored_matches: Vec<(usize, i32)> = Vec::new();
 
         for (idx, (cmd, desc)) in COMMANDS.iter().enumerate() {
-            let cmd_lower = cmd[1..].to_lowercase(); // Remove o '/'
+            let cmd_lower = cmd[1..].to_lowercase(); // Remove the '/'
             let desc_lower = desc.to_lowercase();
 
             let score = if cmd_lower.starts_with(&query) {
-                3 // Maior prioridade para starts_with no comando
+                3 // Highest priority for starts_with in command
             } else if cmd_lower.contains(&query) {
-                2 // Segunda prioridade para contains no comando
+                2 // Second priority for contains in command
             } else if desc_lower.contains(&query) {
-                1 // Menor prioridade para contains na descrição
+                1 // Lower priority for contains in description
             } else {
-                continue; // Não inclui se não houver match
+                continue; // Don't include if no match
             };
 
             scored_matches.push((idx, score));
         }
 
-        // Ordena por score (desc) e depois por nome (asc)
+        // Sort by score (desc) then by name (asc)
         scored_matches.sort_by(|a, b| match b.1.cmp(&a.1) {
             Ordering::Equal => COMMANDS[a.0].0.cmp(COMMANDS[b.0].0),
             other => other,
@@ -299,12 +299,12 @@ impl CommandPalette {
 
         let max_visible = Self::MAX_VISIBLE_ITEMS.min(self.matches.len());
 
-        // Ajustar offset para manter selected dentro de [0, matches.len())
+        // Adjust offset to keep selected within [0, matches.len())
         if self.selected >= self.matches.len() {
             self.selected = self.matches.len().saturating_sub(1);
         }
 
-        // Manter o selecionado visível dentro da janela de 8 linhas
+        // Keep the selected item visible within the 8-line window
         if self.selected >= self.offset + max_visible {
             self.offset = self.selected - max_visible + 1;
         } else if self.selected < self.offset {
@@ -322,24 +322,24 @@ impl CommandPalette {
     ///
     /// Returns `Ok(())` on success or an `io::Error` if terminal operations fail.
     fn ensure_terminal_space(&mut self) -> io::Result<()> {
-        // Obter dimensões do terminal
+        // Get terminal dimensions
         if let Ok((_, terminal_height)) = terminal::size() {
-            let lines_needed = Self::MAX_VISIBLE_ITEMS as u16 + 2; // +2 para espaçamento
+            let lines_needed = Self::MAX_VISIBLE_ITEMS as u16 + 2; // +2 for spacing
             let available_lines = terminal_height.saturating_sub(self.y_input + 1);
 
             if available_lines < lines_needed {
-                // Não há espaço suficiente, precisamos fazer scroll
+                // Not enough space, we need to scroll
                 let lines_to_scroll = lines_needed - available_lines;
 
-                // Fazer scroll para cima (adicionar linhas em branco no final)
+                // Scroll up (add blank lines at the end)
                 for _ in 0..lines_to_scroll {
                     queue!(io::stdout(), Print("\n"))?;
                 }
 
-                // Atualizar a posição y_input após o scroll
+                // Update y_input position after scroll
                 self.y_input = self.y_input.saturating_sub(lines_to_scroll);
 
-                // Mover cursor para a nova posição de entrada
+                // Move cursor to new input position
                 queue!(io::stdout(), cursor::MoveTo(0, self.y_input))?;
                 io::stdout().flush()?;
             }
@@ -357,17 +357,17 @@ impl CommandPalette {
     ///
     /// Returns `Ok(())` on success or an `io::Error` if terminal operations fail.
     fn clear_region(&self) -> io::Result<()> {
-        // Limpar da linha y_input + 1 até o fim da área da paleta
+        // Clear from line y_input + 1 to the end of palette area
         queue!(
             io::stdout(),
             cursor::MoveTo(0, self.y_input + 1),
             terminal::Clear(ClearType::FromCursorDown)
         )?;
 
-        // Limpar apenas as linhas necessárias para evitar flickering (incluindo linha extra de espaçamento)
+        // Clear only necessary lines to avoid flickering (including extra spacing line)
         let visible_items = Self::MAX_VISIBLE_ITEMS.min(self.matches.len());
         for i in 0..=visible_items + 1 {
-            // +1 para linha extra de espaçamento
+            // +1 for extra spacing line
             queue!(
                 io::stdout(),
                 cursor::MoveTo(0, self.y_input + 1 + i as u16),
@@ -392,19 +392,19 @@ impl CommandPalette {
             return Ok(());
         }
 
-        // Salva posição atual do cursor
+        // Save current cursor position
         let original_cursor_pos = cursor::position().unwrap_or((0, self.y_input));
 
-        // 1) Limpar da linha y_input + 1 até o fim da área da paleta
+        // 1) Clear from line y_input + 1 to the end of palette area
         self.clear_region()?;
 
-        // 2) Desenhar min(8, matches.len()) linhas a partir de offset
+        // 2) Draw min(8, matches.len()) lines starting from offset
         let visible_items = Self::MAX_VISIBLE_ITEMS.min(self.matches.len());
         let end_idx = (self.offset + visible_items).min(self.matches.len());
 
         for i in self.offset..end_idx {
             let line_idx = i - self.offset;
-            let y_pos = self.y_input + 2 + line_idx as u16; // Paleta com uma linha de espaço abaixo da entrada
+            let y_pos = self.y_input + 2 + line_idx as u16; // Palette with one spacing line below input
 
             if let Some(&match_idx) = self.matches.get(i) {
                 if let Some((cmd, desc)) = COMMANDS.get(match_idx) {
@@ -413,31 +413,31 @@ impl CommandPalette {
                     queue!(io::stdout(), cursor::MoveTo(0, y_pos))?;
 
                     if is_selected {
-                        // Item selecionado - realce com reverse conforme especificação
+                        // Selected item - highlight with reverse as per specification
                         queue!(
                             io::stdout(),
                             SetAttribute(Attribute::Reverse),
-                            Print(format!("› {}  {}", cmd, desc)), // Dois espaços entre comando e descrição
+                            Print(format!("› {}  {}", cmd, desc)), // Two spaces between command and description
                             SetAttribute(Attribute::Reset)
                         )?;
                     } else {
-                        // Item não selecionado - cores do NetToolsKit (roxo/magenta)
-                    queue!(
-                        io::stdout(),
-                        set_fg(GRAY_COLOR),
-                        Print("  "),
-                        set_fg(PRIMARY_COLOR),
-                        Print(cmd),
-                        set_fg(GRAY_COLOR),
-                        Print(format!("  {}", desc)), // Dois espaços entre comando e descrição
-                        SetAttribute(Attribute::Reset)
+                        // Unselected item - NetToolsKit colors (purple/magenta)
+                        queue!(
+                            io::stdout(),
+                            set_fg(GRAY_COLOR),
+                            Print("  "),
+                            set_fg(PRIMARY_COLOR),
+                            Print(cmd),
+                            set_fg(GRAY_COLOR),
+                            Print(format!("  {}", desc)), // Two spaces between command and description
+                            SetAttribute(Attribute::Reset)
                         )?;
                     }
                 }
             }
         }
 
-        // Restaura posição original do cursor na linha de entrada
+        // Restore original cursor position on input line
         queue!(
             io::stdout(),
             cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1)
@@ -475,7 +475,7 @@ impl CommandPalette {
                 if let Some((cmd, desc)) = COMMANDS.get(match_idx) {
                     let is_selected = i == self.selected;
 
-                    // Limpa apenas a linha atual antes de desenhar
+                    // Clear only the current line before drawing
                     queue!(
                         io::stdout(),
                         cursor::MoveTo(0, y_pos),
@@ -483,7 +483,7 @@ impl CommandPalette {
                     )?;
 
                     if is_selected {
-                        // Item selecionado - realce com reverse conforme especificação
+                        // Selected item - highlight with reverse as per specification
                         queue!(
                             io::stdout(),
                             SetAttribute(Attribute::Reverse),
@@ -491,7 +491,7 @@ impl CommandPalette {
                             SetAttribute(Attribute::Reset)
                         )?;
                     } else {
-                        // Item não selecionado - cores do NetToolsKit
+                        // Unselected item - NetToolsKit colors
                         queue!(
                             io::stdout(),
                             set_fg(GRAY_COLOR),

@@ -120,8 +120,8 @@ ntk check manifest.yml --strict
 # Render template preview
 ntk render dotnet-api --vars variables.json
 
-# Apply manifest to existing solution
-ntk apply manifest.yml --target ./my-solution
+# Apply manifest to existing solution (outputs to ./target/ntk-output by default)
+ntk apply manifest.yml --output ./generated-solution
 ```
 
 ### Template Operations
@@ -162,7 +162,7 @@ Available interactive commands accessible through the `/` command palette:
 | `/new` | Create project from template | `--name`, `--output`, `--vars` |
 | `/check` | Validate manifest or template | `--strict`, `--schema` |
 | `/render` | Render template preview | `--vars`, `--preview-only` |
-| `/apply` | Apply manifest to existing solution | `--target`, `--force` |
+| `/apply` | Apply manifest to existing solution | `--output`, `--force` |
 | `/quit` | Exit NetToolsKit CLI | none |
 
 ### CLI Arguments

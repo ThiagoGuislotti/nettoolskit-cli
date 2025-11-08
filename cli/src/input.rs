@@ -1,6 +1,8 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use nettoolskit_async_utils::with_timeout;
-use nettoolskit_ui::{append_footer_log, handle_resize, render_prompt_with_command, CommandPalette};
+use nettoolskit_ui::{
+    append_footer_log, handle_resize, render_prompt_with_command, CommandPalette,
+};
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,10 +38,12 @@ pub async fn read_line_with_palette(
         .await
         {
             Ok(Ok(event)) => match event {
-                Event::Key(key_event) => match handle_key_event(key_event, buffer, palette, interrupted)? {
-                    Some(result) => return Ok(result),
-                    None => continue,
-                },
+                Event::Key(key_event) => {
+                    match handle_key_event(key_event, buffer, palette, interrupted)? {
+                        Some(result) => return Ok(result),
+                        None => continue,
+                    }
+                }
                 Event::Resize(width, height) => {
                     if let Err(err) = handle_resize(width, height) {
                         let _ =

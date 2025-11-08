@@ -91,8 +91,9 @@ impl CommandHandle {
 /// ```rust
 /// use nettoolskit_commands::CommandProgress;
 ///
-/// let progress = CommandProgress::simple("Processing files...".to_string());
-/// let progress_with_percent = CommandProgress::with_percent("Downloading".to_string(), 75);
+/// let progress = CommandProgress::message("Processing files...");
+/// let progress_with_percent = CommandProgress::percent("Downloading", 75);
+/// let progress_with_steps = CommandProgress::steps("Uploading", 2, 5);
 /// ```
 #[derive(Debug, Clone)]
 pub struct CommandProgress {

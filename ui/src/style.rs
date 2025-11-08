@@ -86,7 +86,12 @@ mod tests {
             let color = rgb_to_crossterm(input_rgb);
             match color {
                 Color::Rgb { r, g, b } => {
-                    assert_eq!((r, g, b), expected, "Color conversion mismatch for {:?}", input_rgb);
+                    assert_eq!(
+                        (r, g, b),
+                        expected,
+                        "Color conversion mismatch for {:?}",
+                        input_rgb
+                    );
                 }
                 _ => panic!("Expected Color::Rgb variant"),
             }
