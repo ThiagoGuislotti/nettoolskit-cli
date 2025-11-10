@@ -1,6 +1,11 @@
-# Phase 0 - Inventory & Preparation
+# Phase 6.0 - Workspace Architecture Migration: Inventory & Preparation
+
+> **Context:** This phase is part of the **Workspace Architecture Migration** project (separate from CLI feature development Phases 0-5). See [architecture-migration-plan.md](architecture-migration-plan.md) for complete migration strategy.
+
 **Date:** 2025-11-09
 **Branch:** feature/workspace-architecture
+**Migration Phase:** 6.0 (Preparation)
+**Related Document:** [architecture-migration-plan.md](architecture-migration-plan.md)
 
 ---
 
