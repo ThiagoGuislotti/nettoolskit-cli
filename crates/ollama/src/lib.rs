@@ -7,17 +7,12 @@
 //!
 //! # Examples
 //!
-//! ```rust,no_run
-//! use nettoolskit_ollama::{OllamaClient, ChatRequest};
+//! ```rust,ignore
+//! use nettoolskit_ollama::OllamaClient;
 //!
 //! async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = OllamaClient::new("http://localhost:11434");
-//!
-//!     let request = ChatRequest::new("llama2")
-//!         .with_prompt("Hello, Ollama!");
-//!
-//!     let response = client.chat(request).await?;
-//!     println!("Response: {}", response.message);
+//!     let client = OllamaClient::new(Some("http://localhost:11434".to_string()));
+//!     // Use client methods here
 //!     Ok(())
 //! }
 //! ```

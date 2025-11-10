@@ -15,8 +15,8 @@
 //! async fn example() -> Result<String, Box<dyn std::error::Error>> {
 //!     // Execute with timeout
 //!     let result = with_timeout(
-//!         async { Ok("completed".to_string()) },
-//!         Duration::from_secs(5)
+//!         Duration::from_secs(5),
+//!         async { "completed".to_string() }
 //!     ).await?;
 //!     Ok(result)
 //! }

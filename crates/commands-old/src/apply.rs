@@ -2121,6 +2121,8 @@ mod tests {
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
+            .expect("crates dir")
+            .parent()
             .expect("cli root")
             .join(".docs")
             .join("ntk-manifest-acceptance.yml");
@@ -2167,6 +2169,8 @@ mod tests {
         fs::create_dir_all(&target_dir)?;
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates dir")
             .parent()
             .expect("cli root")
             .join(".docs")

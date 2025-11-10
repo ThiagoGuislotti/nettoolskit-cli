@@ -3,7 +3,7 @@
 //! These tests ensure that new TUI improvements don't break existing functionality.
 //! All tests must pass before merging any TUI-related changes.
 
-use nettoolskit_cli::ExitStatus;
+use nettoolskit_commands::ExitStatus;
 use nettoolskit_core::Features;
 
 /// Test that feature detection works correctly

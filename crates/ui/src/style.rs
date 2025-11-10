@@ -10,7 +10,7 @@ use owo_colors::Rgb;
 /// # Examples
 ///
 /// ```
-/// use nettoolskit_ui::ui::style::rgb_to_crossterm;
+/// use nettoolskit_ui::style::rgb_to_crossterm;
 /// use owo_colors::Rgb;
 ///
 /// let color = Rgb(155, 114, 255);
@@ -34,8 +34,8 @@ pub fn rgb_to_crossterm(rgb: Rgb) -> Color {
 /// # Examples
 ///
 /// ```
-/// use nettoolskit_ui::ui::style::set_fg;
-/// use nettoolskit_ui::ui::display::PRIMARY_COLOR;
+/// use nettoolskit_ui::style::set_fg;
+/// use nettoolskit_ui::display::PRIMARY_COLOR;
 /// use crossterm::queue;
 /// use std::io::stdout;
 ///

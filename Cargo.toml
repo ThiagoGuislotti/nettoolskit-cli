@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    "cli",
-    "core",
-    "commands",
-    "ui",
-    "async-utils",
-    "file-search",
-    "otel",
-    "ollama",
-    "utils",
+    "crates/cli",
+    "crates/core",
+    "crates/commands-old",
+    "crates/ui",
+    "crates/otel",
+    "crates/ollama",
+    "crates/shared/async-utils",
+    "crates/shared/file-search",
+    "crates/shared/utils",
 ]
 resolver = "2"
 
