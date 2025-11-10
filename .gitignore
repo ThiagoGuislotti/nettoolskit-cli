@@ -11,6 +11,8 @@
 *.userosscache
 *.sln.docstates
 
+*.backup
+
 # SonarQube
 *.sonarqube
 

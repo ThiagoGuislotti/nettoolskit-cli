@@ -8,14 +8,12 @@
 //! # Examples
 //!
 //! ```rust,no_run
-//! use nettoolskit_file_search::{FileSearchConfig, search_files};
+//! use nettoolskit_file_search::{SearchConfig, search_files};
 //!
-//! async fn example() {
-//!     let config = FileSearchConfig::default()
-//!         .with_pattern("*.rs")
-//!         .max_depth(3);
+//! fn example() {
+//!     let config = SearchConfig::default();
 //!
-//!     let files = search_files("./src", &config).await.unwrap();
+//!     let files = search_files("./src", &config).unwrap();
 //!     println!("Found {} files", files.len());
 //! }
 //! ```
