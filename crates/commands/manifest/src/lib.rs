@@ -41,21 +41,24 @@
 ///! # Ok(())
 ///! # }
 ///! ```
-
 mod error;
 mod executor;
-mod models;
-mod parser;
 mod rendering;
 
+// Public modules for testing
+pub mod files;
+pub mod models;
+pub mod parser;
+pub mod tasks;
+
 pub use error::{ManifestError, ManifestResult};
+pub use executor::{ExecutionConfig, ManifestExecutor};
 pub use models::{
-    ManifestDocument, ManifestKind, ManifestMeta, ManifestConventions,
-    ManifestSolution, ManifestProject, ManifestProjectKind, ManifestPolicy,
-    ManifestGuards, ArtifactKind, ManifestContext, ExecutionSummary,
+    ArtifactKind, ExecutionSummary, FileChange, ManifestContext, ManifestConventions,
+    ManifestDocument, ManifestGuards, ManifestKind, ManifestMeta, ManifestPolicy, ManifestProject,
+    ManifestProjectKind, ManifestSolution,
 };
 pub use parser::ManifestParser;
-pub use executor::{ManifestExecutor, ExecutionConfig};
 
 // Re-export TemplateResolver from templating (no duplication)
 pub use nettoolskit_templating::TemplateResolver;

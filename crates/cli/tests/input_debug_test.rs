@@ -8,25 +8,33 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use nettoolskit_ui::render_prompt;
 use std::io::{self, Write};
 
+// Manual Interactive Tests
+
 /// Manual test for debugging input flow
 ///
 /// Run with: `cargo test --test input_debug_test -- --ignored --nocapture`
 ///
 /// This test is marked as `#[ignore]` because it requires manual interaction
 /// and doesn't run in CI/CD pipelines.
+///
+/// # AAA Pattern (Interactive)
+/// - Arrange: Enable raw mode, initialize buffer
+/// - Act: Read keyboard events in loop (manual user input)
+/// - Assert: Buffer updates correctly, exit on Ctrl+C
 #[test]
 #[ignore]
 fn test_input_flow_manual() -> io::Result<()> {
+    // Arrange
     println!("=== INPUT DEBUG TEST ===");
     println!("Type something and press Enter");
     println!("Press Ctrl+C to exit\n");
 
     enable_raw_mode()?;
-
     let mut buffer = String::new();
-
     render_prompt()?;
 
+    // Act
+    // Main event loop - reads and processes keyboard input manually
     loop {
         if event::poll(std::time::Duration::from_millis(100))? {
             match event::read()? {
@@ -76,6 +84,8 @@ fn test_input_flow_manual() -> io::Result<()> {
         }
     }
 
+    // Assert
+    // Clean exit after Ctrl+C
     disable_raw_mode()?;
     Ok(())
 }

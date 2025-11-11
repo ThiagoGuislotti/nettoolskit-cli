@@ -70,9 +70,7 @@ impl ManifestParser {
 
         // Validate guards
         if manifest.guards.require_existing_projects {
-            tracing::info!(
-                "Guard requireExistingProjects=true: existing projects must be present"
-            );
+            tracing::info!("Guard requireExistingProjects=true: existing projects must be present");
         }
 
         Ok(())

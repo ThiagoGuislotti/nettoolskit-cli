@@ -1,6 +1,6 @@
-/// Manifest execution logic
+/// Manifest execution orchestrator (thin layer)
 use crate::error::{ManifestError, ManifestResult};
-use crate::models::{ExecutionSummary, ManifestDocument};
+use crate::models::{ApplyModeKind, ExecutionSummary, ManifestDocument};
 use crate::parser::ManifestParser;
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ pub struct ExecutionConfig {
     pub dry_run: bool,
 }
 
-/// Executor for manifest operations
+/// Executor for manifest operations (orchestrator)
 pub struct ManifestExecutor;
 
 impl ManifestExecutor {
@@ -21,9 +21,9 @@ impl ManifestExecutor {
         Self
     }
 
-    /// Execute manifest (async)
+    /// Execute manifest (async entry point)
     pub async fn execute(&self, config: ExecutionConfig) -> ManifestResult<ExecutionSummary> {
-        // Parse manifest
+        // Parse and validate manifest
         let manifest = ManifestParser::from_file(&config.manifest_path)?;
         ManifestParser::validate(&manifest)?;
 
@@ -55,40 +55,41 @@ impl ManifestExecutor {
         })
     }
 
-    /// Asynchronous execution - full manifest application logic
+    /// Main async execution logic - orchestrates specialized modules
     async fn execute_async(
         manifest: ManifestDocument,
         config: ExecutionConfig,
     ) -> ManifestResult<ExecutionSummary> {
-        use crate::models::{FileChange, FileChangeKind, ManifestCollisionPolicy, MissingProjectAction};
-        use crate::rendering::{build_project_payload, build_project_stub, build_solution_stub, normalize_line_endings, render_template};
+        use crate::models::{FileChange, FileChangeKind, ManifestCollisionPolicy};
+        use crate::rendering::{normalize_line_endings, render_template};
         use std::fs;
 
         let mut summary = ExecutionSummary::default();
 
-        // Add initial notes
-        summary.notes.push(format!("Applying manifest kind {:?}", manifest.kind));
+        // Add metadata to summary
+        summary
+            .notes
+            .push(format!("Applying manifest kind {:?}", manifest.kind));
         summary.notes.push(format!(
             "Namespace root: {}",
             manifest.conventions.namespace_root
         ));
-
         if let Some(description) = &manifest.meta.description {
-            summary.notes.push(format!("Manifest description: {}", description));
+            summary
+                .notes
+                .push(format!("Manifest description: {}", description));
         }
 
-        // Locate templates root
+        // Locate templates
         let templates_root = Self::locate_templates_root(&config.manifest_path)?;
 
-        // Setup solution paths
+        // Setup paths
         let solution_root = config.output_root.join(&manifest.solution.root);
-        let solution_file = solution_root.join(&manifest.solution.sln_file);
+        summary
+            .notes
+            .push(format!("Solution root: {}", solution_root.display()));
 
-        summary.notes.push(format!("Solution root: {}", solution_root.display()));
-
-        let insert_todo = manifest.conventions.policy.insert_todo_when_missing;
-
-        // Validate solution root existence
+        // Validate solution root
         if !solution_root.exists() {
             if manifest.guards.require_existing_projects {
                 return Err(ManifestError::Validation(format!(
@@ -96,7 +97,7 @@ impl ManifestExecutor {
                     solution_root.display()
                 )));
             }
-            Self::ensure_directory(
+            crate::files::ensure_directory(
                 &solution_root,
                 config.dry_run,
                 &mut summary,
@@ -104,99 +105,25 @@ impl ManifestExecutor {
             )?;
         }
 
-        let mut changes: Vec<FileChange> = Vec::new();
+        // Collect render tasks (delegated to tasks module)
+        let tasks = Self::collect_render_tasks(&manifest)?;
 
-        // Handle solution file
-        if solution_file.exists() {
-            summary.skipped.push((
-                solution_file.clone(),
-                "solution already exists".to_string(),
-            ));
-        } else {
-            if manifest.guards.require_existing_projects {
-                return Err(ManifestError::Validation(format!(
-                    "solution file missing: {}",
-                    solution_file.display()
-                )));
-            }
+        summary
+            .notes
+            .push(format!("Collected {} render task(s)", tasks.len()));
 
-            changes.push(FileChange {
-                path: solution_file.clone(),
-                content: build_solution_stub(&manifest.meta.name),
-                kind: FileChangeKind::Create,
-                note: Some("solution scaffold".to_string()),
-            });
-        }
-
-        // Process projects
-        for project in manifest.projects.values() {
-            let project_dir = solution_root.join(&project.path);
-            let csproj_path = project_dir.join(format!("{}.csproj", project.name));
-
-            if !project_dir.exists() || !csproj_path.exists() {
-                match (
-                    manifest.guards.require_existing_projects,
-                    manifest.guards.on_missing_project,
-                ) {
-                    (true, Some(MissingProjectAction::Skip)) => {
-                        summary.skipped.push((
-                            csproj_path.clone(),
-                            "project missing (skipped due to guard configuration)".to_string(),
-                        ));
-                        continue;
-                    }
-                    (true, _) => {
-                        return Err(ManifestError::Validation(format!(
-                            "project missing: {}",
-                            csproj_path.display()
-                        )));
-                    }
-                    _ => {}
-                }
-            }
-
-            if !project_dir.exists() {
-                Self::ensure_directory(&project_dir, config.dry_run, &mut summary, "project root")?;
-            }
-
-            if csproj_path.exists() {
-                summary.skipped.push((csproj_path, "project already exists".to_string()));
-            } else {
-                let content = if let Some(template_path) = project.kind.template_path() {
-                    let payload = build_project_payload(&manifest, project);
-                    render_template(&templates_root, template_path, &payload, insert_todo).await?
-                } else {
-                    build_project_stub(
-                        &project.name,
-                        &manifest.conventions.target_framework,
-                        manifest
-                            .meta
-                            .author
-                            .as_deref()
-                            .unwrap_or(&manifest.meta.name),
-                    )
-                };
-
-                changes.push(FileChange {
-                    path: csproj_path,
-                    content,
-                    kind: FileChangeKind::Create,
-                    note: Some(format!("project scaffold ({:?})", project.kind)),
-                });
-            }
-        }
-
-        // Collect and process render tasks
+        // Render and build file changes
         let policy = manifest
             .conventions
             .policy
             .collision
             .unwrap_or(ManifestCollisionPolicy::Fail);
-
-        let tasks = Self::collect_render_tasks(&manifest)?;
+        let insert_todo = manifest.conventions.policy.insert_todo_when_missing;
+        let mut changes = Vec::new();
 
         for task in tasks {
-            let rendered = render_template(&templates_root, &task.template, &task.data, insert_todo).await?;
+            let rendered =
+                render_template(&templates_root, &task.template, &task.data, insert_todo).await?;
             let absolute_path = config.output_root.join(&task.destination);
 
             if absolute_path.exists() {
@@ -236,94 +163,16 @@ impl ManifestExecutor {
             }
         }
 
-        // Execute the plan
-        Self::execute_plan(changes, config.dry_run, &mut summary)?;
+        // Execute file operations (delegated to files module)
+        crate::files::execute_plan(changes, config.dry_run, &mut summary)?;
 
         Ok(summary)
     }
 
-    /// Ensure directory exists
-    fn ensure_directory(
-        path: &PathBuf,
-        dry_run: bool,
-        summary: &mut ExecutionSummary,
-        note: &str,
-    ) -> ManifestResult<()> {
-        use std::fs;
-
-        if path.exists() {
-            return Ok(());
-        }
-
-        if dry_run {
-            summary.notes.push(format!(
-                "create directory (dry-run): {} ({})",
-                path.display(),
-                note
-            ));
-            return Ok(());
-        }
-
-        fs::create_dir_all(path)?;
-        summary.notes.push(format!("Created directory: {} ({})", path.display(), note));
-        Ok(())
-    }
-
-    /// Execute file change plan
-    fn execute_plan(
-        changes: Vec<crate::models::FileChange>,
-        dry_run: bool,
-        summary: &mut ExecutionSummary,
-    ) -> ManifestResult<()> {
-        use crate::models::FileChangeKind;
-        use std::fs;
-
-        for change in changes {
-            if dry_run {
-                match change.kind {
-                    FileChangeKind::Create => {
-                        summary.notes.push(format!(
-                            "would create: {} ({})",
-                            change.path.display(),
-                            change.note.as_deref().unwrap_or("no note")
-                        ));
-                    }
-                    FileChangeKind::Update => {
-                        summary.notes.push(format!(
-                            "would update: {} ({})",
-                            change.path.display(),
-                            change.note.as_deref().unwrap_or("no note")
-                        ));
-                    }
-                }
-                continue;
-            }
-
-            // Ensure parent directory exists
-            if let Some(parent) = change.path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            // Write file
-            fs::write(&change.path, &change.content)?;
-
-            match change.kind {
-                FileChangeKind::Create => {
-                    summary.created.push(change.path.clone());
-                }
-                FileChangeKind::Update => {
-                    summary.updated.push(change.path.clone());
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Collect render tasks based on manifest mode
-    #[allow(unused_variables)]
-    fn collect_render_tasks(manifest: &ManifestDocument) -> ManifestResult<Vec<crate::models::RenderTask>> {
-        use crate::models::{ArtifactKind, ApplyModeKind};
+    /// Collect render tasks based on manifest mode (delegates to tasks module)
+    fn collect_render_tasks(
+        manifest: &ManifestDocument,
+    ) -> ManifestResult<Vec<crate::models::RenderTask>> {
         use std::collections::BTreeSet;
 
         let mut tasks = Vec::new();
@@ -335,7 +184,7 @@ impl ManifestExecutor {
                     ManifestError::Validation("apply.artifact section missing".to_string())
                 })?;
 
-                let kind = ArtifactKind::from_str(&artifact_cfg.kind);
+                let kind = crate::models::ArtifactKind::from_str(&artifact_cfg.kind);
                 let mappings = template_index.get(&kind).ok_or_else(|| {
                     ManifestError::Validation(format!(
                         "no template mapping found for artifact '{}'",
@@ -343,15 +192,31 @@ impl ManifestExecutor {
                     ))
                 })?;
 
-                // TODO: Implement artifact-specific task building
-                // This will require porting find_* and build_*_task functions
+                let contexts =
+                    Self::select_contexts(&manifest.contexts, artifact_cfg.context.as_deref());
+                if contexts.is_empty() {
+                    return Err(ManifestError::Validation(
+                        "no matching contexts found for artifact apply mode".to_string(),
+                    ));
+                }
+
+                // Delegate to tasks::artifact module
+                crate::tasks::append_artifact_tasks(
+                    &mut tasks,
+                    &contexts,
+                    &manifest.conventions,
+                    &kind,
+                    artifact_cfg.name.as_deref(),
+                    mappings,
+                )?;
             }
             ApplyModeKind::Feature => {
                 let feature_cfg = manifest.apply.feature.as_ref().ok_or_else(|| {
                     ManifestError::Validation("apply.feature section missing".to_string())
                 })?;
 
-                let contexts = Self::select_contexts(&manifest.contexts, feature_cfg.context.as_deref());
+                let contexts =
+                    Self::select_contexts(&manifest.contexts, feature_cfg.context.as_deref());
                 if contexts.is_empty() {
                     return Err(ManifestError::Validation(
                         "no matching contexts found for feature apply mode".to_string(),
@@ -364,16 +229,32 @@ impl ManifestExecutor {
                     .map(|value| value.trim().to_lowercase())
                     .collect();
 
+                // Delegate to specialized task modules
                 if includes.contains("domain") {
-                    Self::append_domain_tasks(&mut tasks, &contexts, &manifest.conventions, &template_index)?;
+                    crate::tasks::append_domain_tasks(
+                        &mut tasks,
+                        &contexts,
+                        &manifest.conventions,
+                        &template_index,
+                    )?;
                 }
 
                 if includes.contains("application") {
-                    Self::append_application_tasks(&mut tasks, &contexts, &manifest.conventions, &template_index)?;
+                    crate::tasks::append_application_tasks(
+                        &mut tasks,
+                        &contexts,
+                        &manifest.conventions,
+                        &template_index,
+                    )?;
                 }
 
                 if includes.contains("api") {
-                    Self::append_api_tasks(&mut tasks, &contexts, &manifest.conventions, &template_index)?;
+                    crate::tasks::append_api_tasks(
+                        &mut tasks,
+                        &contexts,
+                        &manifest.conventions,
+                        &template_index,
+                    )?;
                 }
             }
             ApplyModeKind::Layer => {
@@ -381,15 +262,22 @@ impl ManifestExecutor {
                     ManifestError::Validation("apply.layer section missing".to_string())
                 })?;
 
-                let contexts: Vec<&crate::models::ManifestContext> = manifest.contexts.iter().collect();
+                let contexts: Vec<&crate::models::ManifestContext> =
+                    manifest.contexts.iter().collect();
                 let includes: BTreeSet<String> = layer_cfg
                     .include
                     .iter()
                     .map(|value| value.trim().to_lowercase())
                     .collect();
 
+                // Delegate to specialized task modules
                 if includes.contains("domain") {
-                    Self::append_domain_tasks(&mut tasks, &contexts, &manifest.conventions, &template_index)?;
+                    crate::tasks::append_domain_tasks(
+                        &mut tasks,
+                        &contexts,
+                        &manifest.conventions,
+                        &template_index,
+                    )?;
                 }
             }
         }
@@ -409,39 +297,6 @@ impl ManifestExecutor {
                 .collect(),
             None => contexts.iter().collect(),
         }
-    }
-
-    /// Append domain tasks (placeholder)
-    fn append_domain_tasks(
-        _tasks: &mut Vec<crate::models::RenderTask>,
-        _contexts: &[&crate::models::ManifestContext],
-        _conventions: &crate::models::ManifestConventions,
-        _template_index: &std::collections::BTreeMap<crate::models::ArtifactKind, Vec<&crate::models::TemplateMapping>>,
-    ) -> ManifestResult<()> {
-        // TODO: Port full domain task logic from backup
-        Ok(())
-    }
-
-    /// Append application tasks (placeholder)
-    fn append_application_tasks(
-        _tasks: &mut Vec<crate::models::RenderTask>,
-        _contexts: &[&crate::models::ManifestContext],
-        _conventions: &crate::models::ManifestConventions,
-        _template_index: &std::collections::BTreeMap<crate::models::ArtifactKind, Vec<&crate::models::TemplateMapping>>,
-    ) -> ManifestResult<()> {
-        // TODO: Port full application task logic from backup
-        Ok(())
-    }
-
-    /// Append API tasks (placeholder)
-    fn append_api_tasks(
-        _tasks: &mut Vec<crate::models::RenderTask>,
-        _contexts: &[&crate::models::ManifestContext],
-        _conventions: &crate::models::ManifestConventions,
-        _template_index: &std::collections::BTreeMap<crate::models::ArtifactKind, Vec<&crate::models::TemplateMapping>>,
-    ) -> ManifestResult<()> {
-        // TODO: Port full API task logic from backup
-        Ok(())
     }
 }
 
