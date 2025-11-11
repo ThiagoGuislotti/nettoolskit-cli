@@ -1,10 +1,21 @@
+//! Integration tests for UI module public API
+//!
+//! Validates cross-module integration between UI components, color usage with
+//! display functions, terminal interaction, and module completeness checks.
+//!
+//! ## Test Coverage
+//! - Color constants accessibility
+//! - Function integration (clear_terminal, print_logo)
+//! - Module completeness validation
+//! - Public API surface verification
+
 #[cfg(test)]
 mod tests {
     use nettoolskit_ui::{GRAY_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR};
 
     #[test]
     fn test_color_constants() {
-        // Test that color constants are accessible and have expected RGB values
+        // Assert - Color constants accessibility and RGB values
         assert_eq!(PRIMARY_COLOR.0, 155);
         assert_eq!(PRIMARY_COLOR.1, 114);
         assert_eq!(PRIMARY_COLOR.2, 255);
@@ -24,10 +35,10 @@ mod tests {
 
     #[test]
     fn test_ui_modules_exist() {
-        // Test that we can access the UI modules
+        // Arrange
         use nettoolskit_ui::{clear_terminal, print_logo};
 
-        // These functions should be available (even if we don't call them in tests)
+        // Assert - Functions should be accessible
         let _ = clear_terminal;
         let _ = print_logo;
     }

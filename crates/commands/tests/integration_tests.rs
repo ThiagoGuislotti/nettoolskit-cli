@@ -3,34 +3,50 @@
 use nettoolskit_commands::processor::process_command;
 use nettoolskit_commands::ExitStatus;
 
-// Tests from backup/commands/tests/integration_tests.rs
+// Command Integration Tests
+
 #[tokio::test]
 async fn test_list_command_integration() {
+    // Act
     let result = process_command("/list").await;
+
+    // Assert
     assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_new_command_integration() {
+    // Act
     let result = process_command("/new").await;
+
+    // Assert
     assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_check_command_integration() {
+    // Act
     let result = process_command("/check").await;
+
+    // Assert
     assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_render_command_integration() {
+    // Act
     let result = process_command("/render").await;
+
+    // Assert
     assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_apply_command_integration() {
+    // Act
     let result = process_command("/apply").await;
+
+    // Assert
     assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 

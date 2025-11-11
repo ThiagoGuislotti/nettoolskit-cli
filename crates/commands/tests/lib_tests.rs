@@ -3,56 +3,90 @@
 use clap::Parser;
 use nettoolskit_commands::{Commands, ExitStatus, GlobalArgs};
 
-// ExitStatus conversion tests (from lib_tests.rs backup)
+// ExitStatus to ExitCode Conversion Tests
 
 #[test]
 fn test_exit_status_success_to_exit_code() {
+    // Arrange
     let status = ExitStatus::Success;
+
+    // Act
     let exit_code = std::process::ExitCode::from(status);
+
+    // Assert
     assert_eq!(exit_code, std::process::ExitCode::SUCCESS);
 }
 
 #[test]
 fn test_exit_status_error_to_exit_code() {
+    // Arrange
     let status = ExitStatus::Error;
+
+    // Act
     let exit_code = std::process::ExitCode::from(status);
+
+    // Assert
     assert_eq!(exit_code, std::process::ExitCode::FAILURE);
 }
 
 #[test]
 fn test_exit_status_interrupted_to_exit_code() {
+    // Arrange
     let status = ExitStatus::Interrupted;
+
+    // Act
     let exit_code = std::process::ExitCode::from(status);
+
+    // Assert
     assert_eq!(exit_code, std::process::ExitCode::from(130));
 }
 
+// ExitStatus to i32 Conversion Tests
+
 #[test]
 fn test_exit_status_to_i32_success() {
+    // Arrange
     let status = ExitStatus::Success;
+
+    // Act
     let code: i32 = status.into();
+
+    // Assert
     assert_eq!(code, 0);
 }
 
 #[test]
 fn test_exit_status_to_i32_error() {
+    // Arrange
     let status = ExitStatus::Error;
+
+    // Act
     let code: i32 = status.into();
+
+    // Assert
     assert_eq!(code, 1);
 }
 
 #[test]
 fn test_exit_status_to_i32_interrupted() {
+    // Arrange
     let status = ExitStatus::Interrupted;
+
+    // Act
     let code: i32 = status.into();
+
+    // Assert
     assert_eq!(code, 130);
 }
 
-// GlobalArgs tests (from lib_tests.rs backup)
+// GlobalArgs Parsing Tests
 
 #[test]
 fn test_global_args_defaults() {
+    // Act
     let args = GlobalArgs::try_parse_from(&["test", "--log-level", "info"]).unwrap();
 
+    // Assert
     assert_eq!(args.log_level, "info");
     assert!(args.config.is_none());
     assert!(!args.verbose);
@@ -60,6 +94,7 @@ fn test_global_args_defaults() {
 
 #[test]
 fn test_global_args_with_config() {
+    // Act
     let args = GlobalArgs::try_parse_from(&[
         "test",
         "--log-level",
@@ -70,6 +105,7 @@ fn test_global_args_with_config() {
     ])
     .unwrap();
 
+    // Assert
     assert_eq!(args.log_level, "debug");
     assert_eq!(args.config, Some("config.toml".to_string()));
     assert!(args.verbose);
@@ -77,14 +113,19 @@ fn test_global_args_with_config() {
 
 #[test]
 fn test_global_args_short_verbose() {
+    // Act
     let args = GlobalArgs::try_parse_from(&["test", "-v"]).unwrap();
+
+    // Assert
     assert!(args.verbose);
 }
 
 #[test]
 fn test_global_args_log_levels() {
+    // Arrange
     let log_levels = vec!["off", "error", "warn", "info", "debug", "trace"];
 
+    // Act & Assert
     for level in log_levels {
         let args = GlobalArgs::try_parse_from(&["test", "--log-level", level]).unwrap();
         assert_eq!(args.log_level, level);
@@ -93,11 +134,13 @@ fn test_global_args_log_levels() {
 
 #[test]
 fn test_global_args_debug() {
+    // Act
     let args = GlobalArgs::try_parse_from(&["test"]).unwrap();
     let debug_str = format!("{:?}", args);
 
+    // Assert
     assert!(debug_str.contains("GlobalArgs"));
-    assert!(debug_str.contains("info")); // default log level
+    assert!(debug_str.contains("info"));
 }
 
 #[test]

@@ -620,6 +620,7 @@ None
 
 - **📄 Detailed Architecture:** [architecture-migration-plan.md](architecture-migration-plan.md)
 - **📊 Phase 6.0 - Inventory & Preparation:** [task-phase-6.0-workspace-inventory.md](task-phase-6.0-workspace-inventory.md) *(Workspace migration analysis)*
+- **✅ Phase 8.0 - Test Migration:** [task-phase-8.0-test-migration.md](task-phase-8.0-test-migration.md) *(Commands crate test migration and standardization)*
 - **🏗️ Target Structure:** 13 crates in `crates/` directory
 - **⚙️ Community Standard:** 70% of 10+ crate projects use `crates/`
 
