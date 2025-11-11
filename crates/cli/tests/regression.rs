@@ -5,64 +5,77 @@
 
 use nettoolskit_commands::ExitStatus;
 use nettoolskit_core::Features;
+use std::env;
 
-/// Test that feature detection works correctly
+/// Clear all feature-related environment variables to prevent test interference
+fn clear_feature_env_vars() {
+    env::remove_var("NTK_USE_MODERN_TUI");
+    env::remove_var("NTK_USE_EVENT_DRIVEN");
+    env::remove_var("NTK_USE_FRAME_SCHEDULER");
+    env::remove_var("NTK_USE_PERSISTENT_SESSIONS");
+}
+
+// Feature Detection Tests
+
 #[test]
 fn test_feature_detection() {
+    // Arrange
+    clear_feature_env_vars();
+
+    // Act
     let features = Features::detect();
 
-    // Should always be able to detect features without panic
+    // Assert
     let desc = features.description();
     assert!(!desc.is_empty());
-
-    // Default should be standard UI (unless compiled with modern-tui feature)
     if !cfg!(feature = "modern-tui") {
         assert!(!features.use_modern_tui, "Standard UI should be default");
     }
 }
 
-/// Test that Features can be created from default
 #[test]
 fn test_features_default() {
+    // Arrange & Act
     let features = Features::default();
 
-    // Should not panic
+    // Assert
     assert!(features.description().len() > 0);
 }
 
-/// Test feature description formatting
 #[test]
 fn test_feature_description_formatting() {
-    let features = Features {
+    // Arrange
+    let default_features = Features {
         use_modern_tui: false,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: false,
     };
-
-    let desc = features.description();
-    assert_eq!(desc, "default");
-
-    let features = Features {
+    let modern_features = Features {
         use_modern_tui: true,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: false,
     };
 
-    let desc = features.description();
-    assert!(desc.contains("modern-tui"));
+    // Act
+    let default_desc = default_features.description();
+    let modern_desc = modern_features.description();
+
+    // Assert
+    assert_eq!(default_desc, "default");
+    assert!(modern_desc.contains("modern-tui"));
 }
 
-/// Test that environment variable overrides work
 #[test]
 fn test_env_var_override() {
-    // Set env var
+    // Arrange
     std::env::set_var("NTK_USE_MODERN_TUI", "1");
 
+    // Act
     let features = Features::detect();
 
-    // Should be enabled via env var
+    // Assert
     assert!(
         features.use_modern_tui,
         "Modern TUI should be enabled via env var"
@@ -72,9 +85,9 @@ fn test_env_var_override() {
     std::env::remove_var("NTK_USE_MODERN_TUI");
 }
 
-/// Test various environment variable formats
 #[test]
 fn test_env_var_formats() {
+    // Arrange
     let test_cases = vec![
         ("1", true),
         ("true", true),
@@ -89,16 +102,15 @@ fn test_env_var_formats() {
         ("", false),
     ];
 
+    // Act & Assert
     for (value, expected) in test_cases {
         std::env::set_var("NTK_TEST_VAR", value);
-
         let is_set = std::env::var("NTK_TEST_VAR")
             .map(|v| {
                 let v = v.trim().to_lowercase();
                 v == "1" || v == "true" || v == "yes" || v == "on"
             })
             .unwrap_or(false);
-
         assert_eq!(
             is_set, expected,
             "Failed for value '{}', expected {}",
@@ -106,89 +118,93 @@ fn test_env_var_formats() {
         );
     }
 
+    // Cleanup
     std::env::remove_var("NTK_TEST_VAR");
 }
 
-/// Test that ExitStatus conversion works
+// Exit Status Tests
+
 #[test]
 fn test_exit_status_conversion() {
-    let status = ExitStatus::Success;
-    let code: i32 = status.into();
-    assert_eq!(code, 0);
+    // Arrange & Act
+    let success_code: i32 = ExitStatus::Success.into();
+    let error_code: i32 = ExitStatus::Error.into();
+    let interrupted_code: i32 = ExitStatus::Interrupted.into();
 
-    let status = ExitStatus::Error;
-    let code: i32 = status.into();
-    assert_eq!(code, 1);
-
-    let status = ExitStatus::Interrupted;
-    let code: i32 = status.into();
-    assert_eq!(code, 130);
+    // Assert
+    assert_eq!(success_code, 0);
+    assert_eq!(error_code, 1);
+    assert_eq!(interrupted_code, 130);
 }
 
-/// Test that Features::is_full_modern works correctly
+// Feature Flags Tests
+
 #[test]
 fn test_is_full_modern() {
-    let features = Features {
+    // Arrange
+    let full_modern = Features {
         use_modern_tui: true,
         use_event_driven: true,
         use_frame_scheduler: true,
         use_persistent_sessions: false,
     };
-    assert!(features.is_full_modern());
-
-    let features = Features {
+    let partial_modern = Features {
         use_modern_tui: true,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: false,
     };
-    assert!(!features.is_full_modern());
-
-    let features = Features {
+    let no_modern = Features {
         use_modern_tui: false,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: false,
     };
-    assert!(!features.is_full_modern());
+
+    // Act & Assert
+    assert!(full_modern.is_full_modern());
+    assert!(!partial_modern.is_full_modern());
+    assert!(!no_modern.is_full_modern());
 }
 
-/// Test that Features::has_any_modern works correctly
 #[test]
 fn test_has_any_modern() {
-    let features = Features {
+    // Arrange
+    let no_modern = Features {
         use_modern_tui: false,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: false,
     };
-    assert!(!features.has_any_modern());
-
-    let features = Features {
+    let has_tui = Features {
         use_modern_tui: true,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: false,
     };
-    assert!(features.has_any_modern());
-
-    let features = Features {
+    let has_sessions = Features {
         use_modern_tui: false,
         use_event_driven: false,
         use_frame_scheduler: false,
         use_persistent_sessions: true,
     };
-    assert!(features.has_any_modern());
+
+    // Act & Assert
+    assert!(!no_modern.has_any_modern());
+    assert!(has_tui.has_any_modern());
+    assert!(has_sessions.has_any_modern());
 }
 
-/// Test that multiple env vars can be set simultaneously
 #[test]
 fn test_multiple_env_vars() {
+    // Arrange
     std::env::set_var("NTK_USE_MODERN_TUI", "1");
     std::env::set_var("NTK_USE_EVENT_DRIVEN", "1");
 
+    // Act
     let features = Features::detect();
 
+    // Assert
     assert!(features.use_modern_tui);
     assert!(features.use_event_driven);
 
@@ -197,9 +213,11 @@ fn test_multiple_env_vars() {
     std::env::remove_var("NTK_USE_EVENT_DRIVEN");
 }
 
-/// Integration test: Verify that feature detection doesn't panic with any combination
+// Integration Tests
+
 #[test]
 fn test_all_feature_combinations() {
+    // Arrange
     let combinations = vec![
         (false, false, false, false),
         (true, false, false, false),
@@ -211,6 +229,7 @@ fn test_all_feature_combinations() {
         (false, false, false, true),
     ];
 
+    // Act & Assert - Critical: All combinations should work without panic
     for (modern, event, frame, session) in combinations {
         let features = Features {
             use_modern_tui: modern,
@@ -218,20 +237,22 @@ fn test_all_feature_combinations() {
             use_frame_scheduler: frame,
             use_persistent_sessions: session,
         };
-
-        // Should not panic
         let _ = features.description();
         let _ = features.is_full_modern();
         let _ = features.has_any_modern();
     }
 }
 
-/// Test that feature detection is consistent across multiple calls
 #[test]
 fn test_feature_detection_consistency() {
+    // Arrange
+    clear_feature_env_vars();
+
+    // Act
     let features1 = Features::detect();
     let features2 = Features::detect();
 
+    // Assert
     assert_eq!(features1.use_modern_tui, features2.use_modern_tui);
     assert_eq!(features1.use_event_driven, features2.use_event_driven);
     assert_eq!(features1.use_frame_scheduler, features2.use_frame_scheduler);
