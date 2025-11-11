@@ -22,11 +22,13 @@ pub async fn render_template(
     let resolver = TemplateResolver::new(templates_root.to_path_buf());
 
     // Resolve template path
-    let full_path = resolver.resolve(template_path).await.map_err(|_| {
-        ManifestError::TemplateNotFound {
-            path: template_path.to_string(),
-        }
-    })?;
+    let full_path =
+        resolver
+            .resolve(template_path)
+            .await
+            .map_err(|_| ManifestError::TemplateNotFound {
+                path: template_path.to_string(),
+            })?;
 
     // Render using shared engine (no duplication!)
     engine
@@ -83,10 +85,7 @@ pub fn build_project_stub(name: &str, target_framework: &str, author: &str) -> S
 }
 
 /// Build project payload for rendering
-pub fn build_project_payload(
-    manifest: &ManifestDocument,
-    project: &ManifestProject,
-) -> Value {
+pub fn build_project_payload(manifest: &ManifestDocument, project: &ManifestProject) -> Value {
     let mut map = Map::new();
     map.insert("name".to_string(), Value::String(project.name.clone()));
     map.insert(

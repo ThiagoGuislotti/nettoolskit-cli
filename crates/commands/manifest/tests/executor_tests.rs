@@ -88,7 +88,11 @@ fn test_execution_config_paths() {
     };
 
     // Assert
-    assert!(config.manifest_path.to_str().unwrap().contains("domain.yml"));
+    assert!(config
+        .manifest_path
+        .to_str()
+        .unwrap()
+        .contains("domain.yml"));
     assert!(config.output_root.to_str().unwrap().contains("generated"));
 }
 

@@ -1,9 +1,9 @@
+use once_cell::sync::Lazy;
 /// Domain models for manifest documents
 ///
 /// These types represent the structure of NetToolsKit manifest files (YAML).
 use owo_colors::OwoColorize;
 use regex::Regex;
-use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;

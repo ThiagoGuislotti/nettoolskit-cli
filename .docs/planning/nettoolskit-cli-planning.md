@@ -4,11 +4,6 @@
 
 > Multi‑stack code generator based on **static templates**. CLI written in **Rust**. No Roslyn in this phase. Placeholders with `{{Tokens}}`, collision policy, `--dry-run` with unified diff, and optional insertion of `// TODO` + `NotImplementedException` when optional sections are empty.
 
-**Version**: 0.2.0
-**Status**: Phase 2.3 Complete (40% roadmap) - Moving to Phase 2.4
-**Tests**: 13/13 ✅
-**Next**: Phase 2.4-2.6 (Complete Async) → Phase 3 (Estado e Persistência)
-
 ---
 
 ## 🖥️ Terminal Layout Architecture
@@ -504,7 +499,6 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 #### 10.7.1 Context
 Analysis of `codex-rs/cli` identified critical gaps in NetToolsKit CLI's performance and UX.
-See: [comparative-analysis-codex-vs-ntk.md](comparative-analysis-codex-vs-ntk.md)
 
 #### 10.7.2 Critical Improvements
 
@@ -515,8 +509,6 @@ See: [comparative-analysis-codex-vs-ntk.md](comparative-analysis-codex-vs-ntk.md
 | **IMP-3** | ⭐⭐⭐ | 📋 Planned | Phase 4.1+ | Enhanced Input - Rustyline integration with history |
 | **IMP-4** | ⭐⭐ | 🔄 Partial | Phase 2.2-2.3 | Progress Indicators - Indicatif integration planned |
 | **IMP-5** | ⭐⭐⭐ | 📋 Planned | Phase 2.5+ | Task Parallelization - JoinSet pattern for concurrency |
-
-**See detailed implementation in:** [comparative-analysis-codex-vs-ntk.md](comparative-analysis-codex-vs-ntk.md)
 
 #### 10.7.3 Dependencies
 
@@ -613,29 +605,5 @@ None
 **Version:** 1.0.0
 **Started:** 2025-11-09
 **Detailed Documentation:** [architecture-migration-plan.md](architecture-migration-plan.md)
-
----
-
-### Migration References
-
-- **📄 Detailed Architecture:** [architecture-migration-plan.md](architecture-migration-plan.md)
-- **📊 Phase 6.0 - Inventory & Preparation:** [task-phase-6.0-workspace-inventory.md](task-phase-6.0-workspace-inventory.md) *(Workspace migration analysis)*
-- **✅ Phase 8.0 - Test Migration:** [task-phase-8.0-test-migration.md](task-phase-8.0-test-migration.md) *(Commands crate test migration and standardization)*
-- **🏗️ Target Structure:** 13 crates in `crates/` directory
-- **⚙️ Community Standard:** 70% of 10+ crate projects use `crates/`
-
-### Migration Decisions
-
-**Decisions:**
-- ✅ `crates/` structure (community standard)
-- ✅ NO `nettoolskit_` prefix (private workspace)
-- ✅ Features in `crates/commands/`
-- ✅ Utilities in `crates/shared/`
-
-**Risks:**
-- Phase 4 is largest (20 hours)
-- API changes need careful migration
-
-**Next:** Phase 1 (Workspace Skeleton)
 
 ---

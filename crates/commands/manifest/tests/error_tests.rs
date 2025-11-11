@@ -210,7 +210,10 @@ fn test_error_propagation_with_question_mark() {
 
     // Assert
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("validation failed"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("validation failed"));
 }
 
 #[test]
