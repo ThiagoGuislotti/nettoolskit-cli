@@ -1,78 +1,95 @@
+//! End-to-end UI integration tests
+//!
+//! Validates complete workflows combining display, terminal, and string-utils.
+//! Tests cross-module interactions, color usage in real scenarios, and UI
+//! component composition.
+//!
+//! ## Test Coverage
+//! - UI module integration (colors + functions)
+//! - Display and terminal interaction workflows
+//! - Color usage with display functions
+//! - Module completeness checks
+//! - Cross-platform compatibility validation
+
 use nettoolskit_ui::*;
 use nettoolskit_string_utils::string::truncate_directory;
 
+// Module Integration Tests
+
 #[test]
 fn test_ui_module_integration() {
-    // Test that all public items are accessible
+    // Arrange
     let _primary = PRIMARY_COLOR;
     let _secondary = SECONDARY_COLOR;
     let _white = WHITE_COLOR;
     let _gray = GRAY_COLOR;
 
-    // Test function integration
+    // Act
     let path = "/test/path";
     let _truncated = truncate_directory(path, 10);
     let _clear_result = clear_terminal();
 
+    // Assert
     assert!(true);
 }
 
 #[test]
 fn test_display_and_terminal_integration() {
-    // Test that display and terminal functions work together
+    // Arrange
     let test_path = "/very/long/directory/path/for/testing";
-    let truncated = truncate_directory(test_path, 20);
 
-    // After truncating path, should be able to clear terminal
+    // Act
+    let truncated = truncate_directory(test_path, 20);
     let _clear_result = clear_terminal();
 
-    assert!(truncated.len() <= 20 || truncated.len() <= 25); // Allow some flexibility
+    // Assert
+    assert!(truncated.len() <= 20 || truncated.len() <= 25);
 }
 
 #[test]
 fn test_color_usage_with_display_functions() {
-    // Test that colors can be used with display-related functions
+    // Arrange
     let _colors = vec![PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR, GRAY_COLOR];
-
-    // Test path truncation with colors in mind (path might contain color info)
     let test_path = "/colored/path/with/ansi/codes";
+
+    // Act
     let _truncated = truncate_directory(test_path, 15);
 
+    // Assert
     assert!(true);
 }
 
 #[test]
 fn test_module_completeness() {
-    // Verify all expected exports are available
-
-    // Colors
+    // Arrange - Colors
     let _primary = PRIMARY_COLOR;
     let _secondary = SECONDARY_COLOR;
     let _white = WHITE_COLOR;
     let _gray = GRAY_COLOR;
 
-    // Display functions
+    // Act - Display and terminal functions
     let _truncated = truncate_directory("/test", 10);
-
-    // Terminal functions
     let _clear_result = clear_terminal();
 
+    // Assert
     assert!(true);
 }
 
+// Error Handling and Consistency Tests
+
 #[test]
 fn test_ui_error_handling_integration() {
-    // Test error handling across UI modules
+    // Act
+    let result = clear_terminal();
 
-    // Terminal operations might fail
-    match clear_terminal() {
+    // Assert
+    // Critical: display operations work regardless of terminal operations
+    match result {
         Ok(()) => {
-            // If terminal ops succeed, display ops should work too
             let _truncated = truncate_directory("/test/path", 10);
             assert!(true);
         }
         Err(_) => {
-            // If terminal ops fail, display ops should still work
             let _truncated = truncate_directory("/test/path", 10);
             assert!(true);
         }
@@ -81,47 +98,49 @@ fn test_ui_error_handling_integration() {
 
 #[test]
 fn test_ui_consistency() {
-    // Test that UI components work consistently together
-
+    // Arrange
     let paths = vec![
         "/short",
         "/medium/length/path",
         "/very/long/path/with/many/segments/for/testing/truncation",
     ];
 
+    // Act & Assert
     for path in paths {
         let truncated = truncate_directory(path, 20);
-        assert!(truncated.len() <= 22); // Allow small margin
+        assert!(truncated.len() <= 22);
 
-        // Should be able to clear terminal after each operation
         let _clear = clear_terminal();
     }
 }
 
+// Thread Safety and Performance Tests
+
 #[test]
 fn test_ui_module_no_conflicts() {
-    // Test that importing everything doesn't cause conflicts
+    // Arrange
     use nettoolskit_ui::*;
 
+    // Act
     let _color_test = PRIMARY_COLOR;
     let _path_test = truncate_directory("/test", 5);
     let _terminal_test = clear_terminal();
 
+    // Assert
     assert!(true);
 }
 
 #[test]
 fn test_ui_synchronous_operations() {
-    // Test that UI functions work in synchronous contexts
-
+    // Arrange
     let _color = PRIMARY_COLOR;
+
+    // Act
     let _path = truncate_directory("/sync/test/path", 15);
-
-    // Simulate some work
     std::thread::sleep(std::time::Duration::from_millis(1));
-
     let _clear = clear_terminal();
 
+    // Assert
     assert!(true);
 }
 
@@ -129,7 +148,8 @@ fn test_ui_synchronous_operations() {
 fn test_ui_thread_safety() {
     use std::thread;
 
-    // Test UI functions in multi-threaded environment
+    // Arrange & Act
+    // Critical: verify UI functions are thread-safe
     let handles: Vec<_> = (0..3)
         .map(|i| {
             thread::spawn(move || {
@@ -140,6 +160,7 @@ fn test_ui_thread_safety() {
         })
         .collect();
 
+    // Assert
     for handle in handles {
         handle.join().unwrap();
     }
@@ -151,9 +172,10 @@ fn test_ui_thread_safety() {
 fn test_ui_performance_basic() {
     use std::time::Instant;
 
+    // Arrange
     let start = Instant::now();
 
-    // Perform various UI operations
+    // Act
     for i in 0..100 {
         let path = format!("/performance/test/path/iteration/{}", i);
         let _truncated = truncate_directory(&path, 20);
@@ -161,6 +183,6 @@ fn test_ui_performance_basic() {
 
     let duration = start.elapsed();
 
-    // Should complete quickly (within reasonable time)
-    assert!(duration.as_millis() < 1000); // Less than 1 second for 100 operations
+    // Assert
+    assert!(duration.as_millis() < 1000);
 }

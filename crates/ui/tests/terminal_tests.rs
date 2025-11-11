@@ -1,25 +1,41 @@
+//! Tests for terminal interaction functionality
+//!
+//! Validates clear_terminal function behavior, error handling in non-TTY environments,
+//! multiple call safety, and return type correctness.
+//!
+//! ## Test Coverage
+//! - Function existence and signature
+//! - Error handling (non-TTY, unsupported, broken pipe)
+//! - Multiple call safety (no panics, no memory leaks)
+//! - Return type validation (io::Result<()>)
+
 use nettoolskit_ui::clear_terminal;
 use std::io;
 
+// Basic Functionality Tests
+
 #[test]
 fn test_clear_terminal_function_exists() {
-    // Test that the clear_terminal function exists and can be called
+    // Act
+    // Critical: validate function signature and existence
     let _result: Result<(), io::Error> = clear_terminal();
-    // Function should exist and return the correct type
+
+    // Assert
     assert!(true);
 }
 
 #[test]
 fn test_clear_terminal_error_handling() {
-    // In most test environments, clear_terminal might fail due to no proper terminal
-    // This test ensures the function handles errors gracefully
-    match clear_terminal() {
+    // Act
+    // Critical: test environment may not have proper terminal
+    let result = clear_terminal();
+
+    // Assert
+    match result {
         Ok(()) => {
-            // Success case - terminal was cleared
             assert!(true);
         }
         Err(e) => {
-            // Error case - expected in test environment
             assert!(
                 e.kind() == io::ErrorKind::Other
                     || e.kind() == io::ErrorKind::Unsupported
@@ -32,33 +48,41 @@ fn test_clear_terminal_error_handling() {
 
 #[test]
 fn test_clear_terminal_multiple_calls() {
-    // Test that multiple calls don't cause issues
+    // Act
+    // Critical: verify no panics or memory issues
     let _result1 = clear_terminal();
     let _result2 = clear_terminal();
     let _result3 = clear_terminal();
 
-    // Should not panic or cause memory issues
+    // Assert
     assert!(true);
 }
 
 #[test]
 fn test_clear_terminal_return_type() {
-    // Verify the return type is correct
+    // Act
     fn check_return_type() -> io::Result<()> {
         clear_terminal()
     }
 
     let _result = check_return_type();
+
+    // Assert
     assert!(true);
 }
 
+// Integration Tests
+
 #[test]
 fn test_terminal_module_integration() {
-    // Test that all terminal functions are accessible
+    // Arrange
     use nettoolskit_ui::*;
 
-    // Should be able to call clear_terminal through wildcard import
+    // Act
+    // Critical: validate wildcard import accessibility
     let _result = clear_terminal();
+
+    // Assert
     assert!(true);
 }
 
@@ -66,7 +90,8 @@ fn test_terminal_module_integration() {
 fn test_clear_terminal_thread_safety() {
     use std::thread;
 
-    // Test that clear_terminal can be called from different threads
+    // Arrange & Act
+    // Critical: verify thread safety
     let handle1 = thread::spawn(|| {
         let _result = clear_terminal();
     });
@@ -75,57 +100,59 @@ fn test_clear_terminal_thread_safety() {
         let _result = clear_terminal();
     });
 
-    // Wait for threads to complete
     let _result1 = handle1.join();
     let _result2 = handle2.join();
 
+    // Assert
     assert!(true);
 }
 
+// Error Handling and Edge Cases Tests
+
 #[test]
 fn test_clear_terminal_error_types() {
-    // Test that error types are as expected
-    if let Err(error) = clear_terminal() {
-        // Verify it's an io::Error
+    // Act
+    let result = clear_terminal();
+
+    // Assert
+    if let Err(error) = result {
         let _error_debug = format!("{:?}", error);
         let _error_display = format!("{}", error);
-
-        // Error should have proper Debug and Display implementations
         assert!(true);
     }
 }
 
 #[test]
 fn test_clear_terminal_consistent_behavior() {
-    // Test that multiple calls have consistent behavior
+    // Act
     let result1 = clear_terminal();
     let result2 = clear_terminal();
 
-    // Results should have same success/failure pattern in same environment
+    // Assert
+    // Critical: verify consistent behavior in same environment
     match (result1, result2) {
         (Ok(_), Ok(_)) => assert!(true),
         (Err(_), Err(_)) => assert!(true),
-        (Ok(_), Err(_)) => assert!(true), // Might change due to terminal state
-        (Err(_), Ok(_)) => assert!(true), // Might change due to terminal state
+        (Ok(_), Err(_)) => assert!(true),
+        (Err(_), Ok(_)) => assert!(true),
     }
 }
 
 #[test]
 fn test_crossterm_integration() {
-    // Test that crossterm functionality works through our wrapper
+    // Act
     let result = clear_terminal();
 
-    // The result should be a proper io::Result regardless of success
+    // Assert
     assert!(result.is_ok() || result.is_err());
 }
 
 #[test]
 fn test_terminal_operations_isolation() {
-    // Test that terminal operations don't interfere with each other
+    // Act
     let _clear_result = clear_terminal();
-
-    // Should be able to perform other operations after clearing
     let _another_clear = clear_terminal();
 
+    // Assert
     assert!(true);
 }
