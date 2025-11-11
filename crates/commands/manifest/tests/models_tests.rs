@@ -1,7 +1,5 @@
 /// Tests for manifest domain models
-use nettoolskit_manifest::{
-    ManifestKind, ManifestProjectKind, ExecutionSummary,
-};
+use nettoolskit_manifest::{ExecutionSummary, ManifestKind, ManifestProjectKind};
 use std::path::PathBuf;
 
 // ManifestKind Tests
@@ -149,7 +147,10 @@ fn test_execution_summary_add_skipped() {
     let mut summary = ExecutionSummary::default();
 
     // Act
-    summary.skipped.push((PathBuf::from("src/Collision.cs"), "already exists".to_string()));
+    summary.skipped.push((
+        PathBuf::from("src/Collision.cs"),
+        "already exists".to_string(),
+    ));
 
     // Assert
     assert_eq!(summary.skipped.len(), 1);

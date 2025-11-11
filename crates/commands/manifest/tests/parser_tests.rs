@@ -1,5 +1,5 @@
 /// Tests for ManifestParser
-use nettoolskit_manifest::{ManifestParser};
+use nettoolskit_manifest::ManifestParser;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -216,7 +216,10 @@ apply:
 
     // Assert
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("artifact section is required"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("artifact section is required"));
 }
 
 // Feature Parsing Tests
