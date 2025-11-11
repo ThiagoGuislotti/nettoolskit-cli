@@ -2,13 +2,14 @@
 members = [
     "crates/cli",
     "crates/core",
-    "crates/commands-old",
+    "crates/commands",
+    "crates/commands/templating",
+    "crates/commands/manifest",
     "crates/ui",
     "crates/otel",
-    "crates/ollama",
     "crates/shared/async-utils",
     "crates/shared/file-search",
-    "crates/shared/utils",
+    "crates/shared/string-utils",
 ]
 resolver = "2"
 

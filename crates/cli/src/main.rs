@@ -36,7 +36,7 @@ async fn main() {
     }
 
     let exit_status: ExitStatus = match cli.subcommand {
-        Some(command) => nettoolskit_commands::execute_command(command, cli.global).await,
+        Some(command) => command.execute().await,
         None => interactive_mode(cli.global.verbose).await,
     };
 

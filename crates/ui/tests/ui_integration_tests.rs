@@ -1,5 +1,5 @@
 use nettoolskit_ui::*;
-use nettoolskit_utils::string::truncate_directory;
+use nettoolskit_string_utils::string::truncate_directory;
 
 #[test]
 fn test_ui_module_integration() {

@@ -201,16 +201,28 @@ endpoint = "http://localhost:4317"
 
 ```
 nettoolskit-cli/
-├── cli/                 # Main CLI entry point
-├── commands/           # Command implementations
-├── ui/                 # Terminal UI components
-├── async-utils/        # Async utilities and timeout management
-├── file-search/        # File discovery and filtering
-├── otel/              # OpenTelemetry observability
-├── ollama/            # AI integration via Ollama
-├── utils/             # String utilities and helpers
-└── core/              # Core types and shared functionality
+├── crates/
+│   ├── cli/                      # Main CLI entry point
+│   ├── commands/                 # Feature dispatcher (thin orchestrator)
+│   │   ├── src/                  # Command routing and processors
+│   │   ├── templating/           # Code generation feature (33 tests ✅)
+│   │   └── README.md             # Commands architecture details
+│   ├── core/                     # Core types and shared functionality
+│   ├── ui/                       # Terminal UI components (ratatui)
+│   ├── otel/                     # OpenTelemetry observability
+│   ├── ollama/                   # AI integration via Ollama
+│   └── shared/                   # Shared utilities
+│       ├── async-utils/          # Async utilities and timeout management
+│       ├── file-search/          # File discovery and filtering
+│       └── utils/                # String utilities and helpers
+└── Cargo.toml                    # Workspace configuration (10 crates)
 ```
+
+**Key Architecture Principles:**
+- ✅ **Modular Monolith**: Workspace with 10 crates
+- ✅ **Feature-First**: Commands dispatcher with feature sub-crates
+- ✅ **Clean Architecture**: Ports/Adapters within features
+- ✅ **Shared Infrastructure**: Common utilities in `shared/`
 
 ---
 

@@ -1,0 +1,43 @@
+[package]
+name = "nettoolskit-manifest"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Core types
+nettoolskit-core = { path = "../../core" }
+
+# Templating feature (sibling)
+nettoolskit-templating = { path = "../templating" }
+
+# UI and colors
+owo-colors = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# String utilities
+regex = "1.10"
+once_cell = "1.19"
+
+# File system
+walkdir = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = "1.0"
+
+# Telemetry
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[lib]
+name = "nettoolskit_manifest"
+path = "src/lib.rs"

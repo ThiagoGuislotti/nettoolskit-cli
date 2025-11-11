@@ -22,7 +22,6 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-pub mod async_executor;
 pub mod input;
 
 use input::{read_line_with_palette, InputResult};
@@ -200,7 +199,7 @@ async fn run_input_loop(
             }
             InputResult::Text(text) => {
                 raw_mode.disable()?;
-                process_text(&text);
+                let _ = process_text(&text);
                 raw_mode.enable()?;
                 // NOTE: Commented out to prevent screen clearing after text input
                 // This was causing input to disappear after Enter
