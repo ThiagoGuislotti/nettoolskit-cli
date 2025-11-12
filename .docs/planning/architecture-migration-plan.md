@@ -20,11 +20,11 @@
 | Phase 5 – Commands Dispatcher | ✅ Completed | 9/9 |
 | Phase 6 – Other Features | ⏳ Not Started | 0/13 |
 | Phase 7 – CLI/UI/Otel | ⏳ Not Started | 0/8 |
-| Phase 8 – Testing & QA | 🔄 In Progress | 5/16 |
+| Phase 8 – Testing & QA | 🔄 In Progress | 7/16 |
 | Phase 9 – Documentation | ⏳ Not Started | 0/11 |
 | Phase 10 – Release | ⏳ Not Started | 0/9 |
 
-**Total Progress:** 55/114 tasks (48.2%)
+**Total Progress:** 57/114 tasks (50.0%)
 
 **Legend:** ✅ Completed | ⏳ Not Started | 🔄 In Progress | ❌ Blocked
 
@@ -1933,14 +1933,19 @@ After completing Phase 5 (Commands Dispatcher) and reviewing the entire codebase
 - [ ] Verify async commands work correctly
 - [ ] Add CLI integration tests
 
-### Phase 8 – Testing & QA (2-3 days) [🔄 In Progress - 3/16]
+### Phase 8 – Testing & QA (2-3 days) [🔄 In Progress - 7/16]
 - [x] ✅ Apply AAA pattern to all test files (Phase 8.2 - 100% complete)
   - 32/32 files migrated (375 tests)
   - Updated rust-testing.instructions.md and e2e-testing.instructions.md
   - All tests passing with AAA pattern
 - [x] ✅ Update testing documentation and instructions
 - [x] ✅ Verify all existing tests pass after AAA migration
-- [ ] Add integration tests (cross-crate scenarios)
+- [x] ✅ Add integration tests (cross-crate scenarios) **(NEW - Phase 8.1 COMPLETE)**
+  - Created integration_tests.rs with 7 end-to-end tests
+  - 6 tests passing, 1 ignored (requires template files)
+  - Tests cover: dry-run mode, missing manifest, invalid YAML, async timeout, multiple contexts, execution summary
+  - Fixed YAML manifest format validation (type field, apply.feature section, templates directory)
+  - **Total manifest crate: 74 tests passing (17+10+15+8+10+8+6)**
 - [ ] Test interactive manifest creation flow (`/manifest create`)
 - [ ] Test file-based manifest application (`/manifest apply`)
 - [ ] Re-run all acceptance manifests
