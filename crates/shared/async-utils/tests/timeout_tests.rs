@@ -66,10 +66,10 @@ async fn test_timeout_zero_duration() {
     let result = with_timeout(Duration::ZERO, async { "instant" }).await;
 
     // Assert
-    match result {
-        Ok(value) => assert_eq!(value, "instant"),
-        Err(_) => assert!(true),
+    if let Ok(value) = result {
+        assert_eq!(value, "instant");
     }
+    // Timeout is also acceptable for ZERO duration
 }
 
 #[tokio::test]

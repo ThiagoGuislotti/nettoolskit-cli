@@ -112,11 +112,12 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
     let _session_timer = Timer::start("cli_session_duration", metrics.clone());
 
     // Use async-utils for timeout instead of direct tokio
-    if let Err(_) = with_timeout(
+    if (with_timeout(
         std::time::Duration::from_millis(50),
         tokio::time::sleep(std::time::Duration::from_millis(50)),
     )
-    .await
+    .await)
+        .is_err()
     {
         // Timeout is unlikely but we handle it gracefully
         info!("Initialization timeout completed (expected)");
@@ -173,7 +174,7 @@ async fn run_input_loop(
     ctrlc::set_handler(move || {
         interrupted_fallback.store(true, Ordering::SeqCst);
     })
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
 
     loop {
         raw_mode.enable()?;
@@ -186,7 +187,7 @@ async fn run_input_loop(
                 if cmd == "/quit" {
                     return Ok(ExitStatus::Success);
                 }
-                let status: ExitStatus = process_command(&cmd).await.into();
+                let status: ExitStatus = process_command(&cmd).await;
                 if matches!(status, ExitStatus::Success) && cmd == "/quit" {
                     return Ok(status);
                 }
@@ -199,7 +200,7 @@ async fn run_input_loop(
             }
             InputResult::Text(text) => {
                 raw_mode.disable()?;
-                let _ = process_text(&text);
+                std::mem::drop(process_text(&text));
                 raw_mode.enable()?;
                 // NOTE: Commented out to prevent screen clearing after text input
                 // This was causing input to disappear after Enter

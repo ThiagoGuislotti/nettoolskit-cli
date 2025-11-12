@@ -19,7 +19,7 @@ pub async fn render_template(
 ) -> ManifestResult<String> {
     // Use shared TemplateEngine from templating crate
     let engine = TemplateEngine::new().with_todo_insertion(insert_todo);
-    let resolver = TemplateResolver::new(templates_root.to_path_buf());
+    let resolver = TemplateResolver::new(templates_root);
 
     // Resolve template path
     let full_path =
@@ -41,14 +41,14 @@ pub async fn render_template(
 }
 
 /// Build solution stub (minimal .sln file)
+#[allow(dead_code)]
 pub fn build_solution_stub(_name: &str) -> String {
-    format!(
-        r#"
+    r#"
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{{2150E333-8FDC-42A3-9474-1A3956D46DE8}}") = "Solution Items", "Solution Items", "{{9A19103F-16F7-4668-BE54-9A1E7A4F7556}}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{9A19103F-16F7-4668-BE54-9A1E7A4F7556}"
 EndProject
 Global
     GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -59,12 +59,12 @@ Global
     EndGlobalSection
 EndGlobal
 "#
-    )
     .trim()
     .to_string()
 }
 
 /// Build project stub (minimal .csproj file)
+#[allow(dead_code)]
 pub fn build_project_stub(name: &str, target_framework: &str, author: &str) -> String {
     format!(
         r#"<Project Sdk="Microsoft.NET.Sdk">
@@ -85,6 +85,7 @@ pub fn build_project_stub(name: &str, target_framework: &str, author: &str) -> S
 }
 
 /// Build project payload for rendering
+#[allow(dead_code)]
 pub fn build_project_payload(manifest: &ManifestDocument, project: &ManifestProject) -> Value {
     let mut map = Map::new();
     map.insert("name".to_string(), Value::String(project.name.clone()));

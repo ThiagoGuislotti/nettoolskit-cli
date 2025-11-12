@@ -9,6 +9,8 @@
 //! - Multiple call safety (no panics, no memory leaks)
 //! - Return type validation (io::Result<()>)
 
+#![allow(clippy::assertions_on_constants)]
+
 use nettoolskit_ui::clear_terminal;
 use std::io;
 

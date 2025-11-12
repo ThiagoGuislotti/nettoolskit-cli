@@ -65,10 +65,7 @@ impl CommandHandle {
 
     /// Try to get result if ready
     pub fn try_result(&mut self) -> Option<CommandResult> {
-        match self.receiver.try_recv() {
-            Ok(result) => Some(result),
-            Err(_) => None,
-        }
+        self.receiver.try_recv().ok()
     }
 
     /// Request cancellation of the command

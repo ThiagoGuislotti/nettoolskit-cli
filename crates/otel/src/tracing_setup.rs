@@ -60,7 +60,7 @@ pub fn init_tracing_with_config(config: TracingConfig) -> Result<()> {
             .with_file(config.with_file)
             .with_line_number(config.with_line_numbers)
             .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-            .with_writer(ui_writer::UiMakeWriter::default())
+            .with_writer(ui_writer::UiMakeWriter)
             .pretty();
 
         registry.with(pretty_layer).try_init()?;
@@ -70,7 +70,7 @@ pub fn init_tracing_with_config(config: TracingConfig) -> Result<()> {
             .with_file(config.with_file)
             .with_line_number(config.with_line_numbers)
             .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-            .with_writer(ui_writer::UiMakeWriter::default())
+            .with_writer(ui_writer::UiMakeWriter)
             .compact();
 
         registry.with(compact_layer).try_init()?;
@@ -101,7 +101,7 @@ pub fn init_tracing_with_filter(filter: &str) -> Result<()> {
                 .with_file(true)
                 .with_line_number(true)
                 .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-                .with_writer(ui_writer::UiMakeWriter::default()),
+                .with_writer(ui_writer::UiMakeWriter),
         )
         .try_init()?;
 

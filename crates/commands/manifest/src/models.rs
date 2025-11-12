@@ -269,7 +269,7 @@ pub enum ArtifactKind {
 }
 
 impl ArtifactKind {
-    pub fn from_str(value: &str) -> Self {
+    pub fn parse_kind(value: &str) -> Self {
         match value {
             "value-object" => Self::ValueObject,
             "entity" => Self::Entity,
@@ -390,7 +390,7 @@ impl ManifestTemplates {
     pub fn index_by_artifact(&self) -> BTreeMap<ArtifactKind, Vec<&TemplateMapping>> {
         let mut map: BTreeMap<ArtifactKind, Vec<&TemplateMapping>> = BTreeMap::new();
         for mapping in &self.mapping {
-            let kind = ArtifactKind::from_str(&mapping.artifact);
+            let kind = ArtifactKind::parse_kind(&mapping.artifact);
             map.entry(kind).or_default().push(mapping);
         }
         map

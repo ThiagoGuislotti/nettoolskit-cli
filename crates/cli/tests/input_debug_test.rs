@@ -3,6 +3,8 @@
 //! This module provides manual testing utilities for validating
 //! the terminal input system behavior.
 
+#![allow(clippy::single_match)]
+
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use nettoolskit_ui::render_prompt;

@@ -4,8 +4,8 @@
 //! path truncation with different strategies and cross-platform compatibility.
 //!
 //! ## Test Coverage
-//! - Basic truncate_directory (no truncation, basic truncation, Unix paths)
-//! - Advanced truncate_directory_with_middle (Windows, Unix, home paths)
+//! - Basic `truncate_directory` (no truncation, basic truncation, Unix paths)
+//! - Advanced `truncate_directory_with_middle` (Windows, Unix, home paths)
 //! - Edge cases (very short limits, balanced splits, separator preservation)
 //! - Cross-platform path handling (Windows \, Unix /, home ~)
 

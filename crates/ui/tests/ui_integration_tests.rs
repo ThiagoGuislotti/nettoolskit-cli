@@ -3,6 +3,9 @@
 //! Validates complete workflows combining display, terminal, and string-utils.
 //! Tests cross-module interactions, color usage in real scenarios, and UI
 //! component composition.
+
+#![allow(clippy::assertions_on_constants)]
+#![allow(clippy::useless_vec)]
 //!
 //! ## Test Coverage
 //! - UI module integration (colors + functions)

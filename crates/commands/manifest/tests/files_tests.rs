@@ -4,7 +4,6 @@
 /// file writing, dry-run mode, and execution summary tracking.
 use nettoolskit_manifest::models::{ExecutionSummary, FileChange, FileChangeKind};
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 // Test Helpers

@@ -3,6 +3,8 @@
 //! Validates color constants (RGB values), path truncation integration with
 //! string-utils, cross-platform separator handling (Unix/Windows), and display
 //! formatting correctness.
+
+#![allow(clippy::assertions_on_constants)]
 //!
 //! ## Test Coverage
 //! - Color constant values (PRIMARY, SECONDARY, WHITE, GRAY)

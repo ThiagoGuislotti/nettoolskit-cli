@@ -97,11 +97,11 @@ fn test_gauge_operations() {
     // Act & Assert - Initial state
     assert_eq!(metrics.get_gauge("test_gauge"), None);
 
-    // Act - Set gauge
-    metrics.set_gauge("test_gauge", 3.14);
+    // Act - Set gauge (using 42.5 to avoid clippy::approx_constant)
+    metrics.set_gauge("test_gauge", 42.5);
 
     // Assert
-    assert_eq!(metrics.get_gauge("test_gauge"), Some(3.14));
+    assert_eq!(metrics.get_gauge("test_gauge"), Some(42.5));
 
     // Act - Overwrite gauge
     metrics.set_gauge("test_gauge", 2.71);

@@ -98,7 +98,7 @@ fn handle_key_event(
                 io::stdout().flush()?;
 
                 if palette.is_active() {
-                    if buffer.starts_with('/') && buffer.len() > 0 {
+                    if buffer.starts_with('/') && !buffer.is_empty() {
                         palette.update_query(&buffer[1..])?;
                     } else {
                         palette.close()?;

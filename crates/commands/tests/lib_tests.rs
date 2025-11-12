@@ -84,7 +84,7 @@ fn test_exit_status_to_i32_interrupted() {
 #[test]
 fn test_global_args_defaults() {
     // Act
-    let args = GlobalArgs::try_parse_from(&["test", "--log-level", "info"]).unwrap();
+    let args = GlobalArgs::try_parse_from(["test", "--log-level", "info"]).unwrap();
 
     // Assert
     assert_eq!(args.log_level, "info");
@@ -95,7 +95,7 @@ fn test_global_args_defaults() {
 #[test]
 fn test_global_args_with_config() {
     // Act
-    let args = GlobalArgs::try_parse_from(&[
+    let args = GlobalArgs::try_parse_from([
         "test",
         "--log-level",
         "debug",
@@ -114,7 +114,7 @@ fn test_global_args_with_config() {
 #[test]
 fn test_global_args_short_verbose() {
     // Act
-    let args = GlobalArgs::try_parse_from(&["test", "-v"]).unwrap();
+    let args = GlobalArgs::try_parse_from(["test", "-v"]).unwrap();
 
     // Assert
     assert!(args.verbose);
@@ -127,7 +127,7 @@ fn test_global_args_log_levels() {
 
     // Act & Assert
     for level in log_levels {
-        let args = GlobalArgs::try_parse_from(&["test", "--log-level", level]).unwrap();
+        let args = GlobalArgs::try_parse_from(["test", "--log-level", level]).unwrap();
         assert_eq!(args.log_level, level);
     }
 }
@@ -135,7 +135,7 @@ fn test_global_args_log_levels() {
 #[test]
 fn test_global_args_debug() {
     // Act
-    let args = GlobalArgs::try_parse_from(&["test"]).unwrap();
+    let args = GlobalArgs::try_parse_from(["test"]).unwrap();
     let debug_str = format!("{:?}", args);
 
     // Assert
@@ -145,7 +145,7 @@ fn test_global_args_debug() {
 
 #[test]
 fn test_global_args_fields_access() {
-    let args = GlobalArgs::try_parse_from(&["test", "--verbose", "--config", "test.toml"]).unwrap();
+    let args = GlobalArgs::try_parse_from(["test", "--verbose", "--config", "test.toml"]).unwrap();
 
     assert!(args.verbose);
     assert_eq!(args.config.as_ref().unwrap(), "test.toml");
@@ -154,7 +154,7 @@ fn test_global_args_fields_access() {
 
 #[test]
 fn test_global_args_clone() {
-    let args = GlobalArgs::try_parse_from(&["test", "--verbose"]).unwrap();
+    let args = GlobalArgs::try_parse_from(["test", "--verbose"]).unwrap();
     let cloned = args.clone();
 
     assert_eq!(args.verbose, cloned.verbose);

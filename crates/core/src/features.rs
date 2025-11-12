@@ -11,6 +11,7 @@ use std::env;
 /// 1. Compile-time: `cargo build --features modern-tui`
 /// 2. Runtime: `NTK_USE_MODERN_TUI=1 ntk`
 /// 3. Config file: `~/.config/nettoolskit/config.toml`
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Features {
     /// Use modern Ratatui-based TUI instead of standard printf-style UI
@@ -39,6 +40,7 @@ impl Features {
     /// 1. Environment variables (highest)
     /// 2. Compile-time features
     /// 3. Default (standard UI)
+    #[must_use]
     pub fn detect() -> Self {
         let compile_time = Self::from_compile_time();
         let env_override = Self::from_env();
@@ -54,7 +56,7 @@ impl Features {
     }
 
     /// Detect features from compile-time feature flags
-    fn from_compile_time() -> Self {
+    const fn from_compile_time() -> Self {
         Self {
             use_modern_tui: cfg!(feature = "modern-tui"),
             use_event_driven: cfg!(feature = "event-driven"),
@@ -80,12 +82,14 @@ impl Features {
     }
 
     /// Check if all modern features are enabled
-    pub fn is_full_modern(&self) -> bool {
+    #[must_use]
+    pub const fn is_full_modern(&self) -> bool {
         self.use_modern_tui && self.use_event_driven && self.use_frame_scheduler
     }
 
     /// Check if any modern feature is enabled
-    pub fn has_any_modern(&self) -> bool {
+    #[must_use]
+    pub const fn has_any_modern(&self) -> bool {
         self.use_modern_tui
             || self.use_event_driven
             || self.use_frame_scheduler
@@ -93,6 +97,7 @@ impl Features {
     }
 
     /// Get human-readable description of enabled features
+    #[must_use]
     pub fn description(&self) -> String {
         let mut features = Vec::new();
 
@@ -172,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_env_var_parsing() {
-        assert!(env_var_is_set("TEST_VAR") == false); // Not set
+        assert!(!env_var_is_set("TEST_VAR")); // Not set
 
         std::env::set_var("TEST_VAR", "1");
         assert!(env_var_is_set("TEST_VAR"));
