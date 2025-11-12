@@ -63,7 +63,7 @@ pub fn search_files<P: AsRef<Path>>(root: P, config: &SearchConfig) -> Result<Ve
         let entry = entry?;
         let path = entry.path();
 
-        if !entry.file_type().map_or(false, |ft| ft.is_file()) {
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;
         }
 

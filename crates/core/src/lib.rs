@@ -1,7 +1,7 @@
-//! Core types and utilities for NetToolsKit CLI
+//! Core types and utilities for `NetToolsKit` CLI
 //!
-//! This crate provides the foundational types, traits, and utilities
-//! used across the NetToolsKit CLI application.
+//! This crate provides fundamental types, traits, and utilities
+//! used across the `NetToolsKit` CLI application.
 
 /// Core error types for the application
 pub type Result<T> = anyhow::Result<T>;

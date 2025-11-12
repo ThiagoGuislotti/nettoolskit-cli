@@ -199,7 +199,7 @@ fn test_exit_status_debug() {
 #[test]
 fn test_exit_status_clone_copy() {
     let original = ExitStatus::Success;
-    let cloned = original.clone();
+    let cloned = original; // ExitStatus is Copy, no need for .clone()
     let copied = original;
 
     assert_eq!(original, cloned);

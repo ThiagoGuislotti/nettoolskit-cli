@@ -171,7 +171,7 @@ fn test_template_result_ok() {
 
     // Assert
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "success");
+    assert_eq!(result.as_ref().unwrap(), "success");
 }
 
 #[test]

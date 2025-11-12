@@ -1,7 +1,7 @@
-//! String utilities for NetToolsKit CLI
+//! String utilities for `NetToolsKit` CLI
 //!
-//! This module provides common string manipulation functions
-//! used throughout the NetToolsKit CLI application.
+//! This module provides common string manipulation utilities
+//! used throughout the `NetToolsKit` CLI application.
 
 /// Detect directory separator (Windows backslash or Unix forward slash)
 fn detect_separator(path: &str) -> char {
@@ -22,7 +22,7 @@ fn simple_truncate(dir: &str, max_width: usize, ellipsis: &str, separator: char)
     let back_start = dir.len().saturating_sub(back_length);
     let back = &dir[back_start..];
 
-    format!("{}{}{}{}", front, ellipsis, separator, back)
+    format!("{front}{ellipsis}{separator}{back}")
 }
 
 /// Truncate a directory path to fit within a maximum width.
@@ -47,6 +47,7 @@ fn simple_truncate(dir: &str, max_width: usize, ellipsis: &str, separator: char)
 /// let truncated = truncate_directory("/very/long/path/to/project", 20);
 /// // Returns something like "/very/.../project"
 /// ```
+#[must_use]
 pub fn truncate_directory(dir: &str, max_width: usize) -> String {
     if dir.len() <= max_width {
         return dir.to_string();
@@ -67,10 +68,7 @@ pub fn truncate_directory(dir: &str, max_width: usize) -> String {
     let base_length = first_part.len() + last_part.len() + ellipsis.len() + 2; // +2 for separators
 
     if base_length <= max_width {
-        return format!(
-            "{}{}{}{}{}",
-            first_part, separator, ellipsis, separator, last_part
-        );
+        return format!("{first_part}{separator}{ellipsis}{separator}{last_part}");
     }
 
     // Truncate the last part if still too long
@@ -81,10 +79,7 @@ pub fn truncate_directory(dir: &str, max_width: usize) -> String {
         last_part
     };
 
-    format!(
-        "{}{}{}{}{}",
-        first_part, separator, ellipsis, separator, truncated_last
-    )
+    format!("{first_part}{separator}{ellipsis}{separator}{truncated_last}")
 }
 
 /// Truncate a directory path using middle ellipsis with separators.
@@ -108,13 +103,15 @@ pub fn truncate_directory(dir: &str, max_width: usize) -> String {
 /// let truncated = truncate_directory_with_middle("C:\\very\\long\\path\\to\\project", 25);
 /// // Returns something like "C:\\very\\...\\project"
 /// ```
+/// A string with middle parts replaced by "..." if truncation was needed
+#[must_use]
 pub fn truncate_directory_with_middle(dir: &str, max_width: usize) -> String {
     if dir.len() <= max_width {
         return dir.to_string();
     }
 
     let separator = detect_separator(dir);
-    let ellipsis = format!("{}...", separator);
+    let ellipsis = format!("{separator}...");
 
     // Fallback for very short limits
     if max_width <= ellipsis.len() + 4 {
@@ -146,7 +143,7 @@ pub fn truncate_directory_with_middle(dir: &str, max_width: usize) -> String {
         let component = if i == 0 && part.is_empty() {
             separator.to_string() // Unix root "/"
         } else {
-            format!("{}{}", part, separator)
+            format!("{part}{separator}")
         };
 
         if used_front + component.len() <= front_space {
@@ -188,9 +185,9 @@ pub fn truncate_directory_with_middle(dir: &str, max_width: usize) -> String {
 
     // Construct result
     let result = if back_str.is_empty() {
-        format!("{}{}", clean_front, ellipsis)
+        format!("{clean_front}{ellipsis}")
     } else {
-        format!("{}{}{}{}", clean_front, ellipsis, separator, back_str)
+        format!("{clean_front}{ellipsis}{separator}{back_str}")
     };
 
     // Fallback if still too long

@@ -134,7 +134,7 @@ fn build_template_index() -> BTreeMap<ArtifactKind, Vec<&'static TemplateMapping
 
     let mut index: BTreeMap<ArtifactKind, Vec<&'static TemplateMapping>> = BTreeMap::new();
     for mapping in leaked {
-        let kind = ArtifactKind::from_str(&mapping.artifact);
+        let kind = ArtifactKind::parse_kind(&mapping.artifact);
         index.entry(kind).or_default().push(mapping);
     }
     index
