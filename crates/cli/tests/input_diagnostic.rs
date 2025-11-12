@@ -78,7 +78,10 @@ fn test_async_utils_available() {
     });
 
     // Assert
-    assert!(result.is_ok(), "Async operation should complete within timeout");
+    assert!(
+        result.is_ok(),
+        "Async operation should complete within timeout"
+    );
     println!("✅ Async utilities work correctly");
 }
 

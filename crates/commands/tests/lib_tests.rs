@@ -194,46 +194,31 @@ fn test_commands_as_slash_command() {
 #[tokio::test]
 async fn test_commands_execute_list() {
     let result = Commands::List.execute().await;
-    assert!(matches!(
-        result,
-        ExitStatus::Success | ExitStatus::Error
-    ));
+    assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_commands_execute_new() {
     let result = Commands::New.execute().await;
-    assert!(matches!(
-        result,
-        ExitStatus::Success | ExitStatus::Error
-    ));
+    assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_commands_execute_check() {
     let result = Commands::Check.execute().await;
-    assert!(matches!(
-        result,
-        ExitStatus::Success | ExitStatus::Error
-    ));
+    assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_commands_execute_render() {
     let result = Commands::Render.execute().await;
-    assert!(matches!(
-        result,
-        ExitStatus::Success | ExitStatus::Error
-    ));
+    assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[tokio::test]
 async fn test_commands_execute_apply() {
     let result = Commands::Apply.execute().await;
-    assert!(matches!(
-        result,
-        ExitStatus::Success | ExitStatus::Error
-    ));
+    assert!(matches!(result, ExitStatus::Success | ExitStatus::Error));
 }
 
 #[test]

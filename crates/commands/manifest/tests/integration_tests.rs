@@ -118,8 +118,14 @@ async fn test_integration_executor_dry_run_no_files_created() {
     }
     assert!(result.is_ok(), "Executor should succeed in dry-run mode");
     let summary = result.unwrap();
-    assert!(summary.created.is_empty(), "Dry-run should not create files");
-    assert!(summary.updated.is_empty(), "Dry-run should not update files");
+    assert!(
+        summary.created.is_empty(),
+        "Dry-run should not create files"
+    );
+    assert!(
+        summary.updated.is_empty(),
+        "Dry-run should not update files"
+    );
     assert!(
         !summary.notes.is_empty(),
         "Dry-run should have notes about what would be created"
@@ -238,11 +244,8 @@ async fn test_integration_executor_handles_async_timeout() {
 
     // Act - Execute with timeout
     let executor = ManifestExecutor::new();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        executor.execute(config),
-    )
-    .await;
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(5), executor.execute(config)).await;
 
     // Assert
     assert!(result.is_ok(), "Execution should complete within timeout");

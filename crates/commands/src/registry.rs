@@ -2,7 +2,6 @@
 ///
 /// This module provides a centralized registry for all CLI commands,
 /// enabling dynamic command discovery and execution.
-
 use crate::{CommandError, ExitStatus, Result};
 use std::collections::HashMap;
 use std::future::Future;

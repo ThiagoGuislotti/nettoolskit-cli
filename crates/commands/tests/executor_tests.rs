@@ -2,8 +2,7 @@
 ///
 /// Validates command handle behavior, progress tracking,
 /// cancellation support, and concurrent execution patterns.
-
-use nettoolskit_commands::{CommandProgress, AsyncCommandExecutor};
+use nettoolskit_commands::{AsyncCommandExecutor, CommandProgress};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -50,9 +49,7 @@ async fn test_async_executor_spawn_simple() {
     let mut executor = AsyncCommandExecutor::new();
 
     // Act
-    let handle = executor.spawn(async {
-        Ok("success".to_string())
-    });
+    let handle = executor.spawn(async { Ok("success".to_string()) });
 
     let result = handle.wait().await.unwrap();
 
@@ -85,9 +82,7 @@ async fn test_async_executor_spawn_error() {
     let mut executor = AsyncCommandExecutor::new();
 
     // Act
-    let handle = executor.spawn(async {
-        Err("command failed".into())
-    });
+    let handle = executor.spawn(async { Err("command failed".into()) });
 
     let result = handle.wait().await.unwrap();
 
@@ -195,11 +190,7 @@ async fn test_async_executor_concurrent_commands() {
         Ok("cmd3".to_string())
     });
 
-    let (r1, r2, r3) = tokio::join!(
-        handle1.wait(),
-        handle2.wait(),
-        handle3.wait()
-    );
+    let (r1, r2, r3) = tokio::join!(handle1.wait(), handle2.wait(), handle3.wait());
 
     // Assert
     assert!(r1.is_ok());
@@ -289,9 +280,7 @@ async fn test_command_handle_cancel_not_cancellable() {
     // Arrange
     let mut executor = AsyncCommandExecutor::new();
 
-    let mut handle = executor.spawn(async {
-        Ok("result".to_string())
-    });
+    let mut handle = executor.spawn(async { Ok("result".to_string()) });
 
     // Act
     let cancelled = handle.cancel().await;

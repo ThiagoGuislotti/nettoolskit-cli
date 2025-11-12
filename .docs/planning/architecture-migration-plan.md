@@ -20,11 +20,11 @@
 | Phase 5 – Commands Dispatcher | ✅ Completed | 9/9 |
 | Phase 6 – Other Features | ⏳ Not Started | 0/13 |
 | Phase 7 – CLI/UI/Otel | ⏳ Not Started | 0/8 |
-| Phase 8 – Testing & QA | 🔄 In Progress | 7/16 |
+| Phase 8 – Testing & QA | 🔄 In Progress | 11/16 |
 | Phase 9 – Documentation | ⏳ Not Started | 0/11 |
 | Phase 10 – Release | ⏳ Not Started | 0/9 |
 
-**Total Progress:** 57/114 tasks (50.0%)
+**Total Progress:** 61/114 tasks (53.5%)
 
 **Legend:** ✅ Completed | ⏳ Not Started | 🔄 In Progress | ❌ Blocked
 

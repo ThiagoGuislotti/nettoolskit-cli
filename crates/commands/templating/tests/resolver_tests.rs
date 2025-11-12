@@ -133,9 +133,12 @@ async fn test_cache_performance() {
     assert!(result1.is_ok());
     assert!(result2.is_ok());
     // Critical: Cache hit should be at least 10x faster
-    assert!(duration2 < duration1 / 10,
+    assert!(
+        duration2 < duration1 / 10,
         "Cache hit ({:?}) should be much faster than miss ({:?})",
-        duration2, duration1);
+        duration2,
+        duration1
+    );
     let (cache_size, _) = resolver.cache_stats();
     assert_eq!(cache_size, 1, "Cache should contain 1 entry");
 }
@@ -150,9 +153,8 @@ async fn test_parallel_resolve() {
     // Act - Spawn concurrent operations
     for _ in 0..10 {
         let resolver_clone = Arc::clone(&resolver);
-        let handle = tokio::spawn(async move {
-            resolver_clone.resolve("src/Domain/Entity.cs.hbs").await
-        });
+        let handle =
+            tokio::spawn(async move { resolver_clone.resolve("src/Domain/Entity.cs.hbs").await });
         handles.push(handle);
     }
 

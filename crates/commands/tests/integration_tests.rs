@@ -74,13 +74,7 @@ async fn test_malformed_commands() {
 
 #[tokio::test]
 async fn test_command_whitespace_variations() {
-    let whitespace_commands = vec![
-        " /quit",
-        "/quit ",
-        " /quit ",
-        "\t/quit",
-        "/quit\t",
-    ];
+    let whitespace_commands = vec![" /quit", "/quit ", " /quit ", "\t/quit", "/quit\t"];
 
     for cmd in whitespace_commands {
         let result = process_command(cmd).await;
@@ -106,9 +100,7 @@ async fn test_concurrent_command_execution() {
 
     let handles: Vec<_> = commands
         .into_iter()
-        .map(|cmd| tokio::spawn(async move {
-            process_command(cmd).await
-        }))
+        .map(|cmd| tokio::spawn(async move { process_command(cmd).await }))
         .collect();
 
     for handle in handles {
@@ -134,14 +126,7 @@ async fn test_command_case_sensitivity() {
 
 #[tokio::test]
 async fn test_all_commands_are_registered() {
-    let expected_commands = vec![
-        "/quit",
-        "/list",
-        "/new",
-        "/check",
-        "/render",
-        "/apply",
-    ];
+    let expected_commands = vec!["/quit", "/list", "/new", "/check", "/render", "/apply"];
 
     for cmd in expected_commands {
         let result = process_command(cmd).await;

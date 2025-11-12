@@ -2,7 +2,6 @@
 ///
 /// Validates error type conversions, Display implementations,
 /// and error propagation patterns.
-
 use nettoolskit_commands::{CommandError, Result};
 
 // Error Display Tests

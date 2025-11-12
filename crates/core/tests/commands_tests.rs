@@ -22,7 +22,11 @@ fn test_commands_array_has_expected_count() {
 #[test]
 fn test_all_commands_start_with_slash() {
     for (cmd, _desc) in COMMANDS {
-        assert!(cmd.starts_with('/'), "Command '{}' should start with '/'", cmd);
+        assert!(
+            cmd.starts_with('/'),
+            "Command '{}' should start with '/'",
+            cmd
+        );
     }
 }
 
