@@ -1,10 +1,10 @@
 use crate::{CommandRegistry, ExitStatus};
-use nettoolskit_manifest::{ManifestExecutor, ExecutionConfig};
+use nettoolskit_manifest::{ExecutionConfig, ManifestExecutor};
 use nettoolskit_otel::{Metrics, Timer};
 use nettoolskit_ui::PRIMARY_COLOR;
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Process slash commands from CLI and return appropriate status
 ///
@@ -88,25 +88,15 @@ fn build_command_registry() -> CommandRegistry {
         Ok(ExitStatus::Success)
     });
 
-    registry.register("/list", |_args| async move {
-        Ok(handle_list().await)
-    });
+    registry.register("/list", |_args| async move { Ok(handle_list().await) });
 
-    registry.register("/new", |_args| async move {
-        Ok(handle_new().await)
-    });
+    registry.register("/new", |_args| async move { Ok(handle_new().await) });
 
-    registry.register("/check", |_args| async move {
-        Ok(handle_check().await)
-    });
+    registry.register("/check", |_args| async move { Ok(handle_check().await) });
 
-    registry.register("/render", |_args| async move {
-        Ok(handle_render().await)
-    });
+    registry.register("/render", |_args| async move { Ok(handle_render().await) });
 
-    registry.register("/apply", |_args| async move {
-        Ok(handle_apply().await)
-    });
+    registry.register("/apply", |_args| async move { Ok(handle_apply().await) });
 
     registry
 }
@@ -144,7 +134,10 @@ async fn handle_list() -> ExitStatus {
     // Should scan current directory and subdirectories for manifest files
     // For now, provide placeholder feedback
 
-    println!("\n{}", "ℹ️  Manifest discovery to be fully implemented".yellow());
+    println!(
+        "\n{}",
+        "ℹ️  Manifest discovery to be fully implemented".yellow()
+    );
     println!("   Expected: Search for ntk-manifest.yml in current directory");
 
     ExitStatus::Success
@@ -164,7 +157,10 @@ async fn handle_new() -> ExitStatus {
     // 3. Target language (.NET, Java, Go, Python)
     // 4. Artifacts to generate (entities, repositories, use cases, etc.)
 
-    println!("\n{}", "ℹ️  Interactive creation to be fully implemented".yellow());
+    println!(
+        "\n{}",
+        "ℹ️  Interactive creation to be fully implemented".yellow()
+    );
     println!("   Expected: Step-by-step wizard for manifest creation");
 
     ExitStatus::Success
@@ -194,7 +190,10 @@ async fn handle_check() -> ExitStatus {
     }
 
     println!("  📄 Found: {}", manifest_path.display());
-    println!("\n{}", "ℹ️  Validation logic to be fully implemented".yellow());
+    println!(
+        "\n{}",
+        "ℹ️  Validation logic to be fully implemented".yellow()
+    );
     println!("   Expected: Parse and validate manifest structure");
 
     ExitStatus::Success
@@ -213,7 +212,10 @@ async fn handle_render() -> ExitStatus {
     // 3. Render templates (without writing files)
     // 4. Display preview of generated code
 
-    println!("\n{}", "ℹ️  Render preview to be fully implemented".yellow());
+    println!(
+        "\n{}",
+        "ℹ️  Render preview to be fully implemented".yellow()
+    );
     println!("   Expected: Show preview of files that would be generated");
 
     ExitStatus::Success
@@ -240,7 +242,7 @@ async fn handle_apply() -> ExitStatus {
     let executor = ManifestExecutor::new();
     let config = ExecutionConfig {
         manifest_path: manifest_path.clone(),
-        output_root: PathBuf::from("."),  // Current directory
+        output_root: PathBuf::from("."), // Current directory
         dry_run: false,
     };
 

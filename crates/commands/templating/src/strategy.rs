@@ -341,11 +341,7 @@ impl ClojureStrategy {
             conventions: LanguageConventions {
                 source_dirs: vec!["src".to_string()],
                 test_dirs: vec!["test".to_string()],
-                skip_normalization: vec![
-                    "src".to_string(),
-                    "test".to_string(),
-                    "dev".to_string(),
-                ],
+                skip_normalization: vec!["src".to_string(), "test".to_string(), "dev".to_string()],
             },
         }
     }
@@ -383,5 +379,3 @@ impl LanguageStrategy for ClojureStrategy {
         "clj"
     }
 }
-
-

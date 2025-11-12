@@ -2,7 +2,6 @@
 ///
 /// Tests the async command dispatcher, including command routing,
 /// telemetry integration, and handler execution.
-
 use nettoolskit_commands::{processor, ExitStatus};
 
 // Command Processing Tests
@@ -132,12 +131,9 @@ async fn test_concurrent_command_processing() {
     let commands = vec!["/list", "/new", "/render"];
 
     // Act
-    let handles: Vec<_> = commands.into_iter()
-        .map(|cmd| {
-            tokio::spawn(async move {
-                processor::process_command(cmd).await
-            })
-        })
+    let handles: Vec<_> = commands
+        .into_iter()
+        .map(|cmd| tokio::spawn(async move { processor::process_command(cmd).await }))
         .collect();
 
     // Assert
@@ -179,14 +175,7 @@ async fn test_process_command_idempotent() {
 #[tokio::test]
 async fn test_processor_doesnt_panic_on_invalid_input() {
     // Arrange
-    let invalid_inputs = vec![
-        "/",
-        "//",
-        "/123",
-        "/cmd\0null",
-        "/cmd\nline",
-        "/cmd\ttab",
-    ];
+    let invalid_inputs = vec!["/", "//", "/123", "/cmd\0null", "/cmd\nline", "/cmd\ttab"];
 
     // Act & Assert
     for input in invalid_inputs {

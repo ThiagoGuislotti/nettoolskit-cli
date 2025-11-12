@@ -169,7 +169,9 @@ fn test_append_domain_tasks_generates_all_artifact_types() {
     assert!(tasks.iter().any(|t| t.kind == ArtifactKind::ValueObject));
     assert!(tasks.iter().any(|t| t.kind == ArtifactKind::Entity));
     assert!(tasks.iter().any(|t| t.kind == ArtifactKind::DomainEvent));
-    assert!(tasks.iter().any(|t| t.kind == ArtifactKind::RepositoryInterface));
+    assert!(tasks
+        .iter()
+        .any(|t| t.kind == ArtifactKind::RepositoryInterface));
     assert!(tasks.iter().any(|t| t.kind == ArtifactKind::EnumType));
 }
 
@@ -193,10 +195,16 @@ fn test_append_domain_tasks_uses_correct_templates() {
     // Assert
     assert!(result.is_ok());
 
-    let value_object_task = tasks.iter().find(|t| t.kind == ArtifactKind::ValueObject).unwrap();
+    let value_object_task = tasks
+        .iter()
+        .find(|t| t.kind == ArtifactKind::ValueObject)
+        .unwrap();
     assert_eq!(value_object_task.template, "Domain/ValueObject.cs.hbs");
 
-    let entity_task = tasks.iter().find(|t| t.kind == ArtifactKind::Entity).unwrap();
+    let entity_task = tasks
+        .iter()
+        .find(|t| t.kind == ArtifactKind::Entity)
+        .unwrap();
     assert_eq!(entity_task.template, "Domain/Entity.cs.hbs");
 }
 
@@ -314,7 +322,10 @@ fn test_append_artifact_tasks_with_value_object_filter() {
     let contexts = vec![&context];
     let template_index = build_template_index();
     let kind = ArtifactKind::ValueObject;
-    let mappings = template_index.get(&kind).map(|v| v.as_slice()).unwrap_or(&[]);
+    let mappings = template_index
+        .get(&kind)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
     let mut tasks: Vec<RenderTask> = Vec::new();
 
     // Act
@@ -341,7 +352,10 @@ fn test_append_artifact_tasks_without_filter_generates_all_of_kind() {
     let contexts = vec![&context];
     let template_index = build_template_index();
     let kind = ArtifactKind::ValueObject;
-    let mappings = template_index.get(&kind).map(|v| v.as_slice()).unwrap_or(&[]);
+    let mappings = template_index
+        .get(&kind)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
     let mut tasks: Vec<RenderTask> = Vec::new();
 
     // Act - No name filter, should generate all ValueObjects
@@ -356,5 +370,9 @@ fn test_append_artifact_tasks_without_filter_generates_all_of_kind() {
 
     // Assert
     assert!(result.is_ok());
-    assert_eq!(tasks.len(), 1, "Should generate all ValueObjects (1 in test data)");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "Should generate all ValueObjects (1 in test data)"
+    );
 }

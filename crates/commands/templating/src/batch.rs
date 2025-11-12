@@ -172,9 +172,7 @@ impl BatchRenderer {
             }
 
             // Spawn new task
-            join_set.spawn(async move {
-                Self::render_single(engine, resolver, request).await
-            });
+            join_set.spawn(async move { Self::render_single(engine, resolver, request).await });
         }
 
         // Wait for remaining tasks
@@ -238,17 +236,15 @@ impl BatchRenderer {
 
         // Create output directory if needed
         if let Some(parent) = request.output.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|err| {
-                    (
-                        request.template.clone(),
-                        TemplateError::ReadError {
-                            path: parent.display().to_string(),
-                            source: err,
-                        },
-                    )
-                })?;
+            tokio::fs::create_dir_all(parent).await.map_err(|err| {
+                (
+                    request.template.clone(),
+                    TemplateError::ReadError {
+                        path: parent.display().to_string(),
+                        source: err,
+                    },
+                )
+            })?;
         }
 
         // Write output file

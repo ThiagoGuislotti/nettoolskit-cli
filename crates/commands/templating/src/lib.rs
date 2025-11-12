@@ -1,3 +1,4 @@
+mod batch;
 /// High-performance async template rendering for NetToolsKit CLI
 ///
 /// This crate provides a robust, async-first templating engine with:
@@ -55,21 +56,19 @@
 /// # Ok(())
 /// # }
 /// ```
-
 mod engine;
+mod error;
+mod factory;
+mod helpers;
 mod resolver;
 mod strategy;
-mod factory;
-mod batch;
-mod helpers;
-mod error;
 
+pub use batch::{BatchRenderResult, BatchRenderer, RenderRequest};
 pub use engine::TemplateEngine;
+pub use error::{TemplateError, TemplateResult};
+pub use factory::{Language, LanguageStrategyFactory};
 pub use resolver::TemplateResolver;
 pub use strategy::{
-    LanguageStrategy, LanguageConventions, DotNetStrategy, JavaStrategy, GoStrategy,
-    PythonStrategy, RustStrategy, ClojureStrategy
+    ClojureStrategy, DotNetStrategy, GoStrategy, JavaStrategy, LanguageConventions,
+    LanguageStrategy, PythonStrategy, RustStrategy,
 };
-pub use factory::{LanguageStrategyFactory, Language};
-pub use batch::{BatchRenderer, RenderRequest, BatchRenderResult};
-pub use error::{TemplateError, TemplateResult};
