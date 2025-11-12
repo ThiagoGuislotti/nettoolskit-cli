@@ -98,6 +98,23 @@ fn build_command_registry() -> CommandRegistry {
 
     registry.register("/apply", |_args| async move { Ok(handle_apply().await) });
 
+    registry.register("/translate", |args| async move {
+        // Parse args: [from, to, path]
+        if args.len() < 3 {
+            println!("{}", "❌ Usage: /translate <from> <to> <path>".red());
+            println!("   Example: /translate csharp typescript templates/class.cs.hbs");
+            return Ok(ExitStatus::Error);
+        }
+
+        let request = crate::translate::TranslateRequest {
+            from: args[0].clone(),
+            to: args[1].clone(),
+            path: args[2].clone(),
+        };
+
+        Ok(crate::translate::handle_translate(request).await)
+    });
+
     registry
 }
 
