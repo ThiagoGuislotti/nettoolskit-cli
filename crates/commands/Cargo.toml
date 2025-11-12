@@ -14,6 +14,7 @@ nettoolskit-async-utils = { path = "../shared/async-utils" }
 nettoolskit-otel = { path = "../otel" }
 nettoolskit-ui = { path = "../ui" }
 nettoolskit-manifest = { path = "manifest" }
+nettoolskit-templating = { path = "templating" }
 
 # External dependencies
 clap = { version = "4.5", features = ["derive"] }
@@ -24,3 +25,6 @@ owo-colors = "3.5"
 strum = "0.26"
 strum_macros = "0.26"
 thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.8"
