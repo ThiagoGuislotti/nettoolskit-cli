@@ -4,6 +4,7 @@
 //! - Command parsing and validation
 //! - Async command execution with progress tracking
 //! - Template rendering and application
+//! - Manifest orchestration
 //! - Exit status handling
 //!
 //! # Architecture
@@ -11,6 +12,11 @@
 //! Commands follow a processor pattern where each command type has its own
 //! dedicated module. The `processor` module coordinates command execution,
 //! while `executor` handles long-running operations with progress feedback.
+//!
+//! # Features
+//!
+//! - **Templating**: Code generation via Handlebars templates (see `templating` module)
+//! - **Manifest**: Manifest-driven code generation workflows (see `manifest` module)
 
 use clap::Parser;
 
@@ -19,12 +25,17 @@ mod error;
 // Core modules
 pub mod processor;
 pub mod registry;
+pub mod translate;
 
 // Re-export error types
 pub use error::{CommandError, Result};
 
 // Re-export commonly used types from async-utils
 pub mod executor;
+
+// Re-export feature modules
+pub use nettoolskit_templating as templating;
+pub use nettoolskit_manifest as manifest;
 
 pub use executor::{
     AsyncCommandExecutor, CommandHandle, CommandProgress, CommandResult, ProgressSender,
@@ -104,6 +115,20 @@ pub enum Commands {
 
     /// Apply manifest to existing solution (placeholder)
     Apply,
+
+    /// Translate templates between programming languages
+    Translate {
+        /// Source language identifier (e.g., csharp, python, java)
+        #[clap(long)]
+        from: String,
+
+        /// Target language identifier (e.g., typescript, rust, go)
+        #[clap(long)]
+        to: String,
+
+        /// Template file path to translate
+        path: String,
+    },
 }
 
 impl Commands {
@@ -118,6 +143,7 @@ impl Commands {
             Commands::Check => "/check",
             Commands::Render => "/render",
             Commands::Apply => "/apply",
+            Commands::Translate { .. } => "/translate",
         }
     }
 
@@ -126,7 +152,13 @@ impl Commands {
     /// This is the main entry point for command execution from CLI.
     /// Delegates to processor::process_command() for actual dispatch.
     pub async fn execute(self) -> ExitStatus {
-        processor::process_command(self.as_slash_command()).await
+        match self {
+            Commands::Translate { from, to, path } => {
+                let request = crate::translate::TranslateRequest { from, to, path };
+                crate::translate::handle_translate(request).await
+            }
+            _ => processor::process_command(self.as_slash_command()).await,
+        }
     }
 }
 

@@ -470,7 +470,7 @@ fn test_all_features_disabled() {
     clear_feature_env_vars();
 
     // Act
-    let _features = Features::detect();
+    let features = Features::detect();
 
     // Assert
     #[cfg(not(any(
@@ -480,12 +480,22 @@ fn test_all_features_disabled() {
         feature = "persistent-sessions"
     )))]
     {
-        assert!(!_features.use_modern_tui);
-        assert!(!_features.use_event_driven);
-        assert!(!_features.use_frame_scheduler);
-        assert!(!_features.use_persistent_sessions);
+        assert!(!features.use_modern_tui);
+        assert!(!features.use_event_driven);
+        assert!(!features.use_frame_scheduler);
+        assert!(!features.use_persistent_sessions);
         assert!(!features.is_full_modern());
         assert!(!features.has_any_modern());
+    }
+
+    #[cfg(any(
+        feature = "modern-tui",
+        feature = "event-driven",
+        feature = "frame-scheduler",
+        feature = "persistent-sessions"
+    ))]
+    {
+        let _ = features; // Suppress unused warning when features are enabled
     }
 }
 
