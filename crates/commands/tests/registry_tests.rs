@@ -2,7 +2,6 @@
 ///
 /// Tests the dynamic command registration and execution system,
 /// validating async handler invocation, error handling, and registry operations.
-
 use nettoolskit_commands::{CommandRegistry, ExitStatus, Result};
 
 // Helper handlers for testing
@@ -199,13 +198,9 @@ async fn test_concurrent_execution() {
     let r2 = registry.clone();
 
     // Act
-    let handle1 = tokio::spawn(async move {
-        r1.execute("/cmd1", vec![]).await
-    });
+    let handle1 = tokio::spawn(async move { r1.execute("/cmd1", vec![]).await });
 
-    let handle2 = tokio::spawn(async move {
-        r2.execute("/cmd2", vec![]).await
-    });
+    let handle2 = tokio::spawn(async move { r2.execute("/cmd2", vec![]).await });
 
     let (result1, result2) = tokio::join!(handle1, handle2);
 
@@ -224,9 +219,7 @@ async fn test_closure_handler() {
     // Arrange
     let mut registry = CommandRegistry::new();
 
-    registry.register("/closure", |_args| async {
-        Ok(ExitStatus::Success)
-    });
+    registry.register("/closure", |_args| async { Ok(ExitStatus::Success) });
 
     // Act
     let result = registry.execute("/closure", vec![]).await;
@@ -238,8 +231,8 @@ async fn test_closure_handler() {
 
 #[tokio::test]
 async fn test_stateful_handler() {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     // Arrange
     let counter = Arc::new(AtomicUsize::new(0));

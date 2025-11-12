@@ -10,7 +10,7 @@ pub enum TemplateError {
     /// Template file not found
     NotFound {
         /// Template path or name
-        template: String
+        template: String,
     },
 
     /// Failed to read template file
@@ -18,7 +18,7 @@ pub enum TemplateError {
         /// Template path
         path: String,
         /// Underlying I/O error
-        source: std::io::Error
+        source: std::io::Error,
     },
 
     /// Failed to register template with Handlebars
@@ -26,7 +26,7 @@ pub enum TemplateError {
         /// Template name
         template: String,
         /// Handlebars error message
-        message: String
+        message: String,
     },
 
     /// Failed to render template
@@ -34,7 +34,7 @@ pub enum TemplateError {
         /// Template name
         template: String,
         /// Handlebars error message
-        message: String
+        message: String,
     },
 }
 

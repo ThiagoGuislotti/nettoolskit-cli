@@ -71,8 +71,7 @@ async fn test_batch_render_parallelism() {
     // Arrange
     let temp = common::create_batch_test_templates();
     let output_dir = temp.path().join("output");
-    let renderer = BatchRenderer::new(temp.path().join("templates"))
-        .with_max_concurrency(4);
+    let renderer = BatchRenderer::new(temp.path().join("templates")).with_max_concurrency(4);
     let requests: Vec<_> = (0..20)
         .map(|i| RenderRequest {
             template: "dotnet/Domain/Entity.cs.hbs".to_string(),
@@ -145,13 +144,11 @@ async fn test_batch_render_creates_output_directories() {
     let temp = common::create_batch_test_templates();
     let output_dir = temp.path().join("output").join("nested").join("deep");
     let renderer = BatchRenderer::new(temp.path().join("templates"));
-    let requests = vec![
-        RenderRequest {
-            template: "dotnet/Domain/Entity.cs.hbs".to_string(),
-            data: json!({"name": "User"}),
-            output: output_dir.join("User.cs"),
-        },
-    ];
+    let requests = vec![RenderRequest {
+        template: "dotnet/Domain/Entity.cs.hbs".to_string(),
+        data: json!({"name": "User"}),
+        output: output_dir.join("User.cs"),
+    }];
 
     // Act
     let result = renderer.render_batch(requests).await.unwrap();
@@ -171,13 +168,11 @@ async fn test_batch_render_overwrites_existing_files() {
     let output_path = output_dir.join("User.cs");
     fs::write(&output_path, "old content").unwrap();
     let renderer = BatchRenderer::new(temp.path().join("templates"));
-    let requests = vec![
-        RenderRequest {
-            template: "dotnet/Domain/Entity.cs.hbs".to_string(),
-            data: json!({"name": "User"}),
-            output: output_path.clone(),
-        },
-    ];
+    let requests = vec![RenderRequest {
+        template: "dotnet/Domain/Entity.cs.hbs".to_string(),
+        data: json!({"name": "User"}),
+        output: output_path.clone(),
+    }];
 
     // Act
     let result = renderer.render_batch(requests).await.unwrap();
@@ -233,13 +228,11 @@ async fn test_batch_render_with_unicode_data() {
     let temp = common::create_batch_test_templates();
     let output_dir = temp.path().join("output");
     let renderer = BatchRenderer::new(temp.path().join("templates"));
-    let requests = vec![
-        RenderRequest {
-            template: "dotnet/Domain/Entity.cs.hbs".to_string(),
-            data: json!({"name": "用户"}),
-            output: output_dir.join("User.cs"),
-        },
-    ];
+    let requests = vec![RenderRequest {
+        template: "dotnet/Domain/Entity.cs.hbs".to_string(),
+        data: json!({"name": "用户"}),
+        output: output_dir.join("User.cs"),
+    }];
 
     // Act
     let result = renderer.render_batch(requests).await.unwrap();
@@ -255,8 +248,7 @@ async fn test_batch_render_concurrent_same_template() {
     // Arrange
     let temp = common::create_batch_test_templates();
     let output_dir = temp.path().join("output");
-    let renderer = BatchRenderer::new(temp.path().join("templates"))
-        .with_max_concurrency(8);
+    let renderer = BatchRenderer::new(temp.path().join("templates")).with_max_concurrency(8);
     let requests: Vec<_> = (0..50)
         .map(|i| RenderRequest {
             template: "dotnet/Domain/Entity.cs.hbs".to_string(),
@@ -273,6 +265,9 @@ async fn test_batch_render_concurrent_same_template() {
     // Assert - Critical: 50 requests with max_concurrency=8 should complete in <5s
     assert_eq!(result.succeeded, 50);
     assert_eq!(result.failed, 0);
-    assert!(duration < std::time::Duration::from_secs(5),
-        "Batch render took too long: {:?}", duration);
+    assert!(
+        duration < std::time::Duration::from_secs(5),
+        "Batch render took too long: {:?}",
+        duration
+    );
 }

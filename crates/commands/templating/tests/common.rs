@@ -12,13 +12,11 @@ pub fn create_dotnet_test_structure() -> TempDir {
 
     fs::write(
         templates.join("src/Domain/Entity.cs.hbs"),
-        "template content"
-    ).unwrap();
+        "template content",
+    )
+    .unwrap();
 
-    fs::write(
-        templates.join("tests/Test.cs.hbs"),
-        "test content"
-    ).unwrap();
+    fs::write(templates.join("tests/Test.cs.hbs"), "test content").unwrap();
 
     temp
 }
@@ -30,10 +28,7 @@ pub fn create_batch_test_templates() -> TempDir {
     let templates = temp.path().join("templates/dotnet/src");
 
     fs::create_dir_all(&templates).unwrap();
-    fs::write(
-        templates.join("Entity.cs.hbs"),
-        "public class {{name}} { }"
-    ).unwrap();
+    fs::write(templates.join("Entity.cs.hbs"), "public class {{name}} { }").unwrap();
 
     temp
 }

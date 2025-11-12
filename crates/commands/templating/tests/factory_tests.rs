@@ -58,12 +58,20 @@ fn test_factory_detect_from_path() {
     let factory = LanguageStrategyFactory::new();
 
     // Assert - Critical: first path segment determines language
-    assert!(factory.detect_from_path("dotnet/Domain/Entity.cs").is_some());
-    assert!(factory.detect_from_path("java/domain/Entity.java").is_some());
+    assert!(factory
+        .detect_from_path("dotnet/Domain/Entity.cs")
+        .is_some());
+    assert!(factory
+        .detect_from_path("java/domain/Entity.java")
+        .is_some());
     assert!(factory.detect_from_path("go/domain/entity.go").is_some());
-    assert!(factory.detect_from_path("python/domain/entity.py").is_some());
+    assert!(factory
+        .detect_from_path("python/domain/entity.py")
+        .is_some());
     assert!(factory.detect_from_path("rust/domain/entity.rs").is_some());
-    assert!(factory.detect_from_path("clojure/domain/entity.clj").is_some());
+    assert!(factory
+        .detect_from_path("clojure/domain/entity.clj")
+        .is_some());
     assert!(factory.detect_from_path("unknown/file.xyz").is_none());
 }
 

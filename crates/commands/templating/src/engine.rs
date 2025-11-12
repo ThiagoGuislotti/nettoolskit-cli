@@ -100,12 +100,15 @@ impl TemplateEngine {
         data: &T,
     ) -> TemplateResult<String> {
         let path = template_path.as_ref();
-        let source = fs::read_to_string(path).await.map_err(|err| TemplateError::ReadError {
-            path: path.display().to_string(),
-            source: err,
-        })?;
+        let source = fs::read_to_string(path)
+            .await
+            .map_err(|err| TemplateError::ReadError {
+                path: path.display().to_string(),
+                source: err,
+            })?;
 
-        self.render_from_string(&source, data, path.display().to_string()).await
+        self.render_from_string(&source, data, path.display().to_string())
+            .await
     }
 
     /// Render a template from a string (async)
@@ -161,7 +164,8 @@ impl TemplateEngine {
             })??;
 
             // Cache template source
-            self.template_cache.insert(template_name.clone(), template_source.to_string());
+            self.template_cache
+                .insert(template_name.clone(), template_source.to_string());
         }
 
         // Render template (read-only operation, thread-safe)
