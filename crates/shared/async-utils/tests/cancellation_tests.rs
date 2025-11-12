@@ -83,8 +83,7 @@ async fn test_cancellation_multiple_receivers() {
     receiver1.cancelled().await;
     receiver2.cancelled().await;
 
-    // Assert
-    assert!(true);
+    // Assert - both receivers completed cancellation
 }
 
 #[tokio::test]
@@ -97,10 +96,10 @@ async fn test_cancellation_immediate() {
     let result = token.with_cancellation(async { "immediate" }).await;
 
     // Assert
-    match result {
-        Ok(value) => assert_eq!(value, "immediate"),
-        Err(_) => assert!(true),
+    if let Ok(value) = result {
+        assert_eq!(value, "immediate");
     }
+    // Cancellation is also acceptable after immediate cancel
 }
 
 // Type Compatibility and Cloning Tests
@@ -139,11 +138,8 @@ async fn test_token_clone() {
         })
         .await;
 
-    // Assert
-    match result {
-        Ok(_) => assert!(true),
-        Err(_) => assert!(true),
-    }
+    // Assert - both Ok and Err are valid outcomes
+    let _ = result;
 }
 
 // Error Handling Tests

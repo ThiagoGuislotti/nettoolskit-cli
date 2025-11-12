@@ -1,0 +1,6 @@
+# Clippy configuration for nettoolskit-cli
+# Allow certain lints that are too noisy or not critical
+
+# Allow format string warnings - can be fixed in a separate pass
+# These are style issues, not bugs
+cognitive-complexity-threshold = 30

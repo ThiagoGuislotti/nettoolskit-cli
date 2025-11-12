@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 #[test]
 fn test_language_parsing() {
+    use std::str::FromStr;
+
     // Assert - Test all language variants
     assert_eq!(Language::from_str("dotnet").unwrap(), Language::DotNet);
     assert_eq!(Language::from_str("csharp").unwrap(), Language::DotNet);
@@ -18,7 +20,7 @@ fn test_language_parsing() {
     assert_eq!(Language::from_str("rs").unwrap(), Language::Rust);
     assert_eq!(Language::from_str("clojure").unwrap(), Language::Clojure);
     assert_eq!(Language::from_str("clj").unwrap(), Language::Clojure);
-    assert!(Language::from_str("unknown").is_none());
+    assert!(Language::parse("unknown").is_none());
 }
 
 // Factory Strategy Tests

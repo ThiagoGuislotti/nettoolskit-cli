@@ -60,10 +60,7 @@ impl Metrics {
     pub fn record_timing(&self, name: impl Into<String>, duration: Duration) {
         let name = name.into();
         let mut timings = self.timings.lock().unwrap();
-        timings
-            .entry(name.clone())
-            .or_insert_with(Vec::new)
-            .push(duration);
+        timings.entry(name.clone()).or_default().push(duration);
 
         debug!(
             timing = %name,

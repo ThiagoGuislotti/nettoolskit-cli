@@ -2,7 +2,7 @@
 use crate::error::{ManifestError, ManifestResult};
 use crate::models::{ApplyModeKind, ExecutionSummary, ManifestDocument};
 use crate::parser::ManifestParser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Configuration for manifest execution
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ impl ManifestExecutor {
     }
 
     /// Locate templates directory relative to manifest
-    fn locate_templates_root(manifest_path: &PathBuf) -> ManifestResult<PathBuf> {
+    fn locate_templates_root(manifest_path: &Path) -> ManifestResult<PathBuf> {
         let manifest_dir = manifest_path
             .parent()
             .ok_or_else(|| ManifestError::Other("manifest has no parent directory".to_string()))?;
@@ -184,7 +184,7 @@ impl ManifestExecutor {
                     ManifestError::Validation("apply.artifact section missing".to_string())
                 })?;
 
-                let kind = crate::models::ArtifactKind::from_str(&artifact_cfg.kind);
+                let kind = crate::models::ArtifactKind::parse_kind(&artifact_cfg.kind);
                 let mappings = template_index.get(&kind).ok_or_else(|| {
                     ManifestError::Validation(format!(
                         "no template mapping found for artifact '{}'",

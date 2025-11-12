@@ -39,7 +39,7 @@ fn test_features_default() {
     let features = Features::default();
 
     // Assert
-    assert!(features.description().len() > 0);
+    assert!(!features.description().is_empty());
 }
 
 #[test]

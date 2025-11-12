@@ -133,10 +133,7 @@ fn calculate_layout_metrics(width: u16, height: u16) -> io::Result<LayoutMetrics
 
     let dynamic_height = height.saturating_sub(footer_height);
     if dynamic_height < MIN_DYNAMIC_HEIGHT {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "Terminal height insufficient for layout",
-        ));
+        return Err(io::Error::other("Terminal height insufficient for layout"));
     }
 
     let footer_start = height.saturating_sub(footer_height);

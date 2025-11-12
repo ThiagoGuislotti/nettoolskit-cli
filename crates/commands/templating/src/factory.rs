@@ -4,6 +4,7 @@ use crate::strategy::{
     RustStrategy,
 };
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 
 /// Supported languages
@@ -17,18 +18,26 @@ pub enum Language {
     Clojure,
 }
 
-impl Language {
-    /// Parse language from string identifier
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for Language {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "dotnet" | "csharp" | "c#" | "cs" => Some(Language::DotNet),
-            "java" => Some(Language::Java),
-            "go" | "golang" => Some(Language::Go),
-            "python" | "py" => Some(Language::Python),
-            "rust" | "rs" => Some(Language::Rust),
-            "clojure" | "clj" => Some(Language::Clojure),
-            _ => None,
+            "dotnet" | "csharp" | "c#" | "cs" => Ok(Language::DotNet),
+            "java" => Ok(Language::Java),
+            "go" | "golang" => Ok(Language::Go),
+            "python" | "py" => Ok(Language::Python),
+            "rust" | "rs" => Ok(Language::Rust),
+            "clojure" | "clj" => Ok(Language::Clojure),
+            _ => Err(format!("Unknown language: {}", s)),
         }
+    }
+}
+
+impl Language {
+    /// Parse language from string identifier (convenience wrapper)
+    pub fn parse(s: &str) -> Option<Self> {
+        s.parse().ok()
     }
 
     /// Get canonical identifier
@@ -78,7 +87,7 @@ impl LanguageStrategyFactory {
 
     /// Get strategy by string identifier
     pub fn get_strategy_by_name(&self, name: &str) -> Option<Arc<dyn LanguageStrategy>> {
-        Language::from_str(name).and_then(|lang| self.get_strategy(lang))
+        Language::parse(name).and_then(|lang| self.get_strategy(lang))
     }
 
     /// Try to detect language from path prefix
