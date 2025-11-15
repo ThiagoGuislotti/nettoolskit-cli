@@ -6,8 +6,32 @@
 /// Core error types for the application
 pub type Result<T> = anyhow::Result<T>;
 
+/// Trait for items that can be displayed in UI menus
+///
+/// This trait defines the interface for items that can be shown in menus,
+/// allowing the UI layer to remain decoupled from specific domain types.
+pub trait MenuEntry {
+    /// Get the label/identifier for this menu entry (e.g., "/list")
+    fn label(&self) -> &str;
+
+    /// Get the description for this menu entry
+    fn description(&self) -> &str;
+}
+
 /// Feature detection and configuration for opt-in TUI improvements
 pub mod features;
+
+/// String manipulation utilities
+#[path = "string-utils/lib.rs"]
+pub mod string_utils;
+
+/// Async utilities (timeout, cancellation)
+#[path = "async-utils/lib.rs"]
+pub mod async_utils;
+
+/// File search and filtering utilities
+#[path = "file-search/lib.rs"]
+pub mod file_search;
 
 /// Configuration types and utilities
 pub mod config {
@@ -30,19 +54,6 @@ pub mod config {
             }
         }
     }
-}
-
-/// Command definitions for the interactive palette
-pub mod commands {
-    /// Constants for the command palette
-    pub const COMMANDS: &[(&str, &str)] = &[
-        ("/list", "List available templates"),
-        ("/check", "Validate a manifest or template"),
-        ("/render", "Render a template preview"),
-        ("/new", "Create a project from a template"),
-        ("/apply", "Apply a manifest to an existing solution"),
-        ("/quit", "Exit NetToolsKit CLI"),
-    ];
 }
 
 // Re-export commonly used items

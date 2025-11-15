@@ -12,6 +12,7 @@ pub struct TracingConfig {
     pub with_line_numbers: bool,
     pub service_name: String,
     pub service_version: String,
+    pub interactive_mode: bool,
 }
 
 impl Default for TracingConfig {
@@ -23,6 +24,7 @@ impl Default for TracingConfig {
             with_line_numbers: true,
             service_name: "nettoolskit-cli".to_string(),
             service_version: env!("CARGO_PKG_VERSION").to_string(),
+            interactive_mode: false,
         }
     }
 }
@@ -53,14 +55,25 @@ pub fn init_tracing_with_config(config: TracingConfig) -> Result<()> {
     let registry = tracing_subscriber::registry().with(filter);
 
     // Configure format layer based on preferences
-    if config.json_format {
+    // In interactive mode, use UiMakeWriter to redirect formatted logs to footer
+    if config.interactive_mode {
+        let compact_layer = fmt::layer()
+            .with_target(false)
+            .with_file(config.with_file)
+            .with_line_number(config.with_line_numbers)
+            .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
+            .with_writer(ui_writer::UiMakeWriter::default())
+            .compact();
+
+        registry.with(compact_layer).try_init()?;
+    } else if config.json_format {
         warn!("JSON format requested but not available in current setup, using pretty format");
         let pretty_layer = fmt::layer()
             .with_target(true)
             .with_file(config.with_file)
             .with_line_number(config.with_line_numbers)
             .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-            .with_writer(ui_writer::UiMakeWriter)
+            .with_writer(std::io::stderr)
             .pretty();
 
         registry.with(pretty_layer).try_init()?;
@@ -70,7 +83,7 @@ pub fn init_tracing_with_config(config: TracingConfig) -> Result<()> {
             .with_file(config.with_file)
             .with_line_number(config.with_line_numbers)
             .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-            .with_writer(ui_writer::UiMakeWriter)
+            .with_writer(std::io::stderr)
             .compact();
 
         registry.with(compact_layer).try_init()?;
@@ -101,7 +114,7 @@ pub fn init_tracing_with_filter(filter: &str) -> Result<()> {
                 .with_file(true)
                 .with_line_number(true)
                 .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-                .with_writer(ui_writer::UiMakeWriter),
+                .with_writer(std::io::stderr),
         )
         .try_init()?;
 

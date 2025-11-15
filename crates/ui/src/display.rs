@@ -1,4 +1,4 @@
-use nettoolskit_string_utils::string::truncate_directory_with_middle;
+use nettoolskit_core::string_utils::string::truncate_directory_with_middle;
 use owo_colors::{OwoColorize, Rgb};
 use std::env;
 

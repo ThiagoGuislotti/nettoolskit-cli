@@ -18,13 +18,13 @@
 | Phase 3 – Templating Engine | ✅ Completed | 11/11 |
 | Phase 4 – Manifest Feature | ✅ Completed | 17/17 |
 | Phase 5 – Commands Dispatcher | ✅ Completed | 9/9 |
-| Phase 6 – Other Features | 🔄 In Progress | 1/14 |
+| Phase 6 – Other Features | 🔄 In Progress | 2/14 |
 | Phase 7 – CLI/UI/Otel | ⏳ Not Started | 0/8 |
 | Phase 8 – Testing & QA | 🔄 In Progress | 11/16 |
 | Phase 9 – Documentation | ⏳ Not Started | 0/11 |
 | Phase 10 – Release | ⏳ Not Started | 0/9 |
 
-**Total Progress:** 62/115 tasks (53.9%)
+**Total Progress:** 63/115 tasks (54.8%)
 
 **Legend:** ✅ Completed | ⏳ Not Started | 🔄 In Progress | ❌ Blocked
 
@@ -60,12 +60,12 @@
 **NONE** - All phases up to Phase 5 completed successfully!
 
 ### ⏭️ Next Priority
-1. **Phase 6: Command Features** (Ready to implement!)
-   - /manifest list (manifest discovery)
-   - /manifest new (interactive wizard)
-   - /manifest check (full validation logic)
+1. **Phase 6: Command Features** (In Progress - 1/14 complete)
+   - ✅ /manifest list (manifest discovery) - COMPLETE with 12 tests passing
+   - /manifest check (full validation logic) - **NEXT PRIORITY**
    - /manifest render (preview without writing)
-   - /translate (template translation between languages)
+   - /manifest apply (already functional, needs polish)
+   - /translate (template translation between languages) ⏸️ **DEFERRED TO LAST**
 2. **Phase 8**: Integration tests cross-crate
 3. **Phase 9**: Documentation updates
 

@@ -13,7 +13,7 @@
 //! - Cross-platform path handling (Unix /, Windows \)
 //! - Integration with string-utils truncation functions
 
-use nettoolskit_string_utils::string::truncate_directory;
+use nettoolskit_core::string_utils::string::truncate_directory;
 use nettoolskit_ui::{clear_terminal, GRAY_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR};
 use owo_colors::Rgb;
 

@@ -12,4 +12,5 @@ opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+nettoolskit-core = { path = "../core" }
 nettoolskit-ui = { path = "../ui" }

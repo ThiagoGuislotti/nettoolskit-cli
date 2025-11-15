@@ -25,13 +25,9 @@ path = "src/lib.rs"
 [dependencies]
 # Workspace dependencies
 nettoolskit-commands = { path = "../commands" }
-nettoolskit-templating = { path = "../commands/templating" }
-nettoolskit-manifest = { path = "../commands/manifest" }
 nettoolskit-ui = { path = "../ui" }
 nettoolskit-core = { path = "../core" }
-nettoolskit-async-utils = { path = "../shared/async-utils" }
 nettoolskit-otel = { path = "../otel" }
-nettoolskit-file-search = { path = "../shared/file-search" }
 
 # Async and standard dependencies
 anyhow = { workspace = true }
