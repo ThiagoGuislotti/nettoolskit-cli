@@ -3,9 +3,23 @@ use crate::style::set_fg;
 use crossterm::style::{Attribute, Print, SetAttribute};
 use crossterm::terminal::ClearType;
 use crossterm::{cursor, queue, terminal};
-use nettoolskit_core::commands::COMMANDS;
+use nettoolskit_core::MenuEntry;
 use std::cmp::Ordering;
-use std::io::{self, Write};
+use std::io::{self, Write};/// Entry type used internally by CommandPalette
+struct PaletteEntry {
+    label: String,
+    description: String,
+}
+
+impl MenuEntry for PaletteEntry {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+}
 
 /// Command palette state following Codex specification.
 ///
@@ -15,7 +29,9 @@ use std::io::{self, Write};
 pub struct CommandPalette {
     /// The text typed after '/' for filtering commands
     query: String,
-    /// Indices of commands after filtering and ranking
+    /// All available entries
+    all_entries: Vec<PaletteEntry>,
+    /// Entries after filtering and ranking
     matches: Vec<usize>,
     /// Currently selected line in the visible window
     selected: usize,
@@ -31,18 +47,33 @@ impl CommandPalette {
     /// Maximum number of visible items in the palette (8 items as per specification)
     const MAX_VISIBLE_ITEMS: usize = 8;
 
-    /// Creates a new command palette in an inactive state.
+    /// Creates a new command palette with the given menu entries.
     ///
-    /// The palette is initialized with an empty query, all commands as potential matches,
+    /// The palette is initialized with an empty query, all entries as potential matches,
     /// and default positioning values. The palette remains inactive until explicitly opened.
+    ///
+    /// # Arguments
+    ///
+    /// * `entries` - Vector of items implementing MenuEntry trait
     ///
     /// # Returns
     ///
     /// Returns a new `CommandPalette` instance ready for use.
-    pub fn new() -> Self {
+    pub fn new<T: MenuEntry>(entries: Vec<T>) -> Self {
+        let all_entries: Vec<PaletteEntry> = entries
+            .into_iter()
+            .map(|e| PaletteEntry {
+                label: e.label().to_string(),
+                description: e.description().to_string(),
+            })
+            .collect();
+
+        let matches: Vec<usize> = (0..all_entries.len()).collect();
+
         Self {
             query: String::new(),
-            matches: (0..COMMANDS.len()).collect(),
+            all_entries,
+            matches,
             selected: 0,
             offset: 0,
             y_input: 0,
@@ -243,8 +274,8 @@ impl CommandPalette {
 
         self.matches
             .get(self.selected)
-            .and_then(|&idx| COMMANDS.get(idx))
-            .map(|(cmd, _)| *cmd)
+            .and_then(|&idx| self.all_entries.get(idx))
+            .map(|entry| entry.label())
     }
 
     /// Updates the list of matching commands based on the current query.
@@ -256,21 +287,21 @@ impl CommandPalette {
         let query = self.query.trim().to_lowercase();
 
         if query.is_empty() {
-            self.matches = (0..COMMANDS.len()).collect();
+            self.matches = (0..self.all_entries.len()).collect();
             return;
         }
 
         let mut scored_matches: Vec<(usize, i32)> = Vec::new();
 
-        for (idx, (cmd, desc)) in COMMANDS.iter().enumerate() {
-            let cmd_lower = cmd[1..].to_lowercase(); // Remove the '/'
-            let desc_lower = desc.to_lowercase();
+        for (idx, entry) in self.all_entries.iter().enumerate() {
+            let label = entry.label().to_lowercase();
+            let desc = entry.description().to_lowercase();
 
-            let score = if cmd_lower.starts_with(&query) {
-                3 // Highest priority for starts_with in command
-            } else if cmd_lower.contains(&query) {
-                2 // Second priority for contains in command
-            } else if desc_lower.contains(&query) {
+            let score = if label.starts_with(&query) {
+                3 // Highest priority for starts_with in label
+            } else if label.contains(&query) {
+                2 // Second priority for contains in label
+            } else if desc.contains(&query) {
                 1 // Lower priority for contains in description
             } else {
                 continue; // Don't include if no match
@@ -279,9 +310,13 @@ impl CommandPalette {
             scored_matches.push((idx, score));
         }
 
-        // Sort by score (desc) then by name (asc)
+        // Sort by score (desc) then by label (asc)
         scored_matches.sort_by(|a, b| match b.1.cmp(&a.1) {
-            Ordering::Equal => COMMANDS[a.0].0.cmp(COMMANDS[b.0].0),
+            Ordering::Equal => {
+                let label_a = &self.all_entries[a.0].label;
+                let label_b = &self.all_entries[b.0].label;
+                label_a.cmp(label_b)
+            }
             other => other,
         });
 
@@ -406,8 +441,8 @@ impl CommandPalette {
             let line_idx = i - self.offset;
             let y_pos = self.y_input + 2 + line_idx as u16; // Palette with one spacing line below input
 
-            if let Some(&match_idx) = self.matches.get(i) {
-                if let Some((cmd, desc)) = COMMANDS.get(match_idx) {
+            if let Some(&entry_idx) = self.matches.get(i) {
+                if let Some(entry) = self.all_entries.get(entry_idx) {
                     let is_selected = i == self.selected;
 
                     queue!(io::stdout(), cursor::MoveTo(0, y_pos))?;
@@ -417,7 +452,7 @@ impl CommandPalette {
                         queue!(
                             io::stdout(),
                             SetAttribute(Attribute::Reverse),
-                            Print(format!("› {}  {}", cmd, desc)), // Two spaces between command and description
+                            Print(format!("› {}  {}", entry.label(), entry.description())), // Two spaces between command and description
                             SetAttribute(Attribute::Reset)
                         )?;
                     } else {
@@ -427,9 +462,9 @@ impl CommandPalette {
                             set_fg(GRAY_COLOR),
                             Print("  "),
                             set_fg(PRIMARY_COLOR),
-                            Print(cmd),
+                            Print(entry.label()),
                             set_fg(GRAY_COLOR),
-                            Print(format!("  {}", desc)), // Two spaces between command and description
+                            Print(format!("  {}", entry.description())), // Two spaces between command and description
                             SetAttribute(Attribute::Reset)
                         )?;
                     }
@@ -471,8 +506,8 @@ impl CommandPalette {
             let line_idx = i - self.offset;
             let y_pos = self.y_input + 2 + line_idx as u16;
 
-            if let Some(&match_idx) = self.matches.get(i) {
-                if let Some((cmd, desc)) = COMMANDS.get(match_idx) {
+            if let Some(&entry_idx) = self.matches.get(i) {
+                if let Some(entry) = self.all_entries.get(entry_idx) {
                     let is_selected = i == self.selected;
 
                     // Clear only the current line before drawing
@@ -487,7 +522,7 @@ impl CommandPalette {
                         queue!(
                             io::stdout(),
                             SetAttribute(Attribute::Reverse),
-                            Print(format!("› {}  {}", cmd, desc)),
+                            Print(format!("› {}  {}", entry.label(), entry.description())),
                             SetAttribute(Attribute::Reset)
                         )?;
                     } else {
@@ -497,9 +532,9 @@ impl CommandPalette {
                             set_fg(GRAY_COLOR),
                             Print("  "),
                             set_fg(PRIMARY_COLOR),
-                            Print(cmd),
+                            Print(entry.label()),
                             set_fg(GRAY_COLOR),
-                            Print(format!("  {}", desc)),
+                            Print(format!("  {}", entry.description())),
                             SetAttribute(Attribute::Reset)
                         )?;
                     }
@@ -513,14 +548,5 @@ impl CommandPalette {
             cursor::MoveTo(original_cursor_pos.0, original_cursor_pos.1)
         )?;
         io::stdout().flush()
-    }
-}
-
-impl Default for CommandPalette {
-    /// Creates a new CommandPalette with default values.
-    ///
-    /// This is equivalent to calling `CommandPalette::new()`.
-    fn default() -> Self {
-        Self::new()
     }
 }

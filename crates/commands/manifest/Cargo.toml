@@ -7,7 +7,7 @@ edition.workspace = true
 # Core types
 nettoolskit-core = { path = "../../core" }
 
-# Templating feature (sibling)
+# Templating feature (sibling within commands/)
 nettoolskit-templating = { path = "../templating" }
 
 # UI and colors

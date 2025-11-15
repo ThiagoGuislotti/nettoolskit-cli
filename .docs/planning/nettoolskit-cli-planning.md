@@ -56,20 +56,21 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 > /
 
-› /list  List available templates
-  /check  Validate a manifest or template
-  /render  Render a template preview
-  /new  Create a project from a template
-  /apply  Apply a manifest to an existing solution
-  /quit  Exit NetToolsKit CLI
+› /list      Show all available commands
+  /manifest  Manage and apply manifests (submenu)
+  /translate Translate code between languages (deferred)
+  /quit      Exit NetToolsKit CLI
 
-> /lis
+> /manifest
 
-› /list  List available templates
+› /manifest list   Discover available manifests in the workspace
+  /manifest check  Validate manifest structure and dependencies
+  /manifest render Preview generated files without creating them
+  /manifest apply  Apply manifest to generate/update project files
 
-> /che
+> /manifest lis
 
-› /check  Validate a manifest or template
+› /manifest list   Discover available manifests in the workspace
 
 -> dynamic area
 
@@ -91,7 +92,132 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 ---
 
-## 1. Technology Stack
+## 📐 Code Architecture (Layered Architecture)
+
+> **Referência Completa**: [ARCHITECTURE.txt](../../ARCHITECTURE.txt) (diagrama completo na raiz)
+
+A arquitetura do NetToolsKit CLI segue um modelo em **4 camadas hierárquicas** com fluxo de dependências **bottom-up** (base → topo). Cada nível só pode depender dos níveis inferiores, garantindo isolamento e zero ciclos de dependência.
+
+### 1.1 Níveis Hierárquicos
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ NÍVEL 4: Entry Point (Orquestração)                         │
+│   └─ cli: ponto de entrada da aplicação                     │
+└──────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│ NÍVEL 3: Aplicação (Lógica de Negócio)                      │
+│   └─ commands: ENUM gerenciador dos comandos                │
+│       ├─ src/                                               │
+│       │   ├─ translate: transcrição entre linguagens        │
+│       │   ├─ manifest: orquestração (Apply, Check, Test)    │
+│       │   └─ templating: Handlebars (core, string-utils)    │
+│       └─ tests/                                             │
+└──────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│ NÍVEL 2: Apresentação & Infraestrutura                      │
+│   ├─ otel: logs/telemetria                                  │
+│   └─ ui: interface terminal (crossterm)                     │
+└──────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│ NÍVEL 1: Fundação (ZERO deps internas)                      │
+│   ├─ core: tipos fundamentais (Result, Config, Features)    │
+│   ├─ string-utils: manipulação de strings                   │
+│   ├─ async-utils: helpers assíncronos                       │
+│   └─ file-search: busca e filtro de arquivos                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 Fluxo de Dependências (Bottom-Up)
+
+**NÍVEL 1 (Base)** → ZERO dependências internas
+- `core`: tipos fundamentais (Result, Config, Features)
+- `string-utils`: manipulação de strings (ZERO deps totais!)
+- `async-utils`: helpers assíncronos (tokio, futures)
+- `file-search`: busca e filtro de arquivos
+
+**NÍVEL 2 (Infraestrutura)** → depende apenas de Nível 1
+- `otel`: logs/telemetria → depende: `core`
+- `ui`: interface terminal → depende: `core`, `string-utils`
+
+**NÍVEL 3 (Aplicação)** → depende de Níveis 1 e 2
+- `commands`: ENUM gerenciador → depende: `core`, `otel`, `ui`, `async-utils`
+  - `src/translate`: transcrição entre linguagens
+  - `src/manifest`: orquestração (Apply, Check, Test...)
+  - `src/templating`: Handlebars → depende: `core`, `string-utils`
+
+**NÍVEL 4 (Entry Point)** → depende de tudo
+- `cli`: ponto de entrada → depende: `commands`, `ui`, `core`, `async-utils`, `otel`, `file-search`
+
+### 1.3 Regras de Ouro
+
+**1. NÍVEL 1 (Fundação)**
+- ✓ ZERO dependências internas
+- ✓ Apenas deps externas essenciais
+- ✗ NUNCA depende de níveis superiores
+
+**2. NÍVEL 2 (Infraestrutura)**
+- ✓ Pode depender de Nível 1
+- ✗ NÃO pode depender de Níveis 3 ou 4
+
+**3. NÍVEL 3 (Aplicação)**
+- ✓ Pode depender de Níveis 1 e 2
+- ✓ Commands contém manifest e translate em src/
+- ✗ NÃO pode depender de Nível 4
+
+**4. NÍVEL 4 (Entry Point)**
+- ✓ Pode depender de TODOS os níveis
+- ✗ NINGUÉM pode depender dele
+
+### 1.4 Resolução de Dependência Circular
+
+**Problema Identificado:**
+- `commands → ui → otel → commands` (ciclo detectado)
+
+**Solução Implementada:**
+- Crate `command-definitions` isolado (ZERO deps internas)
+- Contém apenas `Command` enum (7 variantes: List, Check, Render, New, Apply, Translate, Quit)
+- `ui` depende de `command-definitions` (não de `commands`)
+- Quebra o ciclo: `commands → ui → command-definitions` ✅
+
+**Arquitetura ENUM como Single Source of Truth:**
+- Command enum usa `strum 0.26` (Display, EnumIter, EnumString, IntoStaticStr)
+- Centraliza definição de comandos
+- Garante consistência entre UI e lógica de aplicação
+
+### 1.5 Status de Validação
+
+- ✅ Compilação: 11.85s (release)
+- ✅ Testes: 186/188 passando (98.9%)
+- ✅ Ciclos detectados: **ZERO**
+- ✅ Hierarquia: **VALIDADA**
+- ✅ Isolamento: **CORRETO**
+
+### 1.6 Rationale das Decisões
+
+**Commands no Nível 3:**
+- Orquestra todos os componentes (otel, ui)
+- Implementa lógica de negócio dos comandos
+- Contém submódulos internos em src/:
+  * `translate`: transcrição entre linguagens
+  * `manifest`: orquestração de aplicação de templates
+  * `templating`: engine Handlebars (depende: core, string-utils)
+- Estrutura modular sem crates separados
+
+**Otel no Nível 2:**
+- Depende de `ui` para `append_footer_log`
+- Necessário para feedback visual de logs no terminal
+- Aceitável pois não cria ciclos com Nível 3
+
+---
+
+## 2. Technology Stack
 - **Language:** Rust 2021 edition
 - **UI Library:** Ratatui 0.28.1 (optional, feature-gated)
 - **Terminal:** Crossterm 0.28.1 (with event-stream)
@@ -101,7 +227,7 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 ---
 
-## 2. Development Guidelines
+## 3. Development Guidelines
 
 ### Code Style
 - Follow Rust 2021 edition conventions.
@@ -129,12 +255,12 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 ---
 
-## 3. Purpose
+## 4. Purpose
 Deliver a single binary `ntk` that scaffolds and expands projects and files for **.NET**, **Vue/Quasar**, **Clojure**, and **Rust** from versioned **manifests** and **templates**, with safety (idempotency), predictability (show diffs before write), and maintainability.
 
 ---
 
-## 4. Scope
+## 5. Scope
 
 **CLI Core & Workflow**
 - [x] Rust CLI with subcommands: `list`, `check`, `new`, `render`, **`apply`**.
@@ -168,7 +294,7 @@ Deliver a single binary `ntk` that scaffolds and expands projects and files for 
 
 ---
 
-## 5. Out‑of‑scope (v0.2.0)
+## 6. Out‑of‑scope (v0.2.0)
 - Semantic refactoring of C# code (Roslyn).
 - PATH‑discovered external plugins (`ntk-*`).
 - Multi‑repo presets or orchestration.
@@ -176,12 +302,12 @@ Deliver a single binary `ntk` that scaffolds and expands projects and files for 
 
 ---
 
-## 6. Stakeholders
+## 7. Stakeholders
 - Platform/Tooling, Backend, Frontend, DevOps, QA.
 
 ---
 
-## 7. Constraints
+## 8. Constraints
 - Cross‑platform (Windows, Linux, macOS).
 - Single executable per platform.
 - Human and JSON outputs (`--json`).
@@ -189,19 +315,19 @@ Deliver a single binary `ntk` that scaffolds and expands projects and files for 
 
 ---
 
-## 8. Assumptions
+## 9. Assumptions
 - Toolchains installed per stack (`dotnet`, `node`/`pnpm`, `cargo`, `clj/lein`).
 - Git available for diffs and CI.
 - No network access by default; post‑steps may use it when enabled.
 
 ---
 
-## 9. Requirements Analysis
+## 10. Requirements Analysis
 
-### 9.1 Method
+### 10.1 Method
 Lightweight elicitation and classification into **FR/NFR/BR**, explicit CLI contracts, and acceptance criteria.
 
-### 9.2 Functional Requirements (FR)
+### 10.2 Functional Requirements (FR)
 **Core CLI**
 - **FR01** [x] List templates (table output + JSON).
 - **FR02** [ ] Check template/manifest (schema + semantic validation).
@@ -230,27 +356,27 @@ Lightweight elicitation and classification into **FR/NFR/BR**, explicit CLI cont
 **Quality Insights**
 - **FR19** [ ] Perform test coverage scan and display coverage graph (CLI report + export).
 
-### 9.3 Non‑Functional Requirements (NFR)
+### 10.3 Non‑Functional Requirements (NFR)
 Portability, packaging, observability, safety, testability, security.
 
-### 9.4 Business Rules (BR)
+### 10.4 Business Rules (BR)
 - **BR01** Templates declare required variables.
 - **BR02** Post‑steps are never implicit.
 - **BR03** Diffs always available in dry‑run.
 - **BR04** Default collision policy is `fail`.
 
-### 9.5 CLI Contracts
+### 10.5 CLI Contracts
 ```
 ntk apply --manifest <file.yml> [--set key=val[,key=val]...] [--dry-run] [--with-post]
 ```
 Exit codes: `0` ok, `1` args, `2` manifest error, `3` collision, `4` post‑step failure, `5` internal.
 
-### 9.6 Deliverables
+### 10.6 Deliverables
 Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPLATES.md`, tests, CI.
 
 ---
 
-## 10. Work Breakdown Structure (WBS)
+## 11. Work Breakdown Structure (WBS)
 **Foundation**
 - **WBS-1 CLI Core**: [x] Clap setup, config parsing, output formatters.
 - **WBS-2 Template Engine**: [ ] Handlebars helpers, strict mode enforcement, error surfacing.
@@ -278,7 +404,7 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 ---
 
-## 11. Milestones & Acceptance
+## 12. Milestones & Acceptance
 - **M0 Skeleton**: [x] `ntk --help`, `ntk list`.
 - **M1 Rendering Engine**: [ ] `ntk render` with `--var/--vars-file/--output`; Handlebars strict mode.
 - **M2 Validation & Manifests**: [ ] `ntk check` schema validation; manifest parsing basics.
@@ -291,7 +417,7 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 ---
 
-## 12. Implementation Phases Progress
+## 13. Implementation Phases Progress
 
 ### 📋 Phases Overview
 
@@ -559,7 +685,7 @@ Analysis of `codex-rs/cli` identified critical gaps in NetToolsKit CLI's perform
 
 ---
 
-## 13. Known Issues
+## 14. Known Issues
 
 ### Deferred Issues
 1. **Cursor positioning bug** (modern mode)
@@ -573,7 +699,7 @@ None
 
 ---
 
-## 14. References
+## 15. References
 
 ### External Documentation
 - [Ratatui Documentation](https://docs.rs/ratatui/)
@@ -593,7 +719,7 @@ None
 
 ---
 
-## 15. Workspace Architecture Migration (Rust Workspace Refactoring)
+## 16. Workspace Architecture Migration (Rust Workspace Refactoring)
 
 > **⚠️ IMPORTANT**: Phase 6 refers to the **Workspace Architecture Migration** project (separate from CLI feature development Phases 0-5). This is a **parallel track** to refactor the Rust workspace structure from flat to `crates/`-based modular architecture.
 
@@ -605,5 +731,7 @@ None
 **Version:** 1.0.0
 **Started:** 2025-11-09
 **Detailed Documentation:** [architecture-migration-plan.md](architecture-migration-plan.md)
+
+> **Nota**: Para detalhes completos da arquitetura de código em camadas, veja a seção **1. Arquitetura de Código** no início deste documento.
 
 ---

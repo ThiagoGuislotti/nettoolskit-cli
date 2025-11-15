@@ -1,0 +1,34 @@
+[package]
+name = "nettoolskit-translate"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Core types
+nettoolskit-core = { path = "../../core" }
+
+# Management (for ExitStatus)
+nettoolskit-management = { path = "../management" }
+
+# Templating feature (sibling within commands/)
+nettoolskit-templating = { path = "../templating" }
+
+# UI and colors
+nettoolskit-ui = { path = "../../ui" }
+owo-colors = { workspace = true }
+
+# Telemetry
+nettoolskit-otel = { path = "../../otel" }
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lib]
+name = "nettoolskit_translate"
+path = "src/lib.rs"

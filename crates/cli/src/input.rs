@@ -1,5 +1,5 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use nettoolskit_async_utils::with_timeout;
+use nettoolskit_core::async_utils::with_timeout;
 use nettoolskit_ui::{
     append_footer_log, handle_resize, render_prompt_with_command, CommandPalette,
 };

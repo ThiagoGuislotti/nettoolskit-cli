@@ -1,6 +1,32 @@
 /// Diagnostic test to verify the complete input chain
 /// Run with: cargo test --test input_diagnostic -- --nocapture
 
+use nettoolskit_core::MenuEntry;
+
+// Test helper for creating menu entries
+#[derive(Clone)]
+struct TestEntry {
+    label: String,
+    description: String,
+}
+
+impl MenuEntry for TestEntry {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+fn create_test_entries() -> Vec<TestEntry> {
+    vec![TestEntry {
+        label: "/test".to_string(),
+        description: "Test command".to_string(),
+    }]
+}
+
 // Import Resolution Tests
 
 #[tokio::test]
@@ -8,10 +34,10 @@ async fn test_input_imports_resolved() {
     use nettoolskit_ui::CommandPalette;
 
     // Arrange
-    // (No setup needed - testing import resolution)
+    let entries = create_test_entries();
 
     // Act
-    let palette = CommandPalette::new();
+    let palette = CommandPalette::new(entries);
 
     // Assert
     assert!(!palette.is_active(), "Palette should start inactive");
@@ -45,7 +71,7 @@ fn test_ui_functions_callable() {
     // (Verifying function pointers exist - no setup needed)
 
     // Act
-    let palette = CommandPalette::new();
+    let palette = CommandPalette::new(create_test_entries());
     let f1: fn(&str) -> std::io::Result<()> = append_footer_log;
     let f2: fn(u16, u16) -> std::io::Result<()> = handle_resize;
 
@@ -60,7 +86,7 @@ fn test_ui_functions_callable() {
 
 #[test]
 fn test_async_utils_available() {
-    use nettoolskit_async_utils::with_timeout;
+    use nettoolskit_core::async_utils::with_timeout;
     use std::time::Duration;
 
     // Arrange

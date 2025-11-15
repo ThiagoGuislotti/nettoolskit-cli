@@ -25,9 +25,8 @@ use std::sync::Arc;
 pub mod input;
 
 use input::{read_line_with_palette, InputResult};
-use nettoolskit_async_utils::with_timeout;
-use nettoolskit_commands::processor::{process_command, process_text};
-use nettoolskit_commands::ExitStatus;
+use nettoolskit_core::async_utils::with_timeout;
+use nettoolskit_commands::{process_command, process_text, ExitStatus};
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
@@ -93,7 +92,8 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
     // Initialize telemetry with development configuration
     let tracing_config = TracingConfig {
         verbose,
-        with_line_numbers: true,
+        with_line_numbers: false,
+        interactive_mode: true, // Suppress tracing fmt output in interactive mode
         ..Default::default()
     };
 
@@ -156,7 +156,10 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
 
 async fn run_interactive_loop() -> io::Result<ExitStatus> {
     let mut input_buffer = String::new();
-    let mut palette = CommandPalette::new();
+
+    // Get menu entries from commands and create palette
+    let menu_entries = nettoolskit_commands::menu_entries();
+    let mut palette = CommandPalette::new(menu_entries);
 
     info!("Starting interactive loop");
     run_input_loop(&mut input_buffer, &mut palette).await

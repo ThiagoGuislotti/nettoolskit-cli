@@ -1,0 +1,27 @@
+[package]
+name = "nettoolskit-management"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+name = "nettoolskit_management"
+path = "src/lib.rs"
+
+[dependencies]
+# Workspace dependencies
+nettoolskit-core = { path = "../../core" }
+nettoolskit-otel = { path = "../../otel" }
+nettoolskit-manifest = { path = "../manifest" }
+
+# External dependencies
+anyhow = "1.0"
+futures = "0.3"
+owo-colors = "3.5"
+strum = { version = "0.26", features = ["derive"] }
+thiserror = "2.0"
+tokio = { version = "1.42", features = ["full"] }
+tracing = "0.1"
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3.8"

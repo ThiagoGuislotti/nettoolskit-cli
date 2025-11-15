@@ -700,9 +700,9 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "ignore"
-version = "0.4.24"
+version = "0.4.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81776e6f9464432afcc28d03e52eb101c93b6f0566f52aef2427663e700f0403"
+checksum = "d3d782a365a015e0f5c04902246139249abf769125006fbe7649e2ee88169b4a"
 dependencies = [
  "crossbeam-deque",
  "globset",
@@ -870,16 +870,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nettoolskit-async-utils"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "futures",
- "futures-util",
- "tokio",
-]
-
-[[package]]
 name = "nettoolskit-cli"
 version = "1.0.0"
 dependencies = [
@@ -891,13 +881,9 @@ dependencies = [
  "futures",
  "futures-util",
  "handlebars 4.5.0",
- "nettoolskit-async-utils",
  "nettoolskit-commands",
  "nettoolskit-core",
- "nettoolskit-file-search",
- "nettoolskit-manifest",
  "nettoolskit-otel",
- "nettoolskit-templating",
  "nettoolskit-ui",
  "owo-colors",
  "ratatui",
@@ -916,21 +902,24 @@ dependencies = [
 name = "nettoolskit-commands"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "clap",
  "futures",
- "nettoolskit-async-utils",
  "nettoolskit-core",
+ "nettoolskit-management",
  "nettoolskit-manifest",
  "nettoolskit-otel",
  "nettoolskit-templating",
+ "nettoolskit-translate",
  "nettoolskit-ui",
  "owo-colors",
+ "serde_yaml",
  "strum 0.26.3",
- "strum_macros 0.26.4",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "walkdir",
 ]
 
 [[package]]
@@ -938,21 +927,33 @@ name = "nettoolskit-core"
 version = "1.0.0"
 dependencies = [
  "anyhow",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "nettoolskit-file-search"
-version = "1.0.0"
-dependencies = [
- "anyhow",
  "futures",
  "globset",
  "ignore",
  "serde",
+ "serde_json",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
  "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "nettoolskit-management"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "nettoolskit-core",
+ "nettoolskit-manifest",
+ "nettoolskit-otel",
+ "owo-colors",
+ "strum 0.26.3",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
  "walkdir",
 ]
 
@@ -981,6 +982,7 @@ name = "nettoolskit-otel"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "nettoolskit-core",
  "nettoolskit-ui",
  "opentelemetry",
  "opentelemetry_sdk",
@@ -990,10 +992,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nettoolskit-string-utils"
-version = "1.0.0"
-
-[[package]]
 name = "nettoolskit-templating"
 version = "0.1.0"
 dependencies = [
@@ -1001,6 +999,7 @@ dependencies = [
  "dashmap",
  "futures",
  "handlebars 6.3.2",
+ "nettoolskit-core",
  "num_cpus",
  "serde",
  "serde_json",
@@ -1011,14 +1010,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "nettoolskit-translate"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "nettoolskit-core",
+ "nettoolskit-management",
+ "nettoolskit-otel",
+ "nettoolskit-templating",
+ "nettoolskit-ui",
+ "owo-colors",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nettoolskit-ui"
 version = "1.0.0"
 dependencies = [
  "crossterm",
  "nettoolskit-core",
- "nettoolskit-string-utils",
  "once_cell",
  "owo-colors",
+ "strum 0.26.3",
  "thiserror 1.0.69",
  "tracing",
 ]

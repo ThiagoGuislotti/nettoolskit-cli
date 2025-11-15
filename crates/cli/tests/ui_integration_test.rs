@@ -3,6 +3,22 @@
 /// This test checks if the input system can properly read characters
 /// and handle basic keyboard events.
 use nettoolskit_ui::CommandPalette;
+use nettoolskit_core::MenuEntry;
+
+#[derive(Clone)]
+struct TestEntry {
+    label: String,
+    description: String,
+}
+
+impl MenuEntry for TestEntry {
+    fn label(&self) -> &str { &self.label }
+    fn description(&self) -> &str { &self.description }
+}
+
+fn create_test_entries() -> Vec<TestEntry> {
+    vec![TestEntry { label: "/test".to_string(), description: "Test".to_string() }]
+}
 
 // CommandPalette Creation Tests
 
@@ -12,7 +28,7 @@ fn test_command_palette_creation() {
     // (No setup needed)
 
     // Act
-    let palette = CommandPalette::new();
+    let palette = CommandPalette::new(create_test_entries());
 
     // Assert
     assert!(!palette.is_active(), "Palette should start inactive");
@@ -31,7 +47,7 @@ fn test_ui_exports_available() {
 
     // Act
     let actual_primary = (PRIMARY_COLOR.0, PRIMARY_COLOR.1, PRIMARY_COLOR.2);
-    let palette = CommandPalette::new();
+    let palette = CommandPalette::new(create_test_entries());
 
     // Assert
     assert_eq!(
@@ -48,13 +64,29 @@ fn test_ui_exports_available() {
 #[test]
 fn test_ui_modules_accessible() {
     use nettoolskit_ui::{display, palette, terminal};
+use nettoolskit_core::MenuEntry;
+
+#[derive(Clone)]
+struct TestEntry {
+    label: String,
+    description: String,
+}
+
+impl MenuEntry for TestEntry {
+    fn label(&self) -> &str { &self.label }
+    fn description(&self) -> &str { &self.description }
+}
+
+fn create_test_entries() -> Vec<TestEntry> {
+    vec![TestEntry { label: "/test".to_string(), description: "Test".to_string() }]
+}
 
     // Arrange
     // (Testing module visibility - no setup needed)
 
     // Act
     let colors = (display::PRIMARY_COLOR, display::SECONDARY_COLOR);
-    let command_palette = palette::CommandPalette::new();
+    let command_palette = palette::CommandPalette::new(create_test_entries());
     let terminal_layout = terminal::TerminalLayout::initialize();
 
     // Assert
@@ -72,6 +104,22 @@ fn test_ui_modules_accessible() {
 fn test_modern_module_when_enabled() {
     // TODO: Implement when modern-tui feature is complete
     // use nettoolskit_ui::modern::{App, Tui};
+use nettoolskit_core::MenuEntry;
+
+#[derive(Clone)]
+struct TestEntry {
+    label: String,
+    description: String,
+}
+
+impl MenuEntry for TestEntry {
+    fn label(&self) -> &str { &self.label }
+    fn description(&self) -> &str { &self.description }
+}
+
+fn create_test_entries() -> Vec<TestEntry> {
+    vec![TestEntry { label: "/test".to_string(), description: "Test".to_string() }]
+}
 
     // Arrange
     // (No setup needed)
