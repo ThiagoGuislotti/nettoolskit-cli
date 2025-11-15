@@ -6,6 +6,10 @@ authors = ["NetToolsKit Contributors"]
 description = "Template rendering engine for NetToolsKit CLI"
 
 [dependencies]
+# Internal dependencies (Nível 1)
+nettoolskit-core = { path = "../../core" }
+
+# External dependencies
 handlebars = "6.2"
 serde = "1.0"
 serde_json = "1.0"

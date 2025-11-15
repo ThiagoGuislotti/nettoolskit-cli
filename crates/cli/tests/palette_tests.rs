@@ -1,14 +1,47 @@
+use nettoolskit_core::MenuEntry;
 use nettoolskit_ui::CommandPalette;
+
+// Test helper for creating menu entries
+#[derive(Clone)]
+struct TestEntry {
+    label: String,
+    description: String,
+}
+
+impl MenuEntry for TestEntry {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+fn create_test_entries() -> Vec<TestEntry> {
+    vec![
+        TestEntry {
+            label: "/test1".to_string(),
+            description: "Test command 1".to_string(),
+        },
+        TestEntry {
+            label: "/test2".to_string(),
+            description: "Test command 2".to_string(),
+        },
+    ]
+}
 
 #[test]
 fn test_command_palette_new() {
-    let palette = CommandPalette::new();
+    let entries = create_test_entries();
+    let palette = CommandPalette::new(entries);
     assert!(!palette.is_active());
 }
 
 #[test]
 fn test_command_palette_open_and_close() {
-    let mut palette = CommandPalette::new();
+    let entries = create_test_entries();
+    let mut palette = CommandPalette::new(entries);
 
     // Test opening
     let result = palette.open("test");
@@ -23,7 +56,8 @@ fn test_command_palette_open_and_close() {
 
 #[test]
 fn test_command_palette_double_close() {
-    let mut palette = CommandPalette::new();
+    let entries = create_test_entries();
+    let mut palette = CommandPalette::new(entries);
 
     // First close on inactive palette should succeed
     let result = palette.close();
@@ -38,7 +72,7 @@ fn test_command_palette_double_close() {
 
 #[test]
 fn test_command_palette_update_query_inactive() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Should succeed even when inactive
     let result = palette.update_query("test");
@@ -48,7 +82,7 @@ fn test_command_palette_update_query_inactive() {
 
 #[test]
 fn test_command_palette_navigation_inactive() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Navigation should succeed but do nothing when inactive
     assert!(palette.navigate_up().is_ok());
@@ -61,7 +95,7 @@ fn test_command_palette_navigation_inactive() {
 
 #[test]
 fn test_command_palette_get_selected_command_inactive() {
-    let palette = CommandPalette::new();
+    let palette = CommandPalette::new(create_test_entries());
 
     // Should return None when inactive
     assert!(palette.get_selected_command().is_none());
@@ -69,7 +103,7 @@ fn test_command_palette_get_selected_command_inactive() {
 
 #[test]
 fn test_command_palette_lifecycle() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Initial state
     assert!(!palette.is_active());
@@ -93,7 +127,7 @@ fn test_command_palette_lifecycle() {
 
 #[test]
 fn test_command_palette_query_filtering() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("").unwrap();
 
     // Empty query should have some results
@@ -114,7 +148,7 @@ fn test_command_palette_query_filtering() {
 
 #[test]
 fn test_command_palette_navigation_wrapping() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("").unwrap();
 
     // Test navigation sequence
@@ -139,7 +173,7 @@ fn test_command_palette_navigation_wrapping() {
 
 #[test]
 fn test_command_palette_down_navigation() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("").unwrap();
 
     // Start at home
@@ -160,7 +194,7 @@ fn test_command_palette_down_navigation() {
 
 #[test]
 fn test_command_palette_multiple_opens() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // First open
     palette.open("test1").unwrap();
@@ -176,7 +210,7 @@ fn test_command_palette_multiple_opens() {
 
 #[test]
 fn test_command_palette_empty_query() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Open with empty query
     palette.open("").unwrap();
@@ -191,7 +225,7 @@ fn test_command_palette_empty_query() {
 
 #[test]
 fn test_command_palette_whitespace_query() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Test with whitespace
     palette.open("   ").unwrap();
@@ -206,7 +240,7 @@ fn test_command_palette_whitespace_query() {
 
 #[test]
 fn test_command_palette_special_characters() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("").unwrap();
 
     // Test with special characters
@@ -222,7 +256,7 @@ fn test_command_palette_special_characters() {
 
 #[test]
 fn test_command_palette_long_query() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("").unwrap();
 
     // Test with very long query
@@ -237,7 +271,7 @@ fn test_command_palette_long_query() {
 
 #[test]
 fn test_command_palette_state_consistency() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Test state is consistent across operations
     assert!(!palette.is_active());
@@ -268,7 +302,7 @@ fn test_command_palette_state_consistency() {
 
 #[test]
 fn test_command_palette_rapid_operations() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
 
     // Test rapid consecutive operations
     for i in 0..10 {
@@ -285,7 +319,7 @@ fn test_command_palette_rapid_operations() {
 
 #[test]
 fn test_command_palette_case_sensitivity() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("").unwrap();
 
     // Test different case variations
@@ -307,7 +341,7 @@ fn test_command_palette_case_sensitivity() {
 
 #[test]
 fn test_command_palette_numeric_query() {
-    let mut palette = CommandPalette::new();
+    let mut palette = CommandPalette::new(create_test_entries());
     palette.open("123").unwrap();
 
     palette.update_query("456").unwrap();

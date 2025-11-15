@@ -25,5 +25,18 @@ anyhow = { workspace = true }
 # Tracing
 tracing = { workspace = true }
 
+# Enum utilities
+strum = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"
+
+# Async utilities (from async-utils)
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# File search utilities (from file-search)
+walkdir = "2.5"
+ignore = "0.4"
+globset = "0.4"
+
 [lints]
 workspace = true

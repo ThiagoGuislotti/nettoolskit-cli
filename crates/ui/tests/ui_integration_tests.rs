@@ -14,7 +14,7 @@
 //! - Module completeness checks
 //! - Cross-platform compatibility validation
 
-use nettoolskit_string_utils::string::truncate_directory;
+use nettoolskit_core::string_utils::string::truncate_directory;
 use nettoolskit_ui::*;
 
 // Module Integration Tests

@@ -1,0 +1,76 @@
+//! Manifest discovery and display utilities
+
+use nettoolskit_manifest::parser::ManifestParser;
+use nettoolskit_otel::Metrics;
+use owo_colors::OwoColorize;
+use std::path::{Path, PathBuf};
+use tracing::{debug, info};
+use walkdir::WalkDir;
+
+#[derive(Debug)]
+pub struct ManifestInfo {
+    pub path: PathBuf,
+    pub project_name: String,
+    pub language: String,
+    pub context_count: usize,
+}
+
+pub async fn discover_manifests(root: Option<PathBuf>) -> Vec<ManifestInfo> {
+    let metrics = Metrics::new();
+    let search_root = root.unwrap_or_else(|| PathBuf::from("."));
+    info!("Searching for manifest files in {:?}", search_root);
+    let manifest_paths = find_manifest_files(&search_root).await.unwrap_or_default();
+    let mut manifests = Vec::new();
+    for path in manifest_paths {
+        if let Ok(doc) = ManifestParser::from_file(&path) {
+            manifests.push(ManifestInfo {
+                path: path.clone(),
+                project_name: doc.meta.name.clone(),
+                language: doc.conventions.target_framework.clone(),
+                context_count: doc.contexts.len(),
+            });
+        }
+    }
+    metrics.increment_counter("manifests_discovered");
+    info!("Discovered {} manifest files", manifests.len());
+    manifests
+}
+
+pub fn display_manifests(manifests: &[ManifestInfo]) {
+    if manifests.is_empty() {
+        println!("{}", "No manifest files found in workspace.".yellow());
+        return;
+    }
+    println!("\n{}", "📋 Discovered Manifests:".cyan().bold());
+    println!("{}", "─".repeat(80).dimmed());
+    for (i, manifest) in manifests.iter().enumerate() {
+        println!("{}. {} ({})", (i + 1).to_string().green(), manifest.project_name.cyan().bold(), manifest.language.yellow());
+        println!("   �� Path: {}", manifest.path.display().to_string().dimmed());
+        println!("   🔢 Contexts: {}", manifest.context_count.to_string().green());
+        if i < manifests.len() - 1 { println!(); }
+    }
+    println!("{}", "─".repeat(80).dimmed());
+    println!("\n{} {}", "Total:".bold(), manifests.len().to_string().green().bold());
+}
+
+async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    use tokio::task;
+    let root = root.to_path_buf();
+    task::spawn_blocking(move || {
+        let mut manifests = Vec::new();
+        for entry_result in WalkDir::new(&root).max_depth(10).follow_links(false).into_iter() {
+            let entry = match entry_result { Ok(e) => e, Err(_) => continue };
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(file_name) = path.file_name() {
+                    let name = file_name.to_string_lossy();
+                    if name.ends_with(".manifest.yaml") || name.ends_with(".manifest.yml") {
+                        debug!("Found manifest: {:?}", path);
+                        manifests.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+        Ok(manifests)
+    }).await?
+}
