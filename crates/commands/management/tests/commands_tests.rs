@@ -6,7 +6,7 @@ use strum::IntoEnumIterator;
 #[test]
 fn test_command_count() {
     // Arrange
-    let expected_count = 6;
+    let expected_count = 4;
 
     // Act
     let actual_count = Command::iter().count();
@@ -16,27 +16,27 @@ fn test_command_count() {
 }
 
 #[test]
-fn test_list_command() {
+fn test_help_command() {
     // Arrange
-    let command = Command::List;
+    let command = Command::Help;
 
     // Act
     let slash_command = command.slash();
 
     // Assert
-    assert_eq!(slash_command, "/list");
+    assert_eq!(slash_command, "/help");
 }
 
 #[test]
-fn test_check_command() {
+fn test_manifest_command() {
     // Arrange
-    let command = Command::Check;
+    let command = Command::Manifest;
 
     // Act
     let slash_command = command.slash();
 
     // Assert
-    assert_eq!(slash_command, "/check");
+    assert_eq!(slash_command, "/manifest");
 }
 
 #[test]

@@ -36,25 +36,17 @@ impl From<ExitStatus> for std::process::ExitCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumIter, EnumString, IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum Command {
-    /// List discovered manifest files in workspace
-    #[strum(serialize = "/list")]
-    List,
+    /// Display help information and available commands
+    #[strum(serialize = "/help")]
+    Help,
 
-    /// Validate manifest or template structure
-    #[strum(serialize = "/check")]
-    Check,
+    /// Manage and apply manifests (submenu)
+    #[strum(serialize = "/manifest")]
+    Manifest,
 
-    /// Preview template rendering without writing files
-    #[strum(serialize = "/render")]
-    Render,
-
-    /// Create a new project from a template
-    #[strum(serialize = "/new")]
-    New,
-
-    /// Apply manifest changes to existing solution
-    #[strum(serialize = "/apply")]
-    Apply,
+    /// Translate code between languages (deferred)
+    #[strum(serialize = "/translate")]
+    Translate,
 
     /// Exit NetToolsKit CLI
     #[strum(serialize = "/quit")]
@@ -65,11 +57,9 @@ impl Command {
     /// Get the user-facing description for this command
     pub fn description(&self) -> &'static str {
         match self {
-            Command::List => "List discovered manifest files in workspace",
-            Command::Check => "Validate manifest or template structure",
-            Command::Render => "Preview template rendering without writing files",
-            Command::New => "Create a new project from a template",
-            Command::Apply => "Apply manifest changes to existing solution",
+            Command::Help => "Display help information and available commands",
+            Command::Manifest => "Manage and apply manifests (submenu)",
+            Command::Translate => "Translate code between languages (deferred)",
             Command::Quit => "Exit NetToolsKit CLI",
         }
     }
@@ -79,14 +69,12 @@ impl Command {
         self.into()
     }
 
-    /// Get the command name without slash (e.g., "list")
+    /// Get the command name without slash (e.g., "help")
     pub fn name(&self) -> String {
         match self {
-            Command::List => "list".to_string(),
-            Command::Check => "check".to_string(),
-            Command::Render => "render".to_string(),
-            Command::New => "new".to_string(),
-            Command::Apply => "apply".to_string(),
+            Command::Help => "help".to_string(),
+            Command::Manifest => "manifest".to_string(),
+            Command::Translate => "translate".to_string(),
             Command::Quit => "quit".to_string(),
         }
     }
@@ -127,25 +115,27 @@ mod tests {
 
     #[test]
     fn test_command_slash() {
-        assert_eq!(Command::List.slash(), "/list");
+        assert_eq!(Command::Help.slash(), "/help");
         assert_eq!(Command::Quit.slash(), "/quit");
     }
 
     #[test]
     fn test_command_description() {
-        assert!(Command::List.description().contains("manifest"));
+        assert!(Command::Help.description().contains("help"));
+        assert!(Command::Manifest.description().contains("manifests"));
+        assert!(Command::Translate.description().contains("Translate"));
         assert!(Command::Quit.description().contains("Exit"));
     }
 
     #[test]
     fn test_get_command() {
-        assert_eq!(get_command("/list"), Some(Command::List));
+        assert_eq!(get_command("/help"), Some(Command::Help));
         assert_eq!(get_command("/invalid"), None);
     }
 
     #[test]
     fn test_enum_iteration() {
         let commands: Vec<Command> = Command::iter().collect();
-        assert_eq!(commands.len(), 6);
+        assert_eq!(commands.len(), 4); // help, manifest, translate, quit
     }
 }

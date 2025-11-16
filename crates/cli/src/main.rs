@@ -22,20 +22,12 @@ pub struct GlobalArgs {
 /// Available CLI commands
 #[derive(Debug, Parser)]
 pub enum Commands {
-    /// List available templates
-    List,
-
-    /// Create a new project from a template
-    New,
-
-    /// Check template or manifest validity
-    Check,
-
-    /// Render template preview
-    Render,
-
-    /// Apply manifest to existing solution
-    Apply,
+    /// Manage and apply manifests
+    Manifest {
+        /// Manifest subcommand (list, check, render, apply)
+        #[clap(subcommand)]
+        action: Option<ManifestAction>,
+    },
 
     /// Translate templates between programming languages
     Translate {
@@ -52,21 +44,38 @@ pub enum Commands {
     },
 }
 
+#[derive(Debug, Parser)]
+pub enum ManifestAction {
+    /// Discover available manifests in the workspace
+    List,
+
+    /// Validate manifest structure and dependencies
+    Check,
+
+    /// Preview generated files without creating them
+    Render,
+
+    /// Apply manifest to generate/update project files
+    Apply,
+}
+
 impl Commands {
     /// Execute this command
     pub async fn execute(self) -> ExitStatus {
         use nettoolskit_commands::process_command;
 
         match self {
+            Commands::Manifest { action } => match action {
+                Some(ManifestAction::List) => process_command("/manifest list").await,
+                Some(ManifestAction::Check) => process_command("/manifest check").await,
+                Some(ManifestAction::Render) => process_command("/manifest render").await,
+                Some(ManifestAction::Apply) => process_command("/manifest apply").await,
+                None => process_command("/manifest").await,
+            },
             Commands::Translate { from, to, path } => {
                 let request = nettoolskit_translate::TranslateRequest { from, to, path };
                 nettoolskit_translate::handle_translate(request).await
             }
-            Commands::List => process_command("/list").await,
-            Commands::New => process_command("/new").await,
-            Commands::Check => process_command("/check").await,
-            Commands::Render => process_command("/render").await,
-            Commands::Apply => process_command("/apply").await,
         }
     }
 }
@@ -80,7 +89,8 @@ impl Commands {
     author = "NetToolsKit Team",
     version,
     bin_name = "ntk",
-    override_usage = "ntk [OPTIONS] [PROMPT]\n       ntk [OPTIONS] <COMMAND> [ARGS]"
+    override_usage = "ntk [OPTIONS] [PROMPT]\n       ntk [OPTIONS] <COMMAND> [ARGS]",
+    disable_help_subcommand = true
 )]
 struct Cli {
     #[clap(flatten)]

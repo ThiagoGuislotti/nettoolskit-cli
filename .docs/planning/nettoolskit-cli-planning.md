@@ -47,7 +47,7 @@ As commands are executed, the header scrolls up naturally with the content, whil
  ╚═╝  ╚═══╝╚══════╝   ╚═╝      ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝
 
 
-💡 Tip: Type / to see available commands
+💡 Tip: Type /help to see all commands, or / to open command palette
    Use ↑↓ to navigate, Enter to select, /quit to exit
 -> header
 
@@ -56,7 +56,7 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 > /
 
-› /list      Show all available commands
+› /help      Display help information and available commands
   /manifest  Manage and apply manifests (submenu)
   /translate Translate code between languages (deferred)
   /quit      Exit NetToolsKit CLI
@@ -89,6 +89,16 @@ As commands are executed, the header scrolls up naturally with the content, whil
 ---
 -> footer
 ```
+
+**Commands:**
+/help      - Display help information and available commands
+/manifest  - Manage and apply manifests (submenu)
+  ├─ list   - Discover available manifests in workspace
+  ├─ check  - Validate manifest structure and dependencies
+  ├─ render - Preview generated files without creating them
+  └─ apply  - Apply manifest to generate/update project files
+/translate - Translate code between languages (deferred)
+/quit      - Exit NetToolsKit CLI
 
 ---
 

@@ -945,10 +945,13 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "futures",
+ "handlebars 6.3.2",
  "nettoolskit-core",
  "nettoolskit-manifest",
  "nettoolskit-otel",
  "owo-colors",
+ "regex",
+ "serde_json",
  "strum 0.26.3",
  "tempfile",
  "thiserror 2.0.17",

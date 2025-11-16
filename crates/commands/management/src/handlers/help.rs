@@ -1,4 +1,4 @@
-//! Manifest discovery and display utilities
+//! Help command handler and manifest discovery utilities
 
 use nettoolskit_manifest::parser::ManifestParser;
 use nettoolskit_otel::Metrics;
@@ -20,15 +20,23 @@ pub async fn discover_manifests(root: Option<PathBuf>) -> Vec<ManifestInfo> {
     let search_root = root.unwrap_or_else(|| PathBuf::from("."));
     info!("Searching for manifest files in {:?}", search_root);
     let manifest_paths = find_manifest_files(&search_root).await.unwrap_or_default();
+    debug!("Found {} potential manifest files", manifest_paths.len());
     let mut manifests = Vec::new();
     for path in manifest_paths {
-        if let Ok(doc) = ManifestParser::from_file(&path) {
-            manifests.push(ManifestInfo {
-                path: path.clone(),
-                project_name: doc.meta.name.clone(),
-                language: doc.conventions.target_framework.clone(),
-                context_count: doc.contexts.len(),
-            });
+        debug!("Attempting to parse manifest: {:?}", path);
+        match ManifestParser::from_file(&path) {
+            Ok(doc) => {
+                debug!("Successfully parsed manifest: {}", doc.meta.name);
+                manifests.push(ManifestInfo {
+                    path: path.clone(),
+                    project_name: doc.meta.name.clone(),
+                    language: doc.conventions.target_framework.clone(),
+                    context_count: doc.contexts.len(),
+                });
+            }
+            Err(e) => {
+                debug!("Failed to parse manifest at {:?}: {}", path, e);
+            }
         }
     }
     metrics.increment_counter("manifests_discovered");
@@ -64,7 +72,9 @@ async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
             if path.is_file() {
                 if let Some(file_name) = path.file_name() {
                     let name = file_name.to_string_lossy();
-                    if name.ends_with(".manifest.yaml") || name.ends_with(".manifest.yml") {
+                    // Support both manifest.yaml and *.manifest.yaml patterns
+                    if name.ends_with(".manifest.yaml") || name.ends_with(".manifest.yml")
+                        || name == "manifest.yaml" || name == "manifest.yml" {
                         debug!("Found manifest: {:?}", path);
                         manifests.push(path.to_path_buf());
                     }

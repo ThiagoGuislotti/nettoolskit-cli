@@ -1,9 +1,9 @@
-//! Tests for manifest discovery command
+//! Tests for help command and manifest discovery
 //!
-//! These tests verify the manifest discovery functionality including
-//! file search, metadata parsing, and display formatting.
+//! These tests verify the help command functionality and manifest discovery
+//! including file search, metadata parsing, and display formatting.
 
-use nettoolskit_management::handlers::list::{discover_manifests, display_manifests, ManifestInfo};
+use nettoolskit_management::handlers::help::{discover_manifests, display_manifests, ManifestInfo};
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::fs;
@@ -24,7 +24,7 @@ async fn create_test_manifest(dir: &TempDir, filename: &str, content: &str) -> P
 /// Sample manifest YAML for testing
 fn sample_manifest_yaml() -> &'static str {
     r#"
-apiVersion: v1
+apiVersion: ntk/v1
 kind: solution
 meta:
   name: TestProject
@@ -76,7 +76,7 @@ async fn test_discover_manifests_finds_yaml_files() {
         "Should find exactly one manifest file"
     );
     assert_eq!(manifests[0].project_name, "TestProject");
-    assert_eq!(manifests[0].language, ".NET");
+    assert_eq!(manifests[0].language, "net8.0");
     assert_eq!(manifests[0].context_count, 2);
 }
 
@@ -238,7 +238,7 @@ async fn test_metadata_extraction_dotnet_project() {
 
     // Assert
     assert_eq!(manifests[0].project_name, "TestProject");
-    assert_eq!(manifests[0].language, ".NET");
+    assert_eq!(manifests[0].language, "net8.0");
     assert_eq!(manifests[0].context_count, 2);
 }
 
@@ -247,7 +247,7 @@ async fn test_metadata_extraction_context_count() {
     // Arrange
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let manifest_with_contexts = r#"
-apiVersion: v1
+apiVersion: ntk/v1
 kind: solution
 meta:
   name: MultiContext
@@ -288,7 +288,7 @@ async fn test_metadata_extraction_no_contexts() {
     // Arrange
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let manifest_no_contexts = r#"
-apiVersion: v1
+apiVersion: ntk/v1
 kind: solution
 meta:
   name: NoContexts
