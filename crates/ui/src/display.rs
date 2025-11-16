@@ -80,7 +80,7 @@ pub fn print_ascii_logo() {
     println!();
     println!(
         "{}",
-        "💡 Tip: Type / to see available commands".color(GRAY_COLOR)
+        "💡 Tip: Type /help to see all commands, or / to open command palette".color(GRAY_COLOR)
     );
     println!(
         "{}",

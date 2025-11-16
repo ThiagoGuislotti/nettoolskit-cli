@@ -27,8 +27,9 @@ async fn test_process_list_command() {
 
 #[tokio::test]
 async fn test_process_new_command() {
-    // Act
-    let result = process_command("/new").await;
+    // Act - /new was removed, now it's handled differently
+    // Testing /manifest list instead as a valid manifest subcommand
+    let result = process_command("/manifest list").await;
 
     // Assert
     assert_eq!(result, ExitStatus::Success);
@@ -36,8 +37,8 @@ async fn test_process_new_command() {
 
 #[tokio::test]
 async fn test_process_check_command() {
-    // Act
-    let result = process_command("/check").await;
+    // Act - /check is now a subcommand of /manifest
+    let result = process_command("/manifest check").await;
 
     // Assert
     // Critical: check may fail if no manifest exists (expected in test env)
@@ -46,8 +47,8 @@ async fn test_process_check_command() {
 
 #[tokio::test]
 async fn test_process_render_command() {
-    // Act
-    let result = process_command("/render").await;
+    // Act - /render is now a subcommand of /manifest
+    let result = process_command("/manifest render").await;
 
     // Assert
     assert_eq!(result, ExitStatus::Success);
@@ -55,8 +56,8 @@ async fn test_process_render_command() {
 
 #[tokio::test]
 async fn test_process_apply_command() {
-    // Act
-    let result = process_command("/apply").await;
+    // Act - /apply is now a subcommand of /manifest
+    let result = process_command("/manifest apply").await;
 
     // Assert
     // Critical: apply may fail if no manifest exists (expected in test env)

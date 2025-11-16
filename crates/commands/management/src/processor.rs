@@ -1,11 +1,10 @@
 //! Command processor - Main dispatcher for CLI commands
 
 use crate::definitions::{Command, ExitStatus};
-use crate::handlers::list::discover_manifests;
 use nettoolskit_otel::{Metrics, Timer};
 use owo_colors::OwoColorize;
-use std::path::PathBuf;
 use std::str::FromStr;
+use strum::IntoEnumIterator;
 use tracing::info;
 
 /// Process slash commands from CLI and return appropriate status
@@ -33,40 +32,72 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     );
     metrics.increment_counter(format!("command_{}_usage", cmd.trim_start_matches('/')));
 
+    // Parse command and potential subcommand
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let base_cmd = parts.get(0).unwrap_or(&"");
+    let subcommand = parts.get(1).copied();
+
     // Parse and dispatch command
-    let result = match Command::from_str(cmd).ok() {
-        Some(Command::List) => {
-            println!("{}", "📋 Listing Manifests...".cyan().bold());
-            let manifests = discover_manifests(Some(PathBuf::from("."))).await;
-            if manifests.is_empty() {
-                println!("  {}", "No manifests found in workspace".yellow());
-                println!("  Run '/new' to create a new manifest");
-            } else {
-                println!("  Found {} manifest(s):\n", manifests.len());
-                for manifest in manifests {
-                    println!("  • {}", manifest.path.display());
+    let result = match Command::from_str(base_cmd).ok() {
+        Some(Command::Help) => {
+            println!("{}", "� NetToolsKit CLI - Help".cyan().bold());
+            println!("\n{}", "Available Commands:".white().bold());
+            println!();
+
+            for command in Command::iter() {
+                println!("  {} - {}", command.slash().green(), command.description());
+            }
+
+            println!("\n{}", "Usage:".white().bold());
+            println!("  • Type {} to open the command palette", "/".green());
+            println!("  • Type a command directly (e.g., {})", "/help".green());
+            println!("  • Use {} to navigate in the palette", "↑↓".cyan());
+            println!("  • Press {} to select a command", "Enter".cyan());
+
+            println!("\n{}", "Examples:".white().bold());
+            println!("  {} - Show this help", "/help".green());
+            println!("  {} - Manage manifests", "/manifest".green());
+            println!("  {} - Exit the CLI", "/quit".green());
+
+            ExitStatus::Success
+        }
+        Some(Command::Manifest) => {
+            match subcommand {
+                Some("list") => {
+                    println!("{}", "📋 Discovering Manifests...".cyan().bold());
+                    println!("\n{}", "ℹ️  Manifest discovery will list all available manifest files".yellow());
+                    ExitStatus::Success
+                }
+                Some("check") => {
+                    println!("{}", "✅ Validating Manifest...".cyan().bold());
+                    println!("\n{}", "ℹ️  Manifest validation will check structure and dependencies".yellow());
+                    ExitStatus::Success
+                }
+                Some("render") => {
+                    println!("{}", "🎨 Rendering Preview...".cyan().bold());
+                    println!("\n{}", "ℹ️  Manifest rendering will preview generated files".yellow());
+                    ExitStatus::Success
+                }
+                Some("apply") => {
+                    println!("{}", "⚡ Applying Manifest...".cyan().bold());
+                    println!("\n{}", "ℹ️  Manifest application will generate/update project files".yellow());
+                    ExitStatus::Success
+                }
+                _ => {
+                    println!("{}", "📋 Manifest Commands".cyan().bold());
+                    println!("\nAvailable subcommands:");
+                    println!("  {} - Discover available manifests in the workspace", "/manifest list".green());
+                    println!("  {} - Validate manifest structure and dependencies", "/manifest check".green());
+                    println!("  {} - Preview generated files without creating them", "/manifest render".green());
+                    println!("  {} - Apply manifest to generate/update project files", "/manifest apply".green());
+                    println!("\n{}", "💡 Type a subcommand to continue".yellow());
+                    ExitStatus::Success
                 }
             }
-            ExitStatus::Success
         }
-        Some(Command::New) => {
-            println!("{}", "✨ Creating New Manifest...".cyan().bold());
-            println!("\n{}", "ℹ️  Manifest creation to be implemented".yellow());
-            ExitStatus::Success
-        }
-        Some(Command::Check) => {
-            println!("{}", "🔍 Checking Manifest...".cyan().bold());
-            println!("\n{}", "ℹ️  Manifest validation to be implemented".yellow());
-            ExitStatus::Success
-        }
-        Some(Command::Render) => {
-            println!("{}", "🎨 Rendering Preview...".cyan().bold());
-            println!("\n{}", "ℹ️  Render preview to be implemented".yellow());
-            ExitStatus::Success
-        }
-        Some(Command::Apply) => {
-            println!("{}", "⚡ Applying Manifest...".cyan().bold());
-            println!("\n{}", "ℹ️  Manifest application to be implemented".yellow());
+        Some(Command::Translate) => {
+            println!("{}", "🔄 Translate Command".cyan().bold());
+            println!("\n{}", "ℹ️  Translation feature is deferred to a future release".yellow());
             ExitStatus::Success
         }
         Some(Command::Quit) => ExitStatus::Success, // Handled by CLI loop
