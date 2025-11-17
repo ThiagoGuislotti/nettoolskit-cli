@@ -12,11 +12,13 @@ path = "src/lib.rs"
 nettoolskit-core = { path = "../../core" }
 nettoolskit-otel = { path = "../../otel" }
 nettoolskit-manifest = { path = "../manifest" }
+nettoolskit-ui = { path = "../../ui" }
 
 # External dependencies
 anyhow = "1.0"
 futures = "0.3"
 handlebars = "6.2"
+inquire = "0.7"
 owo-colors = "3.5"
 regex = "1.11"
 serde_json = "1.0"
