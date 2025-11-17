@@ -8,8 +8,6 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::display::print_logo;
-
 /// Clear the terminal screen and move cursor to top-left position.
 ///
 /// This function performs a complete terminal reset, useful for
@@ -159,9 +157,18 @@ struct LayoutState {
 
 impl TerminalLayout {
     /// Initialize terminal layout, render header/footer, and set scroll region.
-    pub fn initialize() -> io::Result<Self> {
+    ///
+    /// # Parameters
+    ///
+    /// * `render_header` - Optional function to render the header content (e.g., logo, welcome message)
+    pub fn initialize<F>(render_header: Option<F>) -> io::Result<Self>
+    where
+        F: FnOnce(),
+    {
         clear_terminal()?;
-        print_logo();
+        if let Some(render) = render_header {
+            render();
+        }
         io::stdout().flush()?;
 
         let (width, height) = terminal::size()?;
@@ -238,7 +245,7 @@ impl TerminalLayoutInner {
         }
 
         clear_terminal()?;
-        print_logo();
+        // Note: Header re-rendering on reconfigure is handled by the caller if needed
         self.render_footer()
     }
 

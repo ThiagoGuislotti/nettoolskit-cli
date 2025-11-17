@@ -1,9 +1,10 @@
 /// Manifest submenu - Interactive menu for manifest commands
 use crate::definitions::ExitStatus;
-use inquire::ui::{RenderConfig, Color, Styled};
-use inquire::{Select, Text};
-use nettoolskit_core::string_utils::string::truncate_directory_with_middle;
-use nettoolskit_ui::{PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR, GRAY_COLOR};
+use inquire::Text;
+use nettoolskit_ui::{
+    BoxConfig, MenuConfig, render_box, render_interactive_menu,
+    PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR
+};
 use owo_colors::OwoColorize;
 use std::env;
 use std::path::PathBuf;
@@ -62,57 +63,30 @@ pub async fn show_manifest_menu() -> ExitStatus {
         .and_then(|p| p.to_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Configure custom theme matching primary color
-    let mut render_config = RenderConfig::default();
-    render_config.prompt_prefix = Styled::new("?").with_fg(Color::Rgb { r: PRIMARY_COLOR.0, g: PRIMARY_COLOR.1, b: PRIMARY_COLOR.2 });
-    render_config.highlighted_option_prefix = Styled::new("❯").with_fg(Color::Rgb { r: PRIMARY_COLOR.0, g: PRIMARY_COLOR.1, b: PRIMARY_COLOR.2 });
-    render_config.selected_option = Some(render_config.selected_option.unwrap_or_default().with_fg(Color::Rgb { r: PRIMARY_COLOR.0, g: PRIMARY_COLOR.1, b: PRIMARY_COLOR.2 }));
-    render_config.help_message = render_config.help_message.with_fg(Color::DarkYellow);
-
     loop {
         // Print command being executed
         println!();
-        println!("{}", "> manifest".color(PRIMARY_COLOR).bold());
-
+        println!("{}", "> /manifest".color(PRIMARY_COLOR).bold());
         println!();
 
-        // Print box header
-        let box_width = 89; // Same as main menu
-        println!("{}", "╭─────────────────────────────────────────────────────────────────────────────────────────╮".color(PRIMARY_COLOR));
-        println!(
-            "{}{}{}{}",
-            "│".color(PRIMARY_COLOR),
-            " >_".color(PRIMARY_COLOR).bold(),
-            " Manifest Commands Menu".color(WHITE_COLOR).bold(),
-            "                                                              │".color(PRIMARY_COLOR)
-        );
-        println!("{}", "│    Interactive menu for manifest operations                                            │".color(PRIMARY_COLOR));
-        println!("{}", "│                                                                                         │".color(PRIMARY_COLOR));
+        // Render box using component
+        let box_config = BoxConfig::new("Manifest Commands Menu")
+            .with_title_prefix(">_")
+            .with_title_color(WHITE_COLOR)
+            .with_subtitle("Interactive menu for manifest operations")
+            .add_footer_item("directory", current_dir.clone(), WHITE_COLOR)
+            .with_border_color(PRIMARY_COLOR)
+            .with_width(89)
+            .with_spacing(false);
 
-        // Calculate available width for directory path (same logic as main menu)
-        let dir_label = "    directory: ";
-        let available_width = box_width - dir_label.len() - 1 - 4 - 4; // -1 for │, -4 for spaces, -4 for safety margin
-        let truncated_dir = truncate_directory_with_middle(&current_dir, available_width);
-
-        // Calculate padding for directory line
-        let dir_text_length = dir_label.len() + truncated_dir.len();
-        let padding_needed = box_width - dir_text_length;
-        let padding = " ".repeat(padding_needed.max(4));
-
-        println!(
-            "{}{}{}{}",
-            "│".color(PRIMARY_COLOR),
-            "    directory: ".color(GRAY_COLOR),
-            truncated_dir.color(WHITE_COLOR),
-            format!("{}│", padding).color(PRIMARY_COLOR)
-        );
-        println!("{}", "╰─────────────────────────────────────────────────────────────────────────────────────────╯".color(PRIMARY_COLOR));
+        render_box(box_config);
 
         println!();
         println!("{}", "    [Use ↑↓ to navigate, Enter to select, /quit to exit]".color(GRAY_COLOR));
         println!();
 
-        let options = vec![
+        // Render menu using component
+        let menu_items = vec![
             ManifestSubcommand::List,
             ManifestSubcommand::Check,
             ManifestSubcommand::Render,
@@ -120,11 +94,12 @@ pub async fn show_manifest_menu() -> ExitStatus {
             ManifestSubcommand::Back,
         ];
 
-        let selection = Select::new("Select a manifest command:", options)
+        let menu_config = MenuConfig::new("Select a manifest command:", menu_items)
+            .with_cursor_color(PRIMARY_COLOR)
             .with_page_size(6)
-            .with_render_config(render_config)
-            .without_help_message()
-            .prompt();
+            .with_inquire_help(false);
+
+        let selection = render_interactive_menu(menu_config);
 
         match selection {
             Ok(ManifestSubcommand::List) => {
@@ -233,9 +208,11 @@ async fn execute_apply_interactive() -> ExitStatus {
 
     // Prompt for dry-run
     let dry_run_options = vec!["No - Apply changes", "Yes - Dry-run (preview only)"];
-    let dry_run_selection = Select::new("Run in dry-run mode?", dry_run_options)
-        .with_help_message("Dry-run will preview changes without modifying files")
-        .prompt();
+    let dry_run_menu = MenuConfig::new("Run in dry-run mode?", dry_run_options)
+        .with_cursor_color(PRIMARY_COLOR)
+        .with_help_message("Dry-run will preview changes without modifying files");
+
+    let dry_run_selection = render_interactive_menu(dry_run_menu);
 
     let dry_run = match dry_run_selection {
         Ok(option) => option.starts_with("Yes"),

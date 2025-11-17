@@ -1,4 +1,4 @@
-use crate::display::{GRAY_COLOR, PRIMARY_COLOR};
+use crate::colors::{GRAY_COLOR, PRIMARY_COLOR};
 use crate::style::set_fg;
 use crossterm::style::{Attribute, Print, SetAttribute};
 use crossterm::terminal::ClearType;
