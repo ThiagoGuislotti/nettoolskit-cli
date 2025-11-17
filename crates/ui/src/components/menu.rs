@@ -25,9 +25,6 @@ pub struct MenuConfig<T> {
 
     /// Number of items visible at once (page size)
     pub page_size: usize,
-
-    /// Whether to show the help message from inquire (usually disabled)
-    pub show_inquire_help: bool,
 }
 
 impl<T> MenuConfig<T> {
@@ -39,7 +36,6 @@ impl<T> MenuConfig<T> {
             cursor_color: Rgb(155, 114, 255), // PRIMARY_COLOR
             help_message: None,
             page_size: 6,
-            show_inquire_help: false,
         }
     }
 
@@ -60,12 +56,6 @@ impl<T> MenuConfig<T> {
         self.page_size = size.max(1);
         self
     }
-
-    /// Set whether to show inquire's built-in help
-    pub fn with_inquire_help(mut self, show: bool) -> Self {
-        self.show_inquire_help = show;
-        self
-    }
 }
 
 /// Render an interactive menu and return the selected item
@@ -78,6 +68,7 @@ where
 {
     // Print custom help message if provided
     if let Some(help_msg) = &config.help_message {
+        println!();
         println!("{}", help_msg.yellow());
         println!();
     }
@@ -104,15 +95,12 @@ where
     render_config.help_message = render_config.help_message.with_fg(Color::DarkYellow);
 
     // Build and execute the select prompt
-    let mut select = Select::new(&config.prompt, config.items)
+    // Always disable inquire's built-in help message
+    Select::new(&config.prompt, config.items)
         .with_page_size(config.page_size)
-        .with_render_config(render_config);
-
-    if !config.show_inquire_help {
-        select = select.without_help_message();
-    }
-
-    select.prompt()
+        .with_render_config(render_config)
+        .without_help_message()
+        .prompt()
 }
 
 #[cfg(test)]
