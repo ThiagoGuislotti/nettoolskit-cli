@@ -33,7 +33,7 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     metrics.increment_counter(format!("command_{}_usage", cmd.trim_start_matches('/')));
 
     // Parse command and potential subcommand
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
     let base_cmd = parts.get(0).unwrap_or(&"");
     let subcommand = parts.get(1).copied();
 
@@ -79,9 +79,41 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
                     ExitStatus::Success
                 }
                 Some("apply") => {
-                    println!("{}", "⚡ Applying Manifest...".cyan().bold());
-                    println!("\n{}", "ℹ️  Manifest application will generate/update project files".yellow());
-                    ExitStatus::Success
+                    // Parse apply command arguments
+                    // Format: /manifest apply <PATH> [--dry-run] [--output DIR]
+
+                    let manifest_path = parts.get(2).map(std::path::PathBuf::from);
+                    let dry_run = parts.contains(&"--dry-run");
+                    let output_root = if let Some(idx) = parts.iter().position(|&p| p == "--output") {
+                        parts.get(idx + 1).map(std::path::PathBuf::from)
+                    } else {
+                        None
+                    };
+
+                    match manifest_path {
+                        Some(path) => {
+                            // Execute apply handler
+                            crate::handlers::execute_apply(
+                                path,
+                                output_root,
+                                dry_run,
+                            ).await
+                        }
+                        None => {
+                            println!("{}", "⚠️  Missing manifest path".red().bold());
+                            println!("\n{}", "Usage:".white().bold());
+                            println!("  {} <PATH> [--dry-run] [--output DIR]", "/manifest apply".green());
+                            println!("\n{}", "Examples:".white().bold());
+                            println!("  {} manifest.yaml", "/manifest apply".green());
+                            println!("  {} feature.manifest.yaml --dry-run", "/manifest apply".green());
+                            println!("  {} domain.manifest.yaml --output ./src", "/manifest apply".green());
+                            ExitStatus::Error
+                        }
+                    }
+                }
+                None => {
+                    // No subcommand provided - show interactive submenu
+                    crate::submenu::show_manifest_menu().await
                 }
                 _ => {
                     println!("{}", "📋 Manifest Commands".cyan().bold());
@@ -90,7 +122,7 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
                     println!("  {} - Validate manifest structure and dependencies", "/manifest check".green());
                     println!("  {} - Preview generated files without creating them", "/manifest render".green());
                     println!("  {} - Apply manifest to generate/update project files", "/manifest apply".green());
-                    println!("\n{}", "💡 Type a subcommand to continue".yellow());
+                    println!("\n{}", "💡 Type a subcommand to continue or just type /manifest for interactive menu".yellow());
                     ExitStatus::Success
                 }
             }
