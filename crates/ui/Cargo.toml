@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 crossterm = { version = "0.28", features = ["event-stream"] }
+inquire = "0.7"
 owo-colors = "3.5"
 thiserror = "1.0"
 tracing = "0.1"

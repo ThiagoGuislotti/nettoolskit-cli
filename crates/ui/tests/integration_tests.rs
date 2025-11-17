@@ -35,11 +35,13 @@ mod tests {
 
     #[test]
     fn test_ui_modules_exist() {
-        // Arrange
-        use nettoolskit_ui::{clear_terminal, print_logo};
+        // Arrange - Test that core UI functions are accessible
+        use nettoolskit_ui::{clear_terminal, BoxConfig, MenuConfig, render_box};
 
         // Assert - Functions should be accessible
         let _ = clear_terminal;
-        let _ = print_logo;
+        let _ = BoxConfig::new("Test");
+        let _ = MenuConfig::new("Test", vec!["a", "b"]);
+        let _ = render_box;
     }
 }

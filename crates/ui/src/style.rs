@@ -35,7 +35,7 @@ pub fn rgb_to_crossterm(rgb: Rgb) -> Color {
 ///
 /// ```
 /// use nettoolskit_ui::style::set_fg;
-/// use nettoolskit_ui::display::PRIMARY_COLOR;
+/// use nettoolskit_ui::PRIMARY_COLOR;
 /// use crossterm::queue;
 /// use std::io::stdout;
 ///
