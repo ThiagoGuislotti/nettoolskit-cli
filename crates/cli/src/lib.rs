@@ -22,15 +22,17 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+pub mod display;
 pub mod input;
 
+use display::print_logo;
 use input::{read_line_with_palette, InputResult};
 use nettoolskit_core::async_utils::with_timeout;
 use nettoolskit_commands::{process_command, process_text, ExitStatus};
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
-    print_logo, render_prompt, CommandPalette, TerminalLayout, PRIMARY_COLOR,
+    render_prompt, CommandPalette, TerminalLayout, PRIMARY_COLOR,
 };
 use tracing::{error, info, warn};
 
@@ -74,7 +76,7 @@ impl Drop for RawModeGuard {
 pub async fn interactive_mode(verbose: bool) -> ExitStatus {
     let mut log_guard = begin_interactive_logging();
 
-    let (layout_failure_notice, _terminal_layout) = match TerminalLayout::initialize() {
+    let (layout_failure_notice, _terminal_layout) = match TerminalLayout::initialize(Some(print_logo)) {
         Ok(layout) => (None, Some(layout)),
         Err(e) => {
             let failure_message = format!("Failed to initialize terminal layout: {e}");

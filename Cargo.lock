@@ -1117,6 +1117,7 @@ name = "nettoolskit-ui"
 version = "1.0.0"
 dependencies = [
  "crossterm 0.28.1",
+ "inquire",
  "nettoolskit-core",
  "once_cell",
  "owo-colors",

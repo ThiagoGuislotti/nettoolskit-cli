@@ -39,8 +39,9 @@ fn test_command_palette_creation() {
 #[test]
 fn test_ui_exports_available() {
     use nettoolskit_ui::{
-        clear_terminal, print_logo, CommandPalette, GRAY_COLOR, PRIMARY_COLOR, WHITE_COLOR,
+        clear_terminal, CommandPalette, GRAY_COLOR, PRIMARY_COLOR, WHITE_COLOR,
     };
+    use nettoolskit_cli::display::print_logo;
 
     // Arrange
     let expected_primary = (155, 114, 255);
@@ -63,7 +64,7 @@ fn test_ui_exports_available() {
 
 #[test]
 fn test_ui_modules_accessible() {
-    use nettoolskit_ui::{display, palette, terminal};
+    use nettoolskit_ui::{colors, palette, terminal};
 use nettoolskit_core::MenuEntry;
 
 #[derive(Clone)]
@@ -85,13 +86,13 @@ fn create_test_entries() -> Vec<TestEntry> {
     // (Testing module visibility - no setup needed)
 
     // Act
-    let colors = (display::PRIMARY_COLOR, display::SECONDARY_COLOR);
+    let color_constants = (colors::PRIMARY_COLOR, colors::SECONDARY_COLOR);
     let command_palette = palette::CommandPalette::new(create_test_entries());
-    let terminal_layout = terminal::TerminalLayout::initialize();
+    let terminal_layout = terminal::TerminalLayout::initialize::<fn()>(None);
 
     // Assert
     // Compilation success + successful creation proves modules are accessible
-    assert_eq!(colors.0 .0, 155); // PRIMARY_COLOR.r
+    assert_eq!(color_constants.0 .0, 155); // PRIMARY_COLOR.r
     assert!(!command_palette.is_active());
     let _ = terminal_layout;
 }

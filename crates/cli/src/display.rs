@@ -1,12 +1,11 @@
-use nettoolskit_core::string_utils::string::truncate_directory_with_middle;
-use owo_colors::{OwoColorize, Rgb};
-use std::env;
+//! NetToolsKit CLI-specific display functions
+//!
+//! This module contains display functions specific to the NetToolsKit CLI application,
+//! including branding, logo, and startup messages.
 
-/// Global UI color constants
-pub const PRIMARY_COLOR: Rgb = Rgb(155, 114, 255);
-pub const SECONDARY_COLOR: Rgb = Rgb(204, 185, 254);
-pub const WHITE_COLOR: Rgb = Rgb(255, 255, 255);
-pub const GRAY_COLOR: Rgb = Rgb(128, 128, 128);
+use nettoolskit_ui::{BoxConfig, render_box, PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR};
+use owo_colors::OwoColorize;
+use std::env;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -20,45 +19,21 @@ pub fn print_logo() {
 ///
 /// Displays the NetToolsKit CLI version, description, current directory,
 /// and helpful usage tips in a formatted box layout.
+///
+/// This is a convenience wrapper around `render_box` with CLI-specific configuration.
 pub fn print_welcome_box() {
     let current_dir = get_current_directory();
-    let box_width = 89; // Total characters in the box line
 
-    println!("{}", "╭─────────────────────────────────────────────────────────────────────────────────────────╮".color(PRIMARY_COLOR));
-    println!(
-        "{} {} {}                                                              {}",
-        "│".color(PRIMARY_COLOR),
-        ">_".color(PRIMARY_COLOR).bold(),
-        format!("NetToolsKit CLI ({})", VERSION).color(WHITE_COLOR),
-        "│".color(PRIMARY_COLOR)
-    );
-    println!(
-        "{}    {}                                      {}",
-        "│".color(PRIMARY_COLOR),
-        "A comprehensive toolkit for backend development".color(GRAY_COLOR),
-        "│".color(PRIMARY_COLOR)
-    );
-    println!("{}", "│                                                                                         │".color(PRIMARY_COLOR));
+    let config = BoxConfig::new(format!("NetToolsKit CLI ({})", VERSION))
+        .with_title_prefix(">_")
+        .with_title_color(WHITE_COLOR)
+        .with_subtitle("A comprehensive toolkit for backend development")
+        .add_footer_item("directory", current_dir, WHITE_COLOR)
+        .with_border_color(PRIMARY_COLOR)
+        .with_width(89)
+        .with_spacing(true);
 
-    // Calculate available width for directory path (leaving 4 spaces before final │)
-    let dir_label = "    directory: ";
-    let available_width = box_width - dir_label.len() - 1 - 4 - 4; // -1 for │, -4 for spaces, -4 for safety margin
-    let truncated_dir = truncate_directory_with_middle(&current_dir, available_width);
-
-    // Calculate padding for directory line to align properly
-    let dir_text_length = dir_label.len() + truncated_dir.len();
-    let padding_needed = box_width - dir_text_length;
-    let padding = " ".repeat(padding_needed.max(4));
-
-    println!(
-        "{}{}{}{}",
-        "│".color(PRIMARY_COLOR),
-        "    directory: ".color(GRAY_COLOR),
-        truncated_dir.color(WHITE_COLOR),
-        format!("{}│", padding).color(PRIMARY_COLOR)
-    );
-    println!("{}", "╰─────────────────────────────────────────────────────────────────────────────────────────╯".color(PRIMARY_COLOR));
-    println!();
+    render_box(config);
     println!();
 }
 
