@@ -118,51 +118,55 @@ pub fn render_box(config: BoxConfig) {
     println!("{}", top_border.color(border_color));
 
     // Title line
-    let title_full = if let Some(prefix) = &config.title_prefix {
-        format!("{} {}", prefix, config.title)
-    } else {
-        config.title.clone()
-    };
-
-    let title_len = title_full.len() + 4; // +4 for "│ " and " │"
-    let padding = " ".repeat(width.saturating_sub(title_len));
-
     if let Some(prefix) = &config.title_prefix {
-        println!(
+        // With prefix: "│ >_ Title │"
+        let content = format!(" {} {}", prefix, config.title);
+        let content_len = content.len() + 2; // +2 for borders │ │
+        let padding = " ".repeat(width.saturating_sub(content_len));
+
+        let line = format!(
             "{}{}{}{}{}",
             "│".color(border_color),
-            " ".to_string() + prefix,
+            format!(" {}", prefix),
             format!(" {}", config.title).color(config.title_color).bold(),
             padding,
             "│".color(border_color)
         );
+        println!("{}", line.trim_end());
     } else {
-        println!(
+        // Without prefix: "│ Title │"
+        let content_len = config.title.len() + 3; // +1 for space after │, +2 for borders
+        let padding = " ".repeat(width.saturating_sub(content_len));
+
+        let line = format!(
             "{} {}{}{}",
             "│".color(border_color),
             config.title.color(config.title_color).bold(),
             padding,
             "│".color(border_color)
         );
+        println!("{}", line.trim_end());
     }
 
     // Subtitle line
     if let Some(subtitle) = &config.subtitle {
-        let subtitle_len = subtitle.len() + 8; // +4 for "│    " and "    │"
-        let padding = " ".repeat(width.saturating_sub(subtitle_len));
-        println!(
+        // Subtitle: "│    subtitle │"
+        let content_len = subtitle.len() + 6; // +4 for indentation "    ", +2 for borders
+        let padding = " ".repeat(width.saturating_sub(content_len));
+        let line = format!(
             "{}{}{}{}",
             "│".color(border_color),
             format!("    {}", subtitle).color(border_color),
             padding,
             "│".color(border_color)
         );
+        println!("{}", line.trim_end());
     }
 
     // Blank line before footer if we have footer items
     if !config.footer_items.is_empty() {
         let blank_line = format!("│{}│", " ".repeat(width - 2));
-        println!("{}", blank_line.color(border_color));
+        println!("{}", blank_line.color(border_color).to_string().trim_end());
     }
 
     // Footer items
@@ -181,17 +185,19 @@ pub fn render_box(config: BoxConfig) {
             }
         };
 
-        let line_len = label_text.len() + truncated_value.len();
-        let padding_needed = width - line_len;
-        let padding = " ".repeat(padding_needed.max(4));
+        let line_len = label_text.len() + truncated_value.len() + 2; // +2 for borders │ │
+        let padding_needed = width.saturating_sub(line_len);
+        let padding = " ".repeat(padding_needed);
 
-        println!(
-            "{}{}{}{}",
+        let line = format!(
+            "{}{}{}{}{}",
             "│".color(border_color),
             label_text.color(Rgb(128, 128, 128)), // Gray for labels
             truncated_value.color(*value_color),
-            format!("{}│", padding).color(border_color)
+            padding,
+            "│".color(border_color)
         );
+        println!("{}", line.trim_end());
     }
 
     // Bottom border

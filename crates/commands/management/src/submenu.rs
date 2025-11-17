@@ -22,21 +22,21 @@ pub enum ManifestSubcommand {
 impl ManifestSubcommand {
     fn get_label(&self) -> &str {
         match self {
-            ManifestSubcommand::List => "List",
-            ManifestSubcommand::Check => "Check",
-            ManifestSubcommand::Render => "Render",
-            ManifestSubcommand::Apply => "Apply",
-            ManifestSubcommand::Back => "Back to main menu",
+            ManifestSubcommand::List =>     "   List",
+            ManifestSubcommand::Check =>    "   Check",
+            ManifestSubcommand::Render =>   "   Render",
+            ManifestSubcommand::Apply =>    "   Apply",
+            ManifestSubcommand::Back =>     "   Back",
         }
     }
 
     fn get_description(&self) -> &str {
         match self {
-            ManifestSubcommand::List => "Discover available manifests",
-            ManifestSubcommand::Check => "Validate manifest structure",
-            ManifestSubcommand::Render => "Preview generated files",
-            ManifestSubcommand::Apply => "Generate/update project files",
-            ManifestSubcommand::Back => "",
+            ManifestSubcommand::List =>     "Discover available manifests",
+            ManifestSubcommand::Check =>    "Validate manifest structure",
+            ManifestSubcommand::Render =>   "Preview generated files",
+            ManifestSubcommand::Apply =>    "Generate/update project files",
+            ManifestSubcommand::Back =>     "To main menu",
         }
     }
 }
@@ -66,7 +66,7 @@ pub async fn show_manifest_menu() -> ExitStatus {
     loop {
         // Print command being executed
         println!();
-        println!("{}", "> /manifest".color(PRIMARY_COLOR).bold());
+        println!("{}", "> manifest".color(PRIMARY_COLOR));
         println!();
 
         // Render box using component
@@ -82,7 +82,10 @@ pub async fn show_manifest_menu() -> ExitStatus {
         render_box(box_config);
 
         println!();
-        println!("{}", "    [Use ↑↓ to navigate, Enter to select, /quit to exit]".color(GRAY_COLOR));
+        println!(
+            "{}",
+            "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(GRAY_COLOR)
+        );
         println!();
 
         // Render menu using component
@@ -96,8 +99,7 @@ pub async fn show_manifest_menu() -> ExitStatus {
 
         let menu_config = MenuConfig::new("Select a manifest command:", menu_items)
             .with_cursor_color(PRIMARY_COLOR)
-            .with_page_size(6)
-            .with_inquire_help(false);
+            .with_page_size(6);
 
         let selection = render_interactive_menu(menu_config);
 
