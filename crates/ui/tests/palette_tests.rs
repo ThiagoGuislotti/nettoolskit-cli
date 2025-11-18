@@ -1,3 +1,8 @@
+//! Command Palette Tests
+//!
+//! Comprehensive tests for the CommandPalette UI component, including
+//! filtering, navigation, selection, and rendering functionality.
+
 use nettoolskit_core::MenuEntry;
 use nettoolskit_ui::CommandPalette;
 

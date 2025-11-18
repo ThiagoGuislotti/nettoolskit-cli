@@ -1,3 +1,8 @@
+//! Input Handling Tests
+//!
+//! Tests for CLI input processing, including command parsing, text input,
+//! and keyboard event handling.
+
 #![allow(clippy::assertions_on_constants)]
 
 use nettoolskit_cli::input::InputResult;

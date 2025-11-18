@@ -1,7 +1,7 @@
-/// Manual test to verify input functionality
-///
-/// This test checks if the input system can properly read characters
-/// and handle basic keyboard events.
+//! UI Integration Tests
+//!
+//! Integration tests that verify CLI and UI component interactions,
+//! including input handling and command palette functionality.
 use nettoolskit_ui::CommandPalette;
 use nettoolskit_core::MenuEntry;
 

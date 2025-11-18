@@ -1,5 +1,7 @@
-/// Diagnostic test to verify the complete input chain
-/// Run with: cargo test --test input_diagnostic -- --nocapture
+//! Command Palette Diagnostic Tests
+//!
+//! Integration tests that verify the complete input chain for command palette interactions.
+//! Run with: cargo test --test command_palette_diagnostic -- --nocapture
 
 use nettoolskit_core::MenuEntry;
 
