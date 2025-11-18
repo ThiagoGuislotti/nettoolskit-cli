@@ -1,13 +1,12 @@
-/// Integration tests for manifest feature
-///
-/// These tests validate the complete workflow:
-/// 1. Parse YAML manifest
-/// 2. Generate render tasks
-/// 3. Render templates (via templating crate)
-/// 4. Write files to disk
-///
-/// Note: These are end-to-end integration tests that touch multiple crates
-/// (manifest + templating) and perform actual file I/O.
+//! Manifest Integration Tests
+//!
+//! End-to-end integration tests validating the complete manifest workflow:
+//! 1. Parse YAML manifest
+//! 2. Generate render tasks
+//! 3. Render templates (via templating crate)
+//! 4. Write files to disk
+//!
+//! Note: These tests touch multiple crates (manifest + templating) and perform actual file I/O.
 use nettoolskit_manifest::{ExecutionConfig, ManifestExecutor};
 use std::fs;
 use std::path::PathBuf;

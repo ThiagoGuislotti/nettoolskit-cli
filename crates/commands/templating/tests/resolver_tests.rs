@@ -1,3 +1,8 @@
+//! Template Resolver Tests
+//!
+//! Tests for TemplateResolver validating template path resolution,
+//! directory scanning, and template discovery workflows.
+
 mod common;
 
 use nettoolskit_templating::TemplateResolver;

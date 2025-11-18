@@ -25,7 +25,7 @@ pub fn create_dotnet_test_structure() -> TempDir {
 #[allow(dead_code)]
 pub fn create_batch_test_templates() -> TempDir {
     let temp = TempDir::new().unwrap();
-    let templates = temp.path().join("templates/dotnet/src");
+    let templates = temp.path().join("templates/dotnet/Domain");
 
     fs::create_dir_all(&templates).unwrap();
     fs::write(templates.join("Entity.cs.hbs"), "public class {{name}} { }").unwrap();

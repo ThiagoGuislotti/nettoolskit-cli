@@ -1,7 +1,8 @@
-/// Integration tests for command processor
-///
-/// Tests the async command dispatcher, including command routing,
-/// telemetry integration, and handler execution.
+//! Command Processor Tests
+//!
+//! Integration tests for the async command dispatcher, including command routing,
+//! telemetry integration, and handler execution workflows.
+
 use nettoolskit_management::{process_command, process_text, ExitStatus};
 
 // Command Processing Tests

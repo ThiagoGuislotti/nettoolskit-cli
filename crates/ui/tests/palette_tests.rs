@@ -38,40 +38,53 @@ fn create_test_entries() -> Vec<TestEntry> {
 
 #[test]
 fn test_command_palette_new() {
+    // Arrange
     let entries = create_test_entries();
+    // Arrange
     let palette = CommandPalette::new(entries);
+    // Assert
     assert!(!palette.is_active());
 }
 
 #[test]
 fn test_command_palette_open_and_close() {
+    // Arrange
     let entries = create_test_entries();
     let mut palette = CommandPalette::new(entries);
 
     // Test opening
     let result = palette.open("test");
+    // Assert
     assert!(result.is_ok());
+    // Assert
     assert!(palette.is_active());
 
     // Test closing
     let result = palette.close();
+    // Assert
     assert!(result.is_ok());
+    // Assert
     assert!(!palette.is_active());
 }
 
 #[test]
 fn test_command_palette_double_close() {
+    // Arrange
     let entries = create_test_entries();
     let mut palette = CommandPalette::new(entries);
 
     // First close on inactive palette should succeed
     let result = palette.close();
+    // Assert
     assert!(result.is_ok());
+    // Assert
     assert!(!palette.is_active());
 
     // Second close should also succeed (idempotent)
     let result = palette.close();
+    // Assert
     assert!(result.is_ok());
+    // Assert
     assert!(!palette.is_active());
 }
 
@@ -81,7 +94,9 @@ fn test_command_palette_update_query_inactive() {
 
     // Should succeed even when inactive
     let result = palette.update_query("test");
+    // Assert
     assert!(result.is_ok());
+    // Assert
     assert!(!palette.is_active());
 }
 
@@ -90,19 +105,26 @@ fn test_command_palette_navigation_inactive() {
     let mut palette = CommandPalette::new(create_test_entries());
 
     // Navigation should succeed but do nothing when inactive
+    // Assert
     assert!(palette.navigate_up().is_ok());
+    // Assert
     assert!(palette.navigate_down().is_ok());
+    // Assert
     assert!(palette.navigate_home().is_ok());
+    // Assert
     assert!(palette.navigate_end().is_ok());
 
+    // Assert
     assert!(!palette.is_active());
 }
 
 #[test]
 fn test_command_palette_get_selected_command_inactive() {
+    // Arrange
     let palette = CommandPalette::new(create_test_entries());
 
     // Should return None when inactive
+    // Assert
     assert!(palette.get_selected_command().is_none());
 }
 
@@ -111,22 +133,27 @@ fn test_command_palette_lifecycle() {
     let mut palette = CommandPalette::new(create_test_entries());
 
     // Initial state
+    // Assert
     assert!(!palette.is_active());
 
     // Open with query
     palette.open("list").unwrap();
+    // Assert
     assert!(palette.is_active());
 
     // Update query
     palette.update_query("new").unwrap();
+    // Assert
     assert!(palette.is_active());
 
     // Navigate
     palette.navigate_down().unwrap();
+    // Assert
     assert!(palette.is_active());
 
     // Close
     palette.close().unwrap();
+    // Assert
     assert!(!palette.is_active());
 }
 
@@ -137,6 +164,7 @@ fn test_command_palette_query_filtering() {
 
     // Empty query should have some results
     let empty_result = palette.get_selected_command();
+    // Assert
     assert!(empty_result.is_some());
 
     // Update with specific query
@@ -146,6 +174,7 @@ fn test_command_palette_query_filtering() {
     let filtered_result = palette.get_selected_command();
     // Can't assert specific command without knowing COMMANDS content
     // but can verify behavior is consistent
+    // Assert
     assert!(filtered_result.is_some() || filtered_result.is_none());
 
     palette.close().unwrap();
@@ -191,7 +220,9 @@ fn test_command_palette_down_navigation() {
 
     // If there are multiple commands, they should be different
     // If only one command, they should be the same
+    // Assert
     assert!(first.is_some());
+    // Assert
     assert!(second.is_some());
 
     palette.close().unwrap();
@@ -203,13 +234,16 @@ fn test_command_palette_multiple_opens() {
 
     // First open
     palette.open("test1").unwrap();
+    // Assert
     assert!(palette.is_active());
 
     // Second open without closing (should work)
     palette.open("test2").unwrap();
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();
+    // Assert
     assert!(!palette.is_active());
 }
 
@@ -219,10 +253,12 @@ fn test_command_palette_empty_query() {
 
     // Open with empty query
     palette.open("").unwrap();
+    // Assert
     assert!(palette.is_active());
 
     // Should have some selection available
     let selection = palette.get_selected_command();
+    // Assert
     assert!(selection.is_some());
 
     palette.close().unwrap();
@@ -238,6 +274,7 @@ fn test_command_palette_whitespace_query() {
     palette.update_query(" \n ").unwrap();
 
     // Should handle whitespace gracefully
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();
@@ -254,6 +291,7 @@ fn test_command_palette_special_characters() {
     palette.update_query("UTF8: 🚀").unwrap();
 
     // Should handle special characters without crashing
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();
@@ -269,6 +307,7 @@ fn test_command_palette_long_query() {
     palette.update_query(&long_query).unwrap();
 
     // Should handle long queries without crashing
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();
@@ -279,9 +318,11 @@ fn test_command_palette_state_consistency() {
     let mut palette = CommandPalette::new(create_test_entries());
 
     // Test state is consistent across operations
+    // Assert
     assert!(!palette.is_active());
 
     palette.open("test").unwrap();
+    // Assert
     assert!(palette.is_active());
 
     // Multiple navigation operations
@@ -296,12 +337,15 @@ fn test_command_palette_state_consistency() {
     }
 
     palette.navigate_home().unwrap();
+    // Assert
     assert!(palette.is_active());
 
     palette.navigate_end().unwrap();
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();
+    // Assert
     assert!(!palette.is_active());
 }
 
@@ -319,6 +363,7 @@ fn test_command_palette_rapid_operations() {
     }
 
     // Should end in consistent state
+    // Assert
     assert!(!palette.is_active());
 }
 
@@ -339,6 +384,7 @@ fn test_command_palette_case_sensitivity() {
 
     // Behavior may vary based on implementation
     // Just ensure no crashes occur
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();
@@ -353,6 +399,7 @@ fn test_command_palette_numeric_query() {
     palette.update_query("0").unwrap();
 
     // Should handle numeric queries without issues
+    // Assert
     assert!(palette.is_active());
 
     palette.close().unwrap();

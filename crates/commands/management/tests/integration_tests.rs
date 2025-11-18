@@ -1,5 +1,8 @@
-/// Integration tests for commands crate
-/// Recovered tests from backup that were not covered by unit tests
+//! Management Integration Tests
+//!
+//! Integration tests for commands crate validating end-to-end command processing,
+//! including list, manifest, and other command workflows.
+
 use nettoolskit_management::{process_command, ExitStatus};
 
 // Command Integration Tests

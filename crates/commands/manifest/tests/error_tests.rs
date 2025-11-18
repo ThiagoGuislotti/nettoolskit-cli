@@ -1,4 +1,8 @@
-/// Tests for ManifestError enum and error handling
+//! Manifest Error Tests
+//!
+//! Tests for ManifestError enum validating Display implementation,
+//! error conversions, and error propagation patterns.
+
 use nettoolskit_manifest::{ManifestError, ManifestResult};
 use std::path::PathBuf;
 

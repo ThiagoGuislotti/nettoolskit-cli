@@ -1,3 +1,8 @@
+//! Language Strategy Factory Tests
+//!
+//! Tests for LanguageStrategyFactory validating language detection,
+//! strategy creation, and language-specific configuration.
+
 use nettoolskit_templating::{Language, LanguageStrategyFactory};
 use std::sync::Arc;
 

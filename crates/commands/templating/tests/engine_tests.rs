@@ -1,3 +1,8 @@
+//! Template Engine Tests
+//!
+//! Tests for TemplateEngine validating template rendering, variable substitution,
+//! filter application, and error handling for Handlebars templates.
+
 use nettoolskit_templating::TemplateEngine;
 use serde_json::json;
 

@@ -1,3 +1,8 @@
+//! Async Manifest Executor Tests
+//!
+//! Tests for asynchronous manifest execution, including timeout handling,
+//! cancellation support, and concurrent task processing.
+
 use nettoolskit_manifest::{ExecutionConfig, ManifestExecutor};
 use std::fs;
 use std::path::PathBuf;
@@ -62,6 +67,7 @@ contexts:{}
 
 #[tokio::test]
 async fn test_async_executor_basic_operation() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -74,15 +80,19 @@ async fn test_async_executor_basic_operation() {
     };
 
     let executor = ManifestExecutor::new();
+    // Act
     let result = executor.execute(config).await;
 
+    // Assert
     assert!(result.is_ok());
     let summary = result.unwrap();
+    // Assert
     assert!(!summary.notes.is_empty());
 }
 
 #[tokio::test]
 async fn test_async_executor_concurrent_instantiation() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -108,12 +118,15 @@ async fn test_async_executor_concurrent_instantiation() {
     let result1 = handle1.await.expect("Task 1 panicked");
     let result2 = handle2.await.expect("Task 2 panicked");
 
+    // Assert
     assert!(result1.is_ok());
+    // Assert
     assert!(result2.is_ok());
 }
 
 #[tokio::test]
 async fn test_async_executor_with_short_timeout() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -126,14 +139,18 @@ async fn test_async_executor_with_short_timeout() {
     };
 
     let executor = ManifestExecutor::new();
+    // Act
     let result = timeout(Duration::from_secs(5), executor.execute(config)).await;
 
+    // Assert
     assert!(result.is_ok(), "Executor timed out");
+    // Assert
     assert!(result.unwrap().is_ok());
 }
 
 #[tokio::test]
 async fn test_async_executor_with_long_timeout() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -146,14 +163,18 @@ async fn test_async_executor_with_long_timeout() {
     };
 
     let executor = ManifestExecutor::new();
+    // Act
     let result = timeout(Duration::from_secs(30), executor.execute(config)).await;
 
+    // Assert
     assert!(result.is_ok(), "Executor timed out with multiple contexts");
+    // Assert
     assert!(result.unwrap().is_ok());
 }
 
 #[tokio::test]
 async fn test_async_error_propagation_invalid_manifest() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("invalid.yml");
     let output_dir = temp_dir.path().join("output");
@@ -167,15 +188,19 @@ async fn test_async_error_propagation_invalid_manifest() {
     };
 
     let executor = ManifestExecutor::new();
+    // Act
     let result = executor.execute(config).await;
 
+    // Assert
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
+    // Assert
     assert!(error_msg.contains("parse") || error_msg.contains("invalid"));
 }
 
 #[tokio::test]
 async fn test_async_error_propagation_missing_file() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let missing_path = temp_dir.path().join("nonexistent.yml");
     let output_dir = temp_dir.path().join("output");
@@ -187,13 +212,16 @@ async fn test_async_error_propagation_missing_file() {
     };
 
     let executor = ManifestExecutor::new();
+    // Act
     let result = executor.execute(config).await;
 
+    // Assert
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_async_sequential_executions() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -213,14 +241,17 @@ async fn test_async_sequential_executions() {
     let executor = ManifestExecutor::new();
 
     let result1 = executor.execute(config1).await;
+    // Assert
     assert!(result1.is_ok());
 
     let result2 = executor.execute(config2).await;
+    // Assert
     assert!(result2.is_ok());
 }
 
 #[tokio::test]
 async fn test_async_executor_dry_run_vs_actual() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -234,6 +265,7 @@ async fn test_async_executor_dry_run_vs_actual() {
         dry_run: true,
     };
     let dry_run_result = executor.execute(dry_run_config).await;
+    // Assert
     assert!(dry_run_result.is_ok());
 
     let actual_config = ExecutionConfig {
@@ -242,13 +274,16 @@ async fn test_async_executor_dry_run_vs_actual() {
         dry_run: false,
     };
     let actual_result = executor.execute(actual_config).await;
+    // Assert
     assert!(actual_result.is_ok());
 
+    // Assert
     assert!(!output_dir.exists() || output_dir.read_dir().unwrap().next().is_none());
 }
 
 #[tokio::test]
 async fn test_async_multiple_contexts_handling() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -261,15 +296,19 @@ async fn test_async_multiple_contexts_handling() {
     };
 
     let executor = ManifestExecutor::new();
+    // Act
     let result = executor.execute(config).await;
 
+    // Assert
     assert!(result.is_ok());
     let summary = result.unwrap();
+    // Assert
     assert!(!summary.notes.is_empty());
 }
 
 #[tokio::test]
 async fn test_async_executor_task_cancellation_safety() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -286,12 +325,15 @@ async fn test_async_executor_task_cancellation_safety() {
 
     tokio::time::sleep(Duration::from_millis(1)).await;
 
+    // Act
     let result = handle.await;
+    // Assert
     assert!(result.is_ok());
 }
 
 #[tokio::test]
 async fn test_async_executor_with_minimal_timeout() {
+    // Arrange
     let temp_dir = create_temp_dir();
     let manifest_path = temp_dir.path().join("manifest.yml");
     let output_dir = temp_dir.path().join("output");
@@ -304,8 +346,11 @@ async fn test_async_executor_with_minimal_timeout() {
     };
 
     let executor = ManifestExecutor::new();
+
+    // Act
     let result = timeout(Duration::from_millis(500), executor.execute(config)).await;
 
+    // Assert
     assert!(
         result.is_ok(),
         "Executor should complete within 500ms for simple manifest"

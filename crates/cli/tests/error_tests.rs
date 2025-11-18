@@ -1,10 +1,10 @@
-// Error Handling Tests
-//
-// This file exists per .github/instructions/rust-testing.instructions.md
-// Even if the CLI crate does not define custom error types, this file serves as:
-// 1. A compliance checkpoint for error handling standards
-// 2. A future location for error-related tests if custom errors are introduced
-// 3. A verification that error propagation from dependencies works correctly
+//! Error Handling Tests
+//!
+//! This file exists per .github/instructions/rust-testing.instructions.md
+//! Even if the CLI crate does not define custom error types, this file serves as:
+//! 1. A compliance checkpoint for error handling standards
+//! 2. A future location for error-related tests if custom errors are introduced
+//! 3. A verification that error propagation from dependencies works correctly
 
 use nettoolskit_commands::ExitStatus;
 

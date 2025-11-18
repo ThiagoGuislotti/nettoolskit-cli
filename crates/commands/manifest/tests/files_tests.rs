@@ -1,7 +1,8 @@
-/// Tests for file operations module (files/executor.rs)
-///
-/// Validates file system operations including directory creation,
-/// file writing, dry-run mode, and execution summary tracking.
+//! File Operations Tests
+//!
+//! Tests for file operations module (files/executor.rs) validating file system operations
+//! including directory creation, file writing, dry-run mode, and execution summary tracking.
+
 use nettoolskit_manifest::models::{ExecutionSummary, FileChange, FileChangeKind};
 use std::fs;
 use tempfile::TempDir;
