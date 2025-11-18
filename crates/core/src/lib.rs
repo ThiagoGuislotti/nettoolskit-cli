@@ -33,6 +33,10 @@ pub mod async_utils;
 #[path = "file-search/lib.rs"]
 pub mod file_search;
 
+/// Path and directory utilities
+#[path = "path-utils/lib.rs"]
+pub mod path_utils;
+
 /// Configuration types and utilities
 pub mod config {
     use serde::{Deserialize, Serialize};

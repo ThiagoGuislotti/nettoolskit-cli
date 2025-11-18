@@ -22,12 +22,8 @@ pub struct GlobalArgs {
 /// Available CLI commands
 #[derive(Debug, Parser)]
 pub enum Commands {
-    /// Manage and apply manifests
-    Manifest {
-        /// Manifest subcommand (list, check, render, apply)
-        #[clap(subcommand)]
-        action: Option<ManifestAction>,
-    },
+    /// Manage and apply manifests (opens interactive submenu)
+    Manifest,
 
     /// Translate templates between programming languages
     Translate {
@@ -44,34 +40,13 @@ pub enum Commands {
     },
 }
 
-#[derive(Debug, Parser)]
-pub enum ManifestAction {
-    /// Discover available manifests in the workspace
-    List,
-
-    /// Validate manifest structure and dependencies
-    Check,
-
-    /// Preview generated files without creating them
-    Render,
-
-    /// Apply manifest to generate/update project files
-    Apply,
-}
-
 impl Commands {
     /// Execute this command
     pub async fn execute(self) -> ExitStatus {
-        use nettoolskit_commands::process_command;
+        use nettoolskit_commands::{process_command, Command};
 
         match self {
-            Commands::Manifest { action } => match action {
-                Some(ManifestAction::List) => process_command("/manifest list").await,
-                Some(ManifestAction::Check) => process_command("/manifest check").await,
-                Some(ManifestAction::Render) => process_command("/manifest render").await,
-                Some(ManifestAction::Apply) => process_command("/manifest apply").await,
-                None => process_command("/manifest").await,
-            },
+            Commands::Manifest => process_command(Command::Manifest.slash()).await,
             Commands::Translate { from, to, path } => {
                 let request = nettoolskit_translate::TranslateRequest { from, to, path };
                 nettoolskit_translate::handle_translate(request).await

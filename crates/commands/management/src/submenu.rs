@@ -1,12 +1,12 @@
 /// Manifest submenu - Interactive menu for manifest commands
 use crate::definitions::ExitStatus;
 use inquire::Text;
+use nettoolskit_core::path_utils::directory::get_current_directory;
 use nettoolskit_ui::{
     BoxConfig, MenuConfig, render_box, render_interactive_menu,
     PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR
 };
 use owo_colors::OwoColorize;
-use std::env;
 use std::path::PathBuf;
 
 /// Manifest subcommand options
@@ -58,10 +58,7 @@ impl std::fmt::Display for ManifestSubcommand {
 /// Display manifest submenu and handle selection
 pub async fn show_manifest_menu() -> ExitStatus {
     // Get current directory
-    let current_dir = env::current_dir()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "unknown".to_string());
+    let current_dir = get_current_directory();
 
     loop {
         // Print command being executed
