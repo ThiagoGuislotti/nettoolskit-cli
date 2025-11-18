@@ -1,4 +1,8 @@
-/// Tests for ExecutionConfig and ManifestExecutor
+//! Manifest Executor Tests
+//!
+//! Tests for ExecutionConfig and ManifestExecutor validating configuration
+//! management and executor initialization.
+
 use nettoolskit_manifest::{ExecutionConfig, ManifestExecutor};
 use std::path::PathBuf;
 

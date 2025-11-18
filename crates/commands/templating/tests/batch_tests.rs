@@ -1,3 +1,8 @@
+//! Batch Renderer Tests
+//!
+//! Tests for BatchRenderer validating concurrent template rendering,
+//! error handling, and batch processing workflows.
+
 mod common;
 
 use nettoolskit_templating::{BatchRenderer, RenderRequest};

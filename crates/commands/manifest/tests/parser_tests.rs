@@ -1,4 +1,8 @@
-/// Tests for ManifestParser
+//! Manifest Parser Tests
+//!
+//! Tests for ManifestParser validating YAML parsing, schema validation,
+//! and manifest structure handling.
+
 use nettoolskit_manifest::ManifestParser;
 use std::fs;
 use std::path::PathBuf;

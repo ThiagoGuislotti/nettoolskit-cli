@@ -1,6 +1,7 @@
-// Error Handling Tests
-//
-// This file exists per .github/instructions/rust-testing.instructions.md
+//! Error Handling Tests
+//!
+//! This file exists per .github/instructions/rust-testing.instructions.md
+//! Tests error handling for translate command processing.
 
 use nettoolskit_management::ExitStatus;
 

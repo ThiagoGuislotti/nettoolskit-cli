@@ -12,10 +12,11 @@ use tempfile::TempDir;
 /// Test manifest apply with missing manifest file
 #[tokio::test]
 async fn test_apply_missing_manifest_file() {
+    // Arrange
     let temp_dir = TempDir::new().unwrap();
     let manifest_path = temp_dir.path().join("nonexistent.yaml");
 
-    // Attempt to apply non-existent manifest
+    // Act
     let result = nettoolskit_manifest::ManifestExecutor::new()
         .execute(nettoolskit_manifest::ExecutionConfig {
             manifest_path,
@@ -24,20 +25,19 @@ async fn test_apply_missing_manifest_file() {
         })
         .await;
 
-    // Should fail with file not found error
+    // Assert
     assert!(result.is_err());
 }
 
 /// Test manifest apply with invalid YAML
 #[tokio::test]
 async fn test_apply_invalid_yaml() {
+    // Arrange
     let temp_dir = TempDir::new().unwrap();
     let manifest_path = temp_dir.path().join("invalid.yaml");
-
-    // Create invalid YAML file
     std::fs::write(&manifest_path, "invalid: yaml: content:").unwrap();
 
-    // Attempt to apply invalid manifest
+    // Act
     let result = nettoolskit_manifest::ManifestExecutor::new()
         .execute(nettoolskit_manifest::ExecutionConfig {
             manifest_path,
@@ -46,17 +46,16 @@ async fn test_apply_invalid_yaml() {
         })
         .await;
 
-    // Should fail with parse error
+    // Assert
     assert!(result.is_err());
 }
 
 /// Test manifest apply with missing apiVersion
 #[tokio::test]
 async fn test_apply_missing_api_version() {
+    // Arrange
     let temp_dir = TempDir::new().unwrap();
     let manifest_path = temp_dir.path().join("manifest.yaml");
-
-    // Create manifest without apiVersion
     let manifest_content = r#"
 kind: artifact
 meta:
@@ -67,7 +66,7 @@ solution:
 "#;
     std::fs::write(&manifest_path, manifest_content).unwrap();
 
-    // Attempt to apply manifest
+    // Act
     let result = nettoolskit_manifest::ManifestExecutor::new()
         .execute(nettoolskit_manifest::ExecutionConfig {
             manifest_path,
@@ -76,7 +75,7 @@ solution:
         })
         .await;
 
-    // Should fail with validation error
+    // Assert
     assert!(result.is_err());
 }
 

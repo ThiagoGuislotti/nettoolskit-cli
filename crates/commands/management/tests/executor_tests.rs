@@ -1,7 +1,8 @@
-/// Tests for async command executor
-///
-/// Validates command handle behavior, progress tracking,
-/// cancellation support, and concurrent execution patterns.
+//! Async Command Executor Tests
+//!
+//! Tests for async command executor validating command handle behavior,
+//! progress tracking, cancellation support, and concurrent execution patterns.
+
 use nettoolskit_management::{AsyncCommandExecutor, CommandProgress};
 use std::time::Duration;
 use tokio::time::sleep;

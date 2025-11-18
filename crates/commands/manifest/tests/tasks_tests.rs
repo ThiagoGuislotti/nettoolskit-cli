@@ -1,7 +1,8 @@
-/// Tests for task generation modules (domain, application, api, artifact)
-///
-/// Note: These tests validate the PUBLIC API and structure of task generation.
-/// Full integration tests with actual rendering are in integration tests.
+//! Task Generation Tests
+//!
+//! Tests for task generation modules (domain, application, api, artifact) validating
+//! the public API and structure of task generation for manifest processing.
+
 use nettoolskit_manifest::models::{
     ArtifactKind, ManifestAggregate, ManifestContext, ManifestConventions, ManifestDomainEvent,
     ManifestEntity, ManifestEnum, ManifestEnumValue, ManifestField, ManifestPolicy,

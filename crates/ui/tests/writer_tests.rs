@@ -1,7 +1,7 @@
-/// Tests for UiWriter - Terminal output writer
-///
-/// Validates that UiWriter correctly buffers and emits formatted output
-/// to the terminal footer, handling newlines, flushes, and edge cases.
+//! UiWriter Tests
+//!
+//! Tests for UiWriter validating terminal output buffering, newline handling,
+//! flush behavior, and edge cases for footer rendering.
 
 use nettoolskit_ui::UiWriter;
 use std::io::Write;

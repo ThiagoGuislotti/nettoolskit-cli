@@ -1,3 +1,8 @@
+//! Language Strategy Tests
+//!
+//! Tests for language-specific strategy implementations validating file extensions,
+//! naming conventions, and language-specific template behaviors.
+
 use nettoolskit_templating::{
     ClojureStrategy, DotNetStrategy, GoStrategy, JavaStrategy, LanguageStrategy, PythonStrategy,
     RustStrategy,
