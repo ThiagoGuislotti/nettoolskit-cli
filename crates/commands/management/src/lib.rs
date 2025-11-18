@@ -13,7 +13,6 @@ pub mod executor;
 pub mod handlers;
 pub mod io;
 pub mod processor;
-pub mod submenu;
 
 // Re-export commonly used types
 pub use definitions::{menu_entries, palette_entries, Command, ExitStatus};

@@ -112,8 +112,8 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
                     }
                 }
                 None => {
-                    // No subcommand provided - show interactive submenu
-                    crate::submenu::show_manifest_menu().await
+                    // No subcommand provided - show interactive menu from manifest crate
+                    nettoolskit_manifest::show_menu().await
                 }
                 _ => {
                     println!("{}", "📋 Manifest Commands".cyan().bold());
