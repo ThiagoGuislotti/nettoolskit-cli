@@ -3,9 +3,9 @@
 //! This module contains display functions specific to the NetToolsKit CLI application,
 //! including branding, logo, and startup messages.
 
+use nettoolskit_core::path_utils::directory::get_current_directory;
 use nettoolskit_ui::{BoxConfig, render_box, PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR};
 use owo_colors::OwoColorize;
-use std::env;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -63,27 +63,4 @@ pub fn print_ascii_logo() {
     );
     println!();
     println!();
-}
-
-/// Get the current directory with home directory substitution.
-///
-/// Returns the current working directory, replacing the user's home directory
-/// with "~" for cleaner display. Falls back to "~" if directory cannot be determined.
-pub fn get_current_directory() -> String {
-    let current = env::current_dir()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "~".to_string());
-
-    if let Ok(home) = env::var("USERPROFILE").or_else(|_| env::var("HOME")) {
-        if current.starts_with(&home) {
-            let relative = &current[home.len()..];
-            return if relative.is_empty() {
-                "~".to_string()
-            } else {
-                format!("~{}", relative)
-            };
-        }
-    }
-
-    current
 }
