@@ -43,15 +43,19 @@
 //! ```
 mod error;
 mod executor;
+mod menu;
 mod rendering;
 
 // Public modules for testing
+pub mod definitions;
 pub mod files;
 pub mod models;
 pub mod parser;
 pub mod tasks;
 
+pub use definitions::{ManifestAction, get_action, menu_entries, palette_entries};
 pub use error::{ManifestError, ManifestResult};
+pub use menu::show_menu;
 pub use executor::{ExecutionConfig, ManifestExecutor};
 pub use models::{
     ArtifactKind, ExecutionSummary, FileChange, ManifestContext, ManifestConventions,

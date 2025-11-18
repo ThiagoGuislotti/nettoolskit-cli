@@ -1,36 +1,12 @@
 //! Command definitions - SINGLE SOURCE OF TRUTH
 //!
-//! This module contains the canonical Command enum and ExitStatus used throughout the CLI.
+//! This module contains the canonical Command enum used throughout the CLI.
 
 use nettoolskit_core::MenuEntry;
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator, IntoStaticStr};
 
-/// Exit status for command execution
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExitStatus {
-    /// Command executed successfully
-    Success,
-    /// Command execution failed
-    Error,
-    /// Command execution was interrupted
-    Interrupted,
-}
-
-impl From<ExitStatus> for i32 {
-    fn from(status: ExitStatus) -> Self {
-        match status {
-            ExitStatus::Success => 0,
-            ExitStatus::Error => 1,
-            ExitStatus::Interrupted => 130,
-        }
-    }
-}
-
-impl From<ExitStatus> for std::process::ExitCode {
-    fn from(status: ExitStatus) -> Self {
-        std::process::ExitCode::from(i32::from(status) as u8)
-    }
-}
+// Re-export ExitStatus from core
+pub use nettoolskit_core::ExitStatus;
 
 /// Command enumeration - SINGLE SOURCE OF TRUTH
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumIter, EnumString, IntoStaticStr)]

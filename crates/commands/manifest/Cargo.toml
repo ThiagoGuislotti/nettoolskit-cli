@@ -4,14 +4,20 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# Core types
+# Core types (includes ExitStatus)
 nettoolskit-core = { path = "../../core" }
 
 # Templating feature (sibling within commands/)
 nettoolskit-templating = { path = "../templating" }
 
-# UI and colors
+# UI components
+nettoolskit-ui = { path = "../../ui" }
 owo-colors = { workspace = true }
+inquire = { workspace = true }
+
+# Enum utilities
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["full"] }

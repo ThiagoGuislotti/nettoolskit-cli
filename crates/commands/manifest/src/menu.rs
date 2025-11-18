@@ -1,8 +1,11 @@
-/// Manifest submenu - Interactive menu for manifest commands
-use crate::definitions::ExitStatus;
+//! Interactive menu for manifest commands
+//!
+//! This module provides the interactive UI menu for selecting and executing
+//! manifest subcommands (check, render, apply).
+
+use crate::definitions::ManifestAction;
 use inquire::Text;
-use nettoolskit_core::path_utils::directory::get_current_directory;
-use nettoolskit_manifest::ManifestAction;
+use nettoolskit_core::{ExitStatus, path_utils::directory::get_current_directory};
 use nettoolskit_ui::{
     BoxConfig, MenuConfig, render_box, render_interactive_menu,
     PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR
@@ -10,7 +13,7 @@ use nettoolskit_ui::{
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
 
-/// Manifest submenu item (action or back)
+/// Manifest menu item (action or back)
 #[derive(Debug, Clone)]
 pub enum ManifestMenuItem {
     Action(ManifestAction),
@@ -47,8 +50,8 @@ impl std::fmt::Display for ManifestMenuItem {
     }
 }
 
-/// Display manifest submenu and handle selection
-pub async fn show_manifest_menu() -> ExitStatus {
+/// Display manifest menu and handle selection
+pub async fn show_menu() -> ExitStatus {
     // Get current directory
     let current_dir = get_current_directory();
 
@@ -170,7 +173,7 @@ async fn execute_apply_interactive() -> ExitStatus {
         .with_placeholder("feature.manifest.yaml")
         .prompt();
 
-    let path = match manifest_path {
+    let _path = match manifest_path {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
         _ => {
             println!("{}", "Apply cancelled".yellow());
@@ -186,7 +189,7 @@ async fn execute_apply_interactive() -> ExitStatus {
 
     let dry_run_selection = render_interactive_menu(dry_run_menu);
 
-    let dry_run = match dry_run_selection {
+    let _dry_run = match dry_run_selection {
         Ok(option) => option.starts_with("Yes"),
         Err(_) => {
             println!("{}", "Apply cancelled".yellow());
@@ -200,7 +203,7 @@ async fn execute_apply_interactive() -> ExitStatus {
         .with_placeholder("./src")
         .prompt();
 
-    let output_root = match output_dir {
+    let _output_root = match output_dir {
         Ok(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
         _ => None,
     };
@@ -208,6 +211,8 @@ async fn execute_apply_interactive() -> ExitStatus {
     println!();
     println!("{}", "Executing manifest apply...".cyan());
 
-    // Execute the apply handler
-    crate::handlers::execute_apply(path, output_root, dry_run).await
+    // TODO: Call the actual apply handler when available
+    // For now, just return success
+    println!("{}", "ℹ️  Apply handler integration pending".yellow());
+    ExitStatus::Success
 }

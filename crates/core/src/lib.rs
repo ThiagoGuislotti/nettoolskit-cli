@@ -18,6 +18,9 @@ pub trait MenuEntry {
     fn description(&self) -> &str;
 }
 
+/// Exit status codes for command execution
+pub mod exit_status;
+
 /// Feature detection and configuration for opt-in TUI improvements
 pub mod features;
 
@@ -60,5 +63,7 @@ pub mod config {
     }
 }
 
+// Re-export commonly used types
+pub use exit_status::ExitStatus;
 // Re-export commonly used items
 pub use features::Features;
