@@ -40,6 +40,9 @@ strum_macros = "0.25"
 owo-colors = "3.5"
 supports-color = "2.1"
 
+# Interactive prompts
+inquire = "0.7"
+
 # Async utilities
 futures = "0.3"
 futures-util = "0.3"

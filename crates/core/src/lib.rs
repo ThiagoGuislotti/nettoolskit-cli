@@ -40,29 +40,6 @@ pub mod file_search;
 #[path = "path-utils/lib.rs"]
 pub mod path_utils;
 
-/// Configuration types and utilities
-pub mod config {
-    use serde::{Deserialize, Serialize};
-
-    /// Application configuration structure
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct Config {
-        /// Application name
-        pub name: String,
-        /// Application version
-        pub version: String,
-    }
-
-    impl Default for Config {
-        fn default() -> Self {
-            Self {
-                name: "NetToolsKit CLI".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            }
-        }
-    }
-}
-
 // Re-export commonly used types
 pub use exit_status::ExitStatus;
 // Re-export commonly used items

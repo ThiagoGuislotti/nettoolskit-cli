@@ -1,6 +1,6 @@
-/// Artifact-specific task generation
-use crate::error::{ManifestError, ManifestResult};
-use crate::models::{
+/// Individual artifact generation tasks
+use crate::core::error::{ManifestError, ManifestResult};
+use crate::core::models::{
     ArtifactKind, ManifestContext, ManifestConventions, RenderTask, TemplateMapping,
 };
 use serde_json::json;

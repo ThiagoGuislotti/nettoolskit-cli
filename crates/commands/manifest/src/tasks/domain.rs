@@ -1,6 +1,6 @@
-/// Domain layer task generation
-use crate::error::ManifestResult;
-use crate::models::{
+/// Tasks for Domain layer (entities, aggregates, value objects, domain services)
+use crate::core::error::ManifestResult;
+use crate::core::models::{
     ArtifactKind, ManifestContext, ManifestConventions, RenderTask, TemplateMapping,
 };
 use serde_json::json;
@@ -29,7 +29,7 @@ pub fn append_domain_tasks(
 fn append_value_objects(
     tasks: &mut Vec<RenderTask>,
     context: &ManifestContext,
-    aggregate: &crate::models::ManifestAggregate,
+    aggregate: &crate::core::models::ManifestAggregate,
     conventions: &ManifestConventions,
     template_index: &BTreeMap<ArtifactKind, Vec<&TemplateMapping>>,
 ) -> ManifestResult<()> {
@@ -70,7 +70,7 @@ fn append_value_objects(
 fn append_entities(
     tasks: &mut Vec<RenderTask>,
     context: &ManifestContext,
-    aggregate: &crate::models::ManifestAggregate,
+    aggregate: &crate::core::models::ManifestAggregate,
     conventions: &ManifestConventions,
     template_index: &BTreeMap<ArtifactKind, Vec<&TemplateMapping>>,
 ) -> ManifestResult<()> {
@@ -114,7 +114,7 @@ fn append_entities(
 fn append_domain_events(
     tasks: &mut Vec<RenderTask>,
     context: &ManifestContext,
-    aggregate: &crate::models::ManifestAggregate,
+    aggregate: &crate::core::models::ManifestAggregate,
     conventions: &ManifestConventions,
     template_index: &BTreeMap<ArtifactKind, Vec<&TemplateMapping>>,
 ) -> ManifestResult<()> {
@@ -152,7 +152,7 @@ fn append_domain_events(
 fn append_repository_interfaces(
     tasks: &mut Vec<RenderTask>,
     context: &ManifestContext,
-    aggregate: &crate::models::ManifestAggregate,
+    aggregate: &crate::core::models::ManifestAggregate,
     conventions: &ManifestConventions,
     template_index: &BTreeMap<ArtifactKind, Vec<&TemplateMapping>>,
 ) -> ManifestResult<()> {
@@ -198,7 +198,7 @@ fn append_repository_interfaces(
 fn append_enums(
     tasks: &mut Vec<RenderTask>,
     context: &ManifestContext,
-    aggregate: &crate::models::ManifestAggregate,
+    aggregate: &crate::core::models::ManifestAggregate,
     conventions: &ManifestConventions,
     template_index: &BTreeMap<ArtifactKind, Vec<&TemplateMapping>>,
 ) -> ManifestResult<()> {

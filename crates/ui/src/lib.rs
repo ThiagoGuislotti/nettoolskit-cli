@@ -10,20 +10,22 @@
 //!
 //! This crate provides generic, reusable UI components.
 //! Application-specific display logic (logos, branding) should live in the CLI crate.
+//!
+//! # Module Organization
+//!
+//! - `core`: Foundational types (colors, style utilities)
+//! - `rendering`: UI components and output writing
+//! - `interaction`: User interaction (palette, prompt, terminal control)
 
-pub mod colors;
-pub mod components;
-pub mod palette;
-pub mod prompt;
-pub mod style;
-pub mod terminal;
-pub mod writer;
+pub mod core;
+pub mod rendering;
+pub mod interaction;
 
 // Re-export commonly used items
-pub use colors::*;
-pub use components::*;
-pub use palette::*;
-pub use prompt::*;
-pub use style::*;
-pub use terminal::*;
-pub use writer::UiWriter;
+pub use core::colors::*;
+pub use core::style;
+pub use rendering::components::{self, BoxConfig, MenuConfig, render_box, render_interactive_menu};
+pub use rendering::writer::UiWriter;
+pub use interaction::palette::*;
+pub use interaction::prompt::*;
+pub use interaction::terminal::*;

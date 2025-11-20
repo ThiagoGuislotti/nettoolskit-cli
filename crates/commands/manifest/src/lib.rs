@@ -41,28 +41,41 @@
 //! # Ok(())
 //! # }
 //! ```
-mod error;
-mod executor;
-mod menu;
-mod rendering;
-
-// Public modules for testing
-pub mod definitions;
-pub mod files;
-pub mod models;
-pub mod parser;
+// Organized module structure
+pub mod core;
+pub mod execution;
+pub mod parsing;
 pub mod tasks;
+pub mod ui;
 
-pub use definitions::{ManifestAction, get_action, menu_entries, palette_entries};
-pub use error::{ManifestError, ManifestResult};
-pub use menu::show_menu;
-pub use executor::{ExecutionConfig, ManifestExecutor};
-pub use models::{
-    ArtifactKind, ExecutionSummary, FileChange, ManifestContext, ManifestConventions,
-    ManifestDocument, ManifestGuards, ManifestKind, ManifestMeta, ManifestPolicy, ManifestProject,
-    ManifestProjectKind, ManifestSolution,
+// Backward compatibility aliases
+pub mod parser {
+    pub use crate::parsing::*;
+}
+
+pub mod models {
+    pub use crate::core::models::*;
+}
+
+pub mod files {
+    pub use crate::execution::files::*;
+}
+
+// Re-export core types
+pub use core::{ManifestAction, ManifestError, ManifestResult};
+pub use core::models::*;
+
+// Re-export execution types
+pub use execution::{
+    build_project_payload, build_project_stub, build_solution_stub, ensure_directory,
+    execute_plan, normalize_line_endings, ExecutionConfig, ManifestExecutor,
 };
-pub use parser::ManifestParser;
+
+// Re-export parsing types
+pub use parsing::ManifestParser;
+
+// Re-export ui types
+pub use ui::{show_menu, ManifestMenuItem};
 
 // Re-export TemplateResolver from templating (no duplication)
 pub use nettoolskit_templating::TemplateResolver;

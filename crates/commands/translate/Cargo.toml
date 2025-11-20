@@ -4,11 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# Core types
+# Core functionality
 nettoolskit-core = { path = "../../core" }
-
-# Management (for ExitStatus)
-nettoolskit-management = { path = "../management" }
 
 # Templating feature (sibling within commands/)
 nettoolskit-templating = { path = "../templating" }

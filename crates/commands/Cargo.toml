@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "nettoolskit_commands"
-path = "src/lib.rs"
+path = "lib.rs"
 
 [dependencies]
 # Workspace dependencies

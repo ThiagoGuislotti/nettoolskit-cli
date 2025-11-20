@@ -1,19 +1,23 @@
-mod batch;
-/// High-performance async template rendering for NetToolsKit CLI
-///
-/// This crate provides a robust, async-first templating engine with:
-/// - **Strategy Pattern**: Language-specific path resolution
-/// - **Factory Pattern**: On-demand strategy instantiation
-/// - **Async/Await**: Non-blocking I/O with tokio
-/// - **Smart Caching**: DashMap for O(1) lookups (100-10,000x faster)
-/// - **Parallelism**: Batch rendering with bounded concurrency
-///
-/// # Architecture
-///
-/// - Pure infrastructure layer (no business logic)
-/// - Zero coupling to domain concerns
-/// - Thread-safe: Arc + DashMap for concurrent access
-/// - Extensible: Easy to add new languages via LanguageStrategy
+//! High-performance async template rendering for NetToolsKit CLI
+//!
+//! This crate provides a robust, async-first templating engine with:
+//! - **Strategy Pattern**: Language-specific path resolution
+//! - **Factory Pattern**: On-demand strategy instantiation
+//! - **Async/Await**: Non-blocking I/O with tokio
+//! - **Smart Caching**: DashMap for O(1) lookups (100-10,000x faster)
+//! - **Parallelism**: Batch rendering with bounded concurrency
+//!
+//! # Architecture
+//!
+//! The templating crate is organized into logical layers:
+//! - `core`: Fundamental types (errors, common utilities, helpers)
+//! - `rendering`: Template engine, batch processing, path resolution
+//! - `strategies`: Language-specific strategies and factory
+//!
+//! - Pure infrastructure layer (no business logic)
+//! - Zero coupling to domain concerns
+//! - Thread-safe: Arc + DashMap for concurrent access
+//! - Extensible: Easy to add new languages via LanguageStrategy
 ///
 /// # Performance
 ///
@@ -56,19 +60,20 @@ mod batch;
 /// # Ok(())
 /// # }
 /// ```
-mod engine;
-mod error;
-mod factory;
-mod helpers;
-mod resolver;
-mod strategy;
 
-pub use batch::{BatchRenderResult, BatchRenderer, RenderRequest};
-pub use engine::TemplateEngine;
-pub use error::{TemplateError, TemplateResult};
-pub use factory::{Language, LanguageStrategyFactory};
-pub use resolver::TemplateResolver;
-pub use strategy::{
-    ClojureStrategy, DotNetStrategy, GoStrategy, JavaStrategy, LanguageConventions,
-    LanguageStrategy, PythonStrategy, RustStrategy,
+// Organized module structure
+pub mod core;
+pub mod rendering;
+pub mod strategies;
+
+// Re-export core types
+pub use core::{TemplateError, TemplateResult};
+
+// Re-export rendering types
+pub use rendering::{BatchRenderResult, BatchRenderer, RenderRequest, TemplateEngine, TemplateResolver};
+
+// Re-export strategy types
+pub use strategies::{
+    ClojureStrategy, DotNetStrategy, GoStrategy, JavaStrategy, Language, LanguageConventions,
+    LanguageStrategy, LanguageStrategyFactory, PythonStrategy, RustStrategy,
 };
