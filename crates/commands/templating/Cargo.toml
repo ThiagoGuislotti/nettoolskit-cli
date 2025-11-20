@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["NetToolsKit Contributors"]
 description = "Template rendering engine for NetToolsKit CLI"
 
+[lib]
+name = "nettoolskit_templating"
+path = "src/lib.rs"
+
 [dependencies]
 # Internal dependencies (Nível 1)
 nettoolskit-core = { path = "../../core" }

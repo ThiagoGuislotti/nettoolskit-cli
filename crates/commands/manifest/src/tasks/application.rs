@@ -1,6 +1,6 @@
-/// Application layer task generation
-use crate::error::ManifestResult;
-use crate::models::{
+/// Tasks for Application layer (use cases, services, commands, queries)
+use crate::core::error::ManifestResult;
+use crate::core::models::{
     ArtifactKind, ManifestContext, ManifestConventions, RenderTask, TemplateMapping,
 };
 use serde_json::json;

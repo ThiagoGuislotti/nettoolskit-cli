@@ -5,9 +5,8 @@
 
 // Module-specific test suites
 mod async_utils;
-mod config;
 mod error_tests;
-mod features;
+mod features_tests;
 mod file_search;
 #[path = "path-utils/mod.rs"]
 mod path_utils;
