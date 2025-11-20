@@ -1,6 +1,6 @@
-/// API layer task generation
-use crate::error::ManifestResult;
-use crate::models::{
+/// Tasks for API layer (REST, gRPC, GraphQL, etc.)
+use crate::core::error::ManifestResult;
+use crate::core::models::{
     ArtifactKind, ManifestContext, ManifestConventions, RenderTask, TemplateMapping,
 };
 use serde_json::json;

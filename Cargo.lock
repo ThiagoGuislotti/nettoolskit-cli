@@ -1048,14 +1048,18 @@ name = "nettoolskit-manifest"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "inquire",
  "nettoolskit-core",
  "nettoolskit-templating",
+ "nettoolskit-ui",
  "once_cell",
  "owo-colors",
  "regex",
  "serde",
  "serde_json",
  "serde_yaml",
+ "strum 0.25.0",
+ "strum_macros 0.25.3",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -1101,7 +1105,6 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "nettoolskit-core",
- "nettoolskit-management",
  "nettoolskit-otel",
  "nettoolskit-templating",
  "nettoolskit-ui",

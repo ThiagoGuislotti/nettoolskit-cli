@@ -1,23 +1,26 @@
 //! Command management and orchestration for NetToolsKit CLI
 //!
 //! This crate provides centralized command management including:
-//! - Command definitions and enumeration (definitions)
-//! - Command processor for execution dispatch (processor)
-//! - Async executor for long-running operations (executor)
+//! - Command definitions and enumeration (core/definitions)
+//! - Command processor for execution dispatch (execution/processor)
+//! - Async executor for long-running operations (execution/executor)
 //! - Command handlers implementation (handlers)
 //! - I/O utilities for output formatting (io)
-//! - Interactive submenus for complex commands (submenu)
 
-pub mod definitions;
-pub mod executor;
+pub mod core;
+pub mod execution;
 pub mod handlers;
 pub mod io;
-pub mod processor;
 
 // Re-export commonly used types
-pub use definitions::{menu_entries, palette_entries, Command, ExitStatus};
-pub use executor::{
+pub use core::definitions::{menu_entries, palette_entries, Command};
+pub use core::error::{CommandError, Result};
+pub use execution::executor::{
     AsyncCommandExecutor, CommandHandle, CommandProgress, CommandResult, ProgressSender,
 };
+pub use execution::processor::{process_command, process_text};
 pub use handlers::{discover_manifests, display_manifests, ManifestInfo};
-pub use processor::{process_command, process_text};
+
+// Backward compatibility aliases
+pub use core::definitions;
+pub use execution::{executor, processor};
