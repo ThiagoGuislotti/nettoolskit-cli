@@ -8,6 +8,8 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::MenuContext;
+
 #[derive(Debug)]
 pub enum InputResult {
     Command(String),
@@ -18,6 +20,7 @@ pub enum InputResult {
 pub async fn read_line_with_palette(
     buffer: &mut String,
     palette: &mut CommandPalette,
+    current_context: &mut MenuContext,
     interrupted: &Arc<AtomicBool>,
 ) -> io::Result<InputResult> {
     loop {
@@ -39,7 +42,7 @@ pub async fn read_line_with_palette(
         {
             Ok(Ok(event)) => match event {
                 Event::Key(key_event) => {
-                    match handle_key_event(key_event, buffer, palette, interrupted)? {
+                    match handle_key_event(key_event, buffer, palette, current_context, interrupted)? {
                         Some(result) => return Ok(result),
                         None => continue,
                     }
@@ -68,6 +71,7 @@ fn handle_key_event(
     key: KeyEvent,
     buffer: &mut String,
     palette: &mut CommandPalette,
+    current_context: &mut MenuContext,
     interrupted: &Arc<AtomicBool>,
 ) -> io::Result<Option<InputResult>> {
     if key.kind != KeyEventKind::Press {
@@ -88,7 +92,18 @@ fn handle_key_event(
             if c == '/' && buffer.len() == 1 {
                 palette.open("")?;
             } else if palette.is_active() && buffer.starts_with('/') && buffer.len() > 1 {
-                palette.update_query(&buffer[1..])?;
+                // Detect new context based on buffer
+                let new_context = detect_context(buffer);
+
+                // Switch menu if context changed
+                if *current_context != new_context {
+                    switch_menu_entries(palette, new_context)?;
+                    *current_context = new_context;
+                }
+
+                // Extract query based on current context
+                let query = extract_query(buffer);
+                palette.update_query(query)?;
             }
         }
         KeyCode::Backspace => {
@@ -111,6 +126,7 @@ fn handle_key_event(
             if palette.is_active() {
                 let selected_cmd = palette.get_selected_command().map(|s| s.to_string());
                 palette.close()?;
+                *current_context = MenuContext::Root;
                 if let Some(cmd) = selected_cmd {
                     return Ok(Some(InputResult::Command(cmd)));
                 }
@@ -134,6 +150,7 @@ fn handle_key_event(
         }
         KeyCode::Esc if palette.is_active() => {
             palette.close()?;
+            *current_context = MenuContext::Root;
         }
         KeyCode::Up if palette.is_active() => {
             palette.navigate_up()?;
@@ -145,4 +162,42 @@ fn handle_key_event(
     }
 
     Ok(None)
+}
+
+/// Detects menu context based on buffer content
+fn detect_context(buffer: &str) -> MenuContext {
+    if buffer.starts_with("/manifest ") {
+        MenuContext::Manifest
+    } else {
+        MenuContext::Root
+    }
+}
+
+/// Extracts query string based on context
+fn extract_query(buffer: &str) -> &str {
+    if let Some(rest) = buffer.strip_prefix("/manifest ") {
+        rest
+    } else if let Some(rest) = buffer.strip_prefix("/") {
+        rest
+    } else {
+        ""
+    }
+}
+
+/// Switches menu entries based on context (CLI layer provides entries to UI)
+fn switch_menu_entries(
+    palette: &mut CommandPalette,
+    context: MenuContext,
+) -> io::Result<()> {
+    match context {
+        MenuContext::Root => {
+            let entries = nettoolskit_commands::menu_entries();
+            palette.reload_entries(entries)?;
+        }
+        MenuContext::Manifest => {
+            let entries = nettoolskit_commands::nettoolskit_manifest::menu_entries();
+            palette.reload_entries(entries)?;
+        }
+    }
+    Ok(())
 }

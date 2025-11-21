@@ -104,126 +104,126 @@ As commands are executed, the header scrolls up naturally with the content, whil
 
 ## 📐 Code Architecture (Layered Architecture)
 
-> **Referência Completa**: [ARCHITECTURE.txt](../../ARCHITECTURE.txt) (diagrama completo na raiz)
+> **Full Reference**: [ARCHITECTURE.txt](../../ARCHITECTURE.txt) (complete diagram at the repository root)
 
-A arquitetura do NetToolsKit CLI segue um modelo em **4 camadas hierárquicas** com fluxo de dependências **bottom-up** (base → topo). Cada nível só pode depender dos níveis inferiores, garantindo isolamento e zero ciclos de dependência.
+The NetToolsKit CLI architecture follows a **four-layer hierarchical model** with a **bottom-up dependency flow** (base → top). Each layer can only depend on lower layers, guaranteeing isolation and zero dependency cycles.
 
-### 1.1 Níveis Hierárquicos
+### 1.1 Hierarchical Levels
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ NÍVEL 4: Entry Point (Orquestração)                         │
-│   └─ cli: ponto de entrada da aplicação                     │
+│ LEVEL 4: Entry Point (Orchestration)                        │
+│   └─ cli: application entry point                           │
 └──────────────────────────────────────────────────────────────┘
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ NÍVEL 3: Aplicação (Lógica de Negócio)                      │
-│   └─ commands: ENUM gerenciador dos comandos                │
+│ LEVEL 3: Application (Business Logic)                       │
+│   └─ commands: enum orchestrator for commands               │
 │       ├─ src/                                               │
-│       │   ├─ translate: transcrição entre linguagens        │
-│       │   ├─ manifest: orquestração (Apply, Check, Test)    │
+│       │   ├─ translate: language transcription pipeline     │
+│       │   ├─ manifest: orchestration (Apply, Check, Test)   │
 │       │   └─ templating: Handlebars (core, string-utils)    │
 │       └─ tests/                                             │
 └──────────────────────────────────────────────────────────────┘
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ NÍVEL 2: Apresentação & Infraestrutura                      │
-│   ├─ otel: logs/telemetria                                  │
-│   └─ ui: interface terminal (crossterm)                     │
+│ LEVEL 2: Presentation & Infrastructure                      │
+│   ├─ otel: logging/telemetry                                │
+│   └─ ui: terminal interface (crossterm)                     │
 └──────────────────────────────────────────────────────────────┘
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ NÍVEL 1: Fundação (ZERO deps internas)                      │
-│   ├─ core: tipos fundamentais (Result, Config, Features)    │
-│   ├─ string-utils: manipulação de strings                   │
-│   ├─ async-utils: helpers assíncronos                       │
-│   └─ file-search: busca e filtro de arquivos                │
+│ LEVEL 1: Foundation (ZERO internal deps)                    │
+│   ├─ core: fundamental types (Result, Config, Features)     │
+│   ├─ string-utils: string manipulation                      │
+│   ├─ async-utils: async helpers                             │
+│   └─ file-search: file discovery and filtering              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Fluxo de Dependências (Bottom-Up)
+### 1.2 Dependency Flow (Bottom-Up)
 
-**NÍVEL 1 (Base)** → ZERO dependências internas
-- `core`: tipos fundamentais (Result, Config, Features)
-- `string-utils`: manipulação de strings (ZERO deps totais!)
-- `async-utils`: helpers assíncronos (tokio, futures)
-- `file-search`: busca e filtro de arquivos
+**LEVEL 1 (Foundation)** → ZERO internal dependencies
+- `core`: fundamental types (Result, Config, Features)
+- `string-utils`: string manipulation (ZERO total deps)
+- `async-utils`: async helpers (tokio, futures)
+- `file-search`: file discovery and filtering
 
-**NÍVEL 2 (Infraestrutura)** → depende apenas de Nível 1
-- `otel`: logs/telemetria → depende: `core`
-- `ui`: interface terminal → depende: `core`, `string-utils`
+**LEVEL 2 (Infrastructure)** → depends only on Level 1
+- `otel`: logging/telemetry → depends on `core`
+- `ui`: terminal interface → depends on `core`, `string-utils`
 
-**NÍVEL 3 (Aplicação)** → depende de Níveis 1 e 2
-- `commands`: ENUM gerenciador → depende: `core`, `otel`, `ui`, `async-utils`
-  - `src/translate`: transcrição entre linguagens
-  - `src/manifest`: orquestração (Apply, Check, Test...)
-  - `src/templating`: Handlebars → depende: `core`, `string-utils`
+**LEVEL 3 (Application)** → depends on Levels 1 and 2
+- `commands`: command orchestrator enum → depends on `core`, `otel`, `ui`, `async-utils`
+  - `src/translate`: language transcription
+  - `src/manifest`: orchestration (Apply, Check, Test...)
+  - `src/templating`: Handlebars → depends on `core`, `string-utils`
 
-**NÍVEL 4 (Entry Point)** → depende de tudo
-- `cli`: ponto de entrada → depende: `commands`, `ui`, `core`, `async-utils`, `otel`, `file-search`
+**LEVEL 4 (Entry Point)** → depends on everything
+- `cli`: application entry point → depends on `commands`, `ui`, `core`, `async-utils`, `otel`, `file-search`
 
-### 1.3 Regras de Ouro
+### 1.3 Golden Rules
 
-**1. NÍVEL 1 (Fundação)**
-- ✓ ZERO dependências internas
-- ✓ Apenas deps externas essenciais
-- ✗ NUNCA depende de níveis superiores
+**1. LEVEL 1 (Foundation)**
+- ✓ ZERO internal dependencies
+- ✓ Only essential external dependencies
+- ✗ Never depends on higher levels
 
-**2. NÍVEL 2 (Infraestrutura)**
-- ✓ Pode depender de Nível 1
-- ✗ NÃO pode depender de Níveis 3 ou 4
+**2. LEVEL 2 (Infrastructure)**
+- ✓ May depend on Level 1
+- ✗ Cannot depend on Levels 3 or 4
 
-**3. NÍVEL 3 (Aplicação)**
-- ✓ Pode depender de Níveis 1 e 2
-- ✓ Commands contém manifest e translate em src/
-- ✗ NÃO pode depender de Nível 4
+**3. LEVEL 3 (Application)**
+- ✓ May depend on Levels 1 and 2
+- ✓ Commands contains manifest and translate inside `src/`
+- ✗ Cannot depend on Level 4
 
-**4. NÍVEL 4 (Entry Point)**
-- ✓ Pode depender de TODOS os níveis
-- ✗ NINGUÉM pode depender dele
+**4. LEVEL 4 (Entry Point)**
+- ✓ May depend on ALL levels
+- ✗ Nothing is allowed to depend on it
 
-### 1.4 Resolução de Dependência Circular
+### 1.4 Circular Dependency Resolution
 
-**Problema Identificado:**
-- `commands → ui → otel → commands` (ciclo detectado)
+**Identified Problem:**
+- `commands → ui → otel → commands` (cycle detected)
 
-**Solução Implementada:**
-- Crate `command-definitions` isolado (ZERO deps internas)
-- Contém apenas `Command` enum (7 variantes: List, Check, Render, New, Apply, Translate, Quit)
-- `ui` depende de `command-definitions` (não de `commands`)
-- Quebra o ciclo: `commands → ui → command-definitions` ✅
+**Implemented Solution:**
+- Isolated `command-definitions` crate (ZERO internal deps)
+- Contains only the `Command` enum (7 variants: List, Check, Render, New, Apply, Translate, Quit)
+- `ui` depends on `command-definitions` (not on `commands`)
+- Breaks the cycle: `commands → ui → command-definitions` ✅
 
-**Arquitetura ENUM como Single Source of Truth:**
-- Command enum usa `strum 0.26` (Display, EnumIter, EnumString, IntoStaticStr)
-- Centraliza definição de comandos
-- Garante consistência entre UI e lógica de aplicação
+**Enum architecture as the single source of truth:**
+- Command enum uses `strum 0.26` (Display, EnumIter, EnumString, IntoStaticStr)
+- Centralizes command definitions
+- Guarantees consistency between UI and application logic
 
-### 1.5 Status de Validação
+### 1.5 Validation Status
 
-- ✅ Compilação: 11.85s (release)
-- ✅ Testes: 186/188 passando (98.9%)
-- ✅ Ciclos detectados: **ZERO**
-- ✅ Hierarquia: **VALIDADA**
-- ✅ Isolamento: **CORRETO**
+- ✅ Compilation: 11.85s (release)
+- ✅ Tests: 186/188 passing (98.9%)
+- ✅ Detected cycles: **ZERO**
+- ✅ Hierarchy: **VALIDATED**
+- ✅ Isolation: **CORRECT**
 
-### 1.6 Rationale das Decisões
+### 1.6 Decision Rationale
 
-**Commands no Nível 3:**
-- Orquestra todos os componentes (otel, ui)
-- Implementa lógica de negócio dos comandos
-- Contém submódulos internos em src/:
-  * `translate`: transcrição entre linguagens
-  * `manifest`: orquestração de aplicação de templates
-  * `templating`: engine Handlebars (depende: core, string-utils)
-- Estrutura modular sem crates separados
+**Commands at Level 3:**
+- Orchestrates every component (otel, ui)
+- Implements the business logic for the commands
+- Contains internal submodules inside `src/`:
+  * `translate`: language transcription
+  * `manifest`: template orchestration
+  * `templating`: Handlebars engine (depends on core, string-utils)
+- Modular structure without splitting into separate crates
 
-**Otel no Nível 2:**
-- Depende de `ui` para `append_footer_log`
-- Necessário para feedback visual de logs no terminal
-- Aceitável pois não cria ciclos com Nível 3
+**Otel at Level 2:**
+- Depends on `ui` for `append_footer_log`
+- Required for visual log feedback in the terminal
+- Acceptable because it does not create cycles with Level 3
 
 ---
 
@@ -552,7 +552,7 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 ---
 
-### 12.4 Phase 3: Estado e Persistência
+### 12.4 Phase 3: State & Persistence
 
 #### 12.4.1 Phase 3.1: Rich State Management
 - [ ] `CliState` structure with history, session, config
@@ -574,7 +574,7 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 ---
 
-### 12.5 Phase 4: Funcionalidades Interativas
+### 12.5 Phase 4: Interactive Features
 
 #### 12.5.1 Phase 4.1: Tab Completion (IMP-3)
 - [ ] Rustyline integration
@@ -603,7 +603,7 @@ Binaries, `templates/`, `docs/README.md`, `docs/nettoolskit-cli.md`, `docs/TEMPL
 
 ---
 
-### 12.6 Phase 5: Features Avançadas
+### 12.6 Phase 5: Advanced Features
 
 #### 12.6.1 Phase 5.1: Syntax Highlighting
 - [ ] Tree-sitter integration
@@ -742,6 +742,6 @@ None
 **Started:** 2025-11-09
 **Detailed Documentation:** [architecture-migration-plan.md](architecture-migration-plan.md)
 
-> **Nota**: Para detalhes completos da arquitetura de código em camadas, veja a seção **1. Arquitetura de Código** no início deste documento.
+> **Note**: For complete details of the layered code architecture, see **Section 1. Code Architecture** at the beginning of this document.
 
 ---

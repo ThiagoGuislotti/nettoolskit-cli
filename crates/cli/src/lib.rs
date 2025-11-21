@@ -22,6 +22,18 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+/// Menu context for hierarchical command palette navigation
+///
+/// Tracks which menu level is active to dynamically switch between
+/// root commands and domain-specific submenus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuContext {
+    /// Root menu: top-level commands like /help, /manifest, /quit
+    Root,
+    /// Manifest submenu: manifest-specific actions (check, render, apply)
+    Manifest,
+}
+
 pub mod display;
 pub mod input;
 
@@ -163,13 +175,17 @@ async fn run_interactive_loop() -> io::Result<ExitStatus> {
     let menu_entries = nettoolskit_commands::menu_entries();
     let mut palette = CommandPalette::new(menu_entries);
 
+    // Track current context to manage menu switching
+    let mut current_context = MenuContext::Root;
+
     info!("Starting interactive loop");
-    run_input_loop(&mut input_buffer, &mut palette).await
+    run_input_loop(&mut input_buffer, &mut palette, &mut current_context).await
 }
 
 async fn run_input_loop(
     input_buffer: &mut String,
     palette: &mut CommandPalette,
+    current_context: &mut MenuContext,
 ) -> io::Result<ExitStatus> {
     let mut raw_mode = RawModeGuard::new()?;
     let interrupted = Arc::new(AtomicBool::new(false));
@@ -186,7 +202,7 @@ async fn run_input_loop(
         render_prompt()?;
         input_buffer.clear();
 
-        match read_line_with_palette(input_buffer, palette, &interrupted).await? {
+        match read_line_with_palette(input_buffer, palette, current_context, &interrupted).await? {
             InputResult::Command(cmd) => {
                 raw_mode.disable()?;
                 if cmd == "/quit" {
