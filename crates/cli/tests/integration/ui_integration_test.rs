@@ -64,7 +64,8 @@ fn test_ui_exports_available() {
 
 #[test]
 fn test_ui_modules_accessible() {
-    use nettoolskit_ui::{colors, palette, terminal};
+    use nettoolskit_ui::core::colors;
+    use nettoolskit_ui::interaction::{palette, terminal};
 use nettoolskit_core::MenuEntry;
 
 #[derive(Clone)]

@@ -5,7 +5,9 @@ use crossterm::terminal::ClearType;
 use crossterm::{cursor, queue, terminal};
 use nettoolskit_core::MenuEntry;
 use std::cmp::Ordering;
-use std::io::{self, Write};/// Entry type used internally by CommandPalette
+use std::io::{self, Write};
+
+/// Entry type used internally by CommandPalette
 struct PaletteEntry {
     label: String,
     description: String,
@@ -78,6 +80,39 @@ impl CommandPalette {
             offset: 0,
             y_input: 0,
             active: false,
+        }
+    }
+
+    /// Reloads the palette with new menu entries.
+    ///
+    /// This function replaces all current entries with new ones, resets the selection
+    /// and scroll state, and re-renders the palette if active.
+    ///
+    /// # Arguments
+    ///
+    /// * `entries` - Vector of new items implementing MenuEntry trait
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success or an `io::Error` if rendering fails.
+    pub fn reload_entries<T: MenuEntry>(&mut self, entries: Vec<T>) -> io::Result<()> {
+        self.all_entries = entries
+            .into_iter()
+            .map(|e| PaletteEntry {
+                label: e.label().to_string(),
+                description: e.description().to_string(),
+            })
+            .collect();
+
+        self.matches = (0..self.all_entries.len()).collect();
+        self.selected = 0;
+        self.offset = 0;
+        self.update_matches();
+
+        if self.active {
+            self.render()
+        } else {
+            Ok(())
         }
     }
 

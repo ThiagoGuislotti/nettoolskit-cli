@@ -26,6 +26,6 @@ pub use core::colors::*;
 pub use core::style;
 pub use rendering::components::{self, BoxConfig, MenuConfig, render_box, render_interactive_menu};
 pub use rendering::writer::UiWriter;
-pub use interaction::palette::*;
+pub use interaction::palette::CommandPalette;
 pub use interaction::prompt::*;
 pub use interaction::terminal::*;
