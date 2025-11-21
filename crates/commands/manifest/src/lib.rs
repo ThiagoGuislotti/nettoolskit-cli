@@ -62,7 +62,8 @@ pub mod files {
 }
 
 // Re-export core types
-pub use core::{ManifestAction, ManifestError, ManifestResult};
+pub use core::definitions::{menu_entries, ManifestAction};
+pub use core::{ManifestError, ManifestResult};
 pub use core::models::*;
 
 // Re-export execution types
