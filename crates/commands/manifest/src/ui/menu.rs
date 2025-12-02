@@ -8,7 +8,8 @@ use inquire::Text;
 use nettoolskit_core::{ExitStatus, path_utils::directory::get_current_directory};
 use nettoolskit_ui::{
     BoxConfig, MenuConfig, render_box, render_interactive_menu,
-    PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR
+    render_command_header, render_menu_instructions, render_section_title, format_menu_item,
+    PRIMARY_COLOR, WHITE_COLOR,
 };
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
@@ -40,13 +41,12 @@ impl std::fmt::Display for ManifestMenuItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let label = self.get_label();
         let desc = self.get_description();
-        if desc.is_empty() {
-            write!(f, "{}", label)
+        let formatted = if desc.is_empty() {
+            label.clone()
         } else {
-            // Label will be colored by inquire based on selection
-            // Description in gray (using ANSI escape codes directly)
-            write!(f, "{} - \x1b[90m{}\x1b[0m", label, desc)
-        }
+            format_menu_item(&label, Some(desc))
+        };
+        write!(f, "{}", formatted)
     }
 }
 
@@ -57,9 +57,7 @@ pub async fn show_menu() -> ExitStatus {
 
     loop {
         // Print command being executed
-        println!();
-        println!("{}", "> manifest".color(PRIMARY_COLOR));
-        println!();
+        render_command_header("manifest");
 
         // Render box using component
         let box_config = BoxConfig::new("Manifest Commands Menu")
@@ -74,10 +72,7 @@ pub async fn show_menu() -> ExitStatus {
         render_box(box_config);
 
         println!();
-        println!(
-            "{}",
-            "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(GRAY_COLOR)
-        );
+        render_menu_instructions();
         println!();
 
         // Render menu using component - Build menu from manifest definitions
@@ -118,10 +113,7 @@ pub async fn show_menu() -> ExitStatus {
 
 /// Execute manifest check command
 async fn execute_check() -> ExitStatus {
-    println!();
-    println!("{}", "✅ Validating Manifest...".cyan().bold());
-    println!("{}", "─".repeat(23).cyan());
-    println!();
+    render_section_title("Validating Manifest...", Some("✅"));
 
     // Prompt for manifest path
     let manifest_path = Text::new("Manifest file path:")
@@ -147,10 +139,7 @@ async fn execute_check() -> ExitStatus {
 
 /// Execute manifest render command
 async fn execute_render() -> ExitStatus {
-    println!();
-    println!("{}", "🎨 Rendering Preview...".cyan().bold());
-    println!("{}", "─".repeat(20).cyan());
-    println!();
+    render_section_title("Rendering Preview...", Some("🎨"));
 
     // TODO: Implement actual rendering
     println!("{}", "ℹ️  Manifest rendering will preview generated files".yellow());
@@ -162,10 +151,7 @@ async fn execute_render() -> ExitStatus {
 
 /// Execute manifest apply command interactively
 async fn execute_apply_interactive() -> ExitStatus {
-    println!();
-    println!("{}", "⚡ Applying Manifest...".cyan().bold());
-    println!("{}", "─".repeat(21).cyan());
-    println!();
+    render_section_title("Applying Manifest...", Some("⚡"));
 
     // Prompt for manifest path
     let manifest_path = Text::new("Manifest file path:")
