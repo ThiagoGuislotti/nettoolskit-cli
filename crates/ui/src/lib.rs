@@ -24,7 +24,12 @@ pub mod interaction;
 // Re-export commonly used items
 pub use core::colors::*;
 pub use core::style;
-pub use rendering::components::{self, BoxConfig, MenuConfig, render_box, render_interactive_menu};
+// Re-export components
+pub use rendering::components::{
+    BoxConfig, render_box,
+    MenuConfig, render_interactive_menu,
+    render_command_header, render_menu_instructions, render_section_title, format_menu_item,
+};
 pub use rendering::writer::UiWriter;
 pub use interaction::palette::CommandPalette;
 pub use interaction::prompt::*;
