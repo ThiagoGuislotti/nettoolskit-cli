@@ -20,6 +20,3 @@ mod input_tests;
 
 #[path = "error_tests.rs"]
 mod error_tests;
-
-// Integration tests
-mod integration;

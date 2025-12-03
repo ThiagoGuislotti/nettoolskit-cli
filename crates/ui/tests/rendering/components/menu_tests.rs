@@ -3,7 +3,7 @@
 //! Validates menu configuration, builder pattern, and interactive menu setup.
 //! Tests cursor colors, page sizes, help messages, and prompt customization.
 
-use nettoolskit_ui::components::MenuConfig;
+use nettoolskit_ui::MenuConfig;
 use owo_colors::Rgb;
 
 // Constructor and Builder Tests
