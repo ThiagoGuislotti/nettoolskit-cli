@@ -46,7 +46,7 @@ impl Commands {
         use nettoolskit_commands::{process_command, Command};
 
         match self {
-            Commands::Manifest => process_command(Command::Manifest.slash()).await,
+            Commands::Manifest => process_command(Command::Manifest.slash_static()).await,
             Commands::Translate { from, to, path } => {
                 let request = nettoolskit_translate::TranslateRequest { from, to, path };
                 nettoolskit_translate::handle_translate(request).await

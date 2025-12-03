@@ -29,7 +29,7 @@ pub mod input;
 use display::print_logo;
 use input::{read_line, InputResult};
 use nettoolskit_core::async_utils::with_timeout;
-use nettoolskit_commands::{process_command, process_text, ExitStatus};
+use nettoolskit_commands::{process_command, process_text, Command, ExitStatus};
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
@@ -183,16 +183,16 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
         match read_line(input_buffer, &interrupted).await? {
             InputResult::ShowMenu => {
                 // User typed "/" - show menu immediately
-                if let Some(selected) = show_main_menu() {
+                if let Some(selected_cmd) = show_main_menu() {
                     raw_mode.disable()?;
 
                     // Check if user selected quit command
-                    if is_quit_command(&selected) {
+                    if selected_cmd == Command::Quit {
                         print_goodbye();
                         return Ok(ExitStatus::Success);
                     }
 
-                    let status: ExitStatus = process_command(&selected).await;
+                    let status: ExitStatus = process_command(selected_cmd.slash_static()).await;
                     if matches!(status, ExitStatus::Interrupted) {
                         return Ok(status);
                     }
@@ -208,7 +208,7 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
                 raw_mode.disable()?;
 
                 // Check if user typed quit command
-                if is_quit_command(&cmd) {
+                if let Some(Command::Quit) = nettoolskit_commands::get_command(&cmd) {
                     print_goodbye();
                     return Ok(ExitStatus::Success);
                 }
@@ -245,25 +245,25 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
     }
 }
 
-/// Show main menu when user types "/"
-fn show_main_menu() -> Option<String> {
+/// Show main menu when user types "/" - returns Command enum directly
+fn show_main_menu() -> Option<Command> {
     let menu_entries = nettoolskit_commands::menu_entries();
     let current_dir = std::env::current_dir()
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| String::from("."));
 
-    let palette = CommandPalette::new(menu_entries)
+    let palette = CommandPalette::new(menu_entries.clone())
+        .with_prompt("   /")
         .with_title("NetToolsKit Commands")
         .with_subtitle("Select a command to execute")
         .with_directory(current_dir);
 
-    palette.show()
-}
-
-/// Check if a command is a quit/exit command
-fn is_quit_command(cmd: &str) -> bool {
-    cmd == "/quit" || cmd == "quit"
+    palette.show().and_then(|label| {
+        menu_entries
+            .into_iter()
+            .find(|cmd| cmd.slash_static() == label.trim())
+    })
 }
 
 /// Print goodbye message to user
