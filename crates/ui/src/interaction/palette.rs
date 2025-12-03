@@ -1,4 +1,5 @@
 use crate::core::colors::{PRIMARY_COLOR, WHITE_COLOR};
+use crate::core::formatting::format_menu_item;
 use crate::rendering::components::{
     BoxConfig, MenuConfig, render_box, render_interactive_menu,
     render_command_header, render_menu_instructions,
@@ -29,12 +30,14 @@ impl MenuEntry for PaletteEntry {
 pub struct CommandPalette {
     /// All available entries
     all_entries: Vec<PaletteEntry>,
-    /// Title for the menu box
-    title: String,
+    /// Title for the menu box (optional)
+    title: Option<String>,
     /// Subtitle for the menu box
     subtitle: Option<String>,
     /// Directory context to display in footer
     directory: Option<String>,
+    /// Prompt text for the menu selection (defaults to "Select →")
+    prompt: Option<String>,
 }
 
 impl CommandPalette {
@@ -58,9 +61,10 @@ impl CommandPalette {
 
         Self {
             all_entries,
-            title: String::from("Commands"),
+            title: None,
             subtitle: None,
             directory: None,
+            prompt: None,
         }
     }
 
@@ -74,7 +78,7 @@ impl CommandPalette {
     ///
     /// Returns self for method chaining.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = title.into();
+        self.title = Some(title.into());
         self
     }
 
@@ -103,6 +107,20 @@ impl CommandPalette {
     /// Returns self for method chaining.
     pub fn with_directory(mut self, directory: impl Into<String>) -> Self {
         self.directory = Some(directory.into());
+        self
+    }
+
+    /// Set the prompt text for the menu selection.
+    ///
+    /// # Arguments
+    ///
+    /// * `prompt` - The prompt text to display
+    ///
+    /// # Returns
+    ///
+    /// Returns self for method chaining.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = Some(prompt.into());
         self
     }
 
@@ -135,51 +153,51 @@ impl CommandPalette {
         println!();
 
         // Render command header if title looks like a command
-        if self.title.starts_with('/') || self.title.contains("Commands") {
-            let cmd = self.title.trim_start_matches('/').to_lowercase();
-            if !cmd.is_empty() && !cmd.contains("commands") {
-                render_command_header(&cmd);
+        if let Some(title) = &self.title {
+            if title.starts_with('/') || title.contains("Commands") {
+                let cmd = title.trim_start_matches('/').to_lowercase();
+                if !cmd.is_empty() && !cmd.contains("commands") {
+                    render_command_header(&cmd);
+                }
             }
         }
 
-        // Render box with title
-        let mut box_config = BoxConfig::new(&self.title)
-            .with_title_prefix(">_")
-            .with_title_color(WHITE_COLOR)
-            .with_border_color(PRIMARY_COLOR)
-            .with_width(89)
-            .with_spacing(false);
+        // Skip box rendering for main menu (already shown at startup)
+        let is_main_menu = self.title.as_ref()
+            .map(|t| t == "NetToolsKit Commands" || t == "Commands")
+            .unwrap_or(true);
 
-        if let Some(subtitle) = &self.subtitle {
-            box_config = box_config.with_subtitle(subtitle);
+        if !is_main_menu {
+            // Render box with title for submenus
+            if let Some(title) = &self.title {
+                let mut box_config = BoxConfig::new(title)
+                    .with_title_prefix(">_")
+                    .with_title_color(WHITE_COLOR)
+                    .with_border_color(PRIMARY_COLOR)
+                    .with_width(89)
+                    .with_spacing(false);
+
+                if let Some(subtitle) = &self.subtitle {
+                    box_config = box_config.with_subtitle(subtitle);
+                }
+
+                if let Some(directory) = &self.directory {
+                    box_config = box_config.add_footer_item("directory", directory, WHITE_COLOR);
+                }
+
+                render_box(box_config);
+            }
         }
-
-        if let Some(directory) = &self.directory {
-            box_config = box_config.add_footer_item("directory", directory, WHITE_COLOR);
-        }
-
-        render_box(box_config);
 
         println!();
         render_menu_instructions();
         println!();
 
-        // Build displayable items for inquire menu
+        // Build displayable items for inquire menu with aligned descriptions
         let display_items: Vec<String> = self
             .all_entries
             .iter()
-            .map(|entry| {
-                let desc = entry.description();
-                if desc.is_empty() {
-                    format!("   {}", entry.label())
-                } else {
-                    format!(
-                        "   {} - \x1b[90m{}\x1b[0m",
-                        entry.label(),
-                        desc
-                    )
-                }
-            })
+            .map(|entry| format_menu_item(entry.label(), entry.description(), 20))
             .collect();
 
         if display_items.is_empty() {
@@ -188,19 +206,21 @@ impl CommandPalette {
         }
 
         // Render interactive menu
-        let menu_config = MenuConfig::new("Select option", display_items)
+        let prompt = self.prompt.as_deref().unwrap_or("Select →");
+        let menu_config = MenuConfig::new(prompt, display_items)
             .with_cursor_color(PRIMARY_COLOR)
             .with_page_size(10);
 
         match render_interactive_menu(menu_config) {
             Ok(selected) => {
-                // Extract label from formatted string "   label - description"
+                // Extract label from formatted string "   / help           - description"
+                // The format_menu_item adds padding between label and description
                 let label = selected
-                    .trim()
                     .split(" - ")
                     .next()
                     .unwrap_or(&selected)
                     .trim();
+
                 Some(label.to_string())
             }
             Err(_) => None, // User cancelled

@@ -3,7 +3,6 @@
 use crate::definitions::{Command, ExitStatus};
 use nettoolskit_otel::{Metrics, Timer};
 use owo_colors::OwoColorize;
-use std::str::FromStr;
 use strum::IntoEnumIterator;
 use tracing::info;
 
@@ -24,6 +23,8 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     let metrics = Metrics::new();
     let timer = Timer::start("command_execution", metrics.clone());
 
+    eprintln!("DEBUG processor: cmd='{}'", cmd);
+
     // Log command usage with structured data
     info!(
         command = %cmd,
@@ -32,13 +33,25 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     );
     metrics.increment_counter(format!("command_{}_usage", cmd.trim_start_matches('/')));
 
-    // Parse command and potential subcommand
+    // Parse command - pass full command string to get_command
+    // It will handle "/ help", "/help", or "help" formats
     let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
-    let base_cmd = parts.get(0).unwrap_or(&"");
-    let subcommand = parts.get(1).copied();
 
-    // Parse and dispatch command
-    let result = match Command::from_str(base_cmd).ok() {
+    // If command is "/ help" (with space), parts = ["/", "help"], subcommand = parts[2]
+    // If command is "/help list", parts = ["/help", "list"], subcommand = parts[1]
+    let subcommand = if parts.get(0) == Some(&"/") {
+        parts.get(2).copied()
+    } else {
+        parts.get(1).copied()
+    };
+
+    eprintln!("DEBUG processor: cmd='{}', parts={:?}, subcommand={:?}", cmd, parts, subcommand);
+
+    // Parse command using full original string
+    let parsed = crate::core::definitions::get_command(cmd);
+    eprintln!("DEBUG processor: get_command('{}') = {:?}", cmd, parsed);
+
+    let result = match parsed {
         Some(Command::Help) => {
             println!("{}", "� NetToolsKit CLI - Help".cyan().bold());
             println!("\n{}", "Available Commands:".white().bold());
@@ -113,6 +126,7 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
                 }
                 None => {
                     // No subcommand provided - show interactive menu from manifest crate
+                    info!("Opening manifest interactive menu (no subcommand)");
                     nettoolskit_manifest::show_menu().await
                 }
                 _ => {

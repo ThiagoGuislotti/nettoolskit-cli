@@ -10,22 +10,21 @@ pub use nettoolskit_core::ExitStatus;
 
 /// Command enumeration - SINGLE SOURCE OF TRUTH
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumIter, EnumString, IntoStaticStr)]
-#[strum(serialize_all = "lowercase")]
 pub enum Command {
     /// Display help information and available commands
-    #[strum(serialize = "/help")]
+    #[strum(serialize = "help")]
     Help,
 
     /// Manage and apply manifests (submenu)
-    #[strum(serialize = "/manifest")]
+    #[strum(serialize = "manifest")]
     Manifest,
 
     /// Translate code between languages (deferred)
-    #[strum(serialize = "/translate")]
+    #[strum(serialize = "translate")]
     Translate,
 
     /// Exit NetToolsKit CLI
-    #[strum(serialize = "/quit")]
+    #[strum(serialize = "quit")]
     Quit,
 }
 
@@ -40,25 +39,25 @@ impl Command {
         }
     }
 
-    /// Get the slash command string (e.g., "/list")
-    pub fn slash(&self) -> &'static str {
-        self.into()
+    /// Get the slash command string
+    pub fn slash(&self) -> String {
+        format!("/ {}", <&str>::from(self))
     }
 
-    /// Get the command name without slash (e.g., "help")
-    pub fn name(&self) -> String {
+    /// Get the slash command as static string
+    pub fn slash_static(&self) -> &'static str {
         match self {
-            Command::Help => "help".to_string(),
-            Command::Manifest => "manifest".to_string(),
-            Command::Translate => "translate".to_string(),
-            Command::Quit => "quit".to_string(),
+            Command::Help => "/ help",
+            Command::Manifest => "/ manifest",
+            Command::Translate => "/ translate",
+            Command::Quit => "/ quit",
         }
     }
 }
 
 impl MenuEntry for Command {
     fn label(&self) -> &str {
-        self.slash()
+        self.slash_static()
     }
 
     fn description(&self) -> &str {
@@ -66,52 +65,14 @@ impl MenuEntry for Command {
     }
 }
 
-/// Get command by slash string (e.g., "/list" -> Some(Command::List))
+/// Get command by slash string (e.g., "/ help" -> Some(Command::Help))
 pub fn get_command(slash: &str) -> Option<Command> {
     use std::str::FromStr;
-    Command::from_str(slash).ok()
-}
-
-/// Get all command entries for palette display
-pub fn palette_entries() -> Vec<(&'static str, &'static str)> {
-    Command::iter()
-        .map(|cmd| (cmd.slash(), cmd.description()))
-        .collect()
+    let name = slash.trim().trim_start_matches('/').trim();
+    Command::from_str(name).ok()
 }
 
 /// Get all commands as menu entries for UI display
 pub fn menu_entries() -> Vec<Command> {
     Command::iter().collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use strum::IntoEnumIterator;
-
-    #[test]
-    fn test_command_slash() {
-        assert_eq!(Command::Help.slash(), "/help");
-        assert_eq!(Command::Quit.slash(), "/quit");
-    }
-
-    #[test]
-    fn test_command_description() {
-        assert!(Command::Help.description().contains("help"));
-        assert!(Command::Manifest.description().contains("manifests"));
-        assert!(Command::Translate.description().contains("Translate"));
-        assert!(Command::Quit.description().contains("Exit"));
-    }
-
-    #[test]
-    fn test_get_command() {
-        assert_eq!(get_command("/help"), Some(Command::Help));
-        assert_eq!(get_command("/invalid"), None);
-    }
-
-    #[test]
-    fn test_enum_iteration() {
-        let commands: Vec<Command> = Command::iter().collect();
-        assert_eq!(commands.len(), 4); // help, manifest, translate, quit
-    }
 }

@@ -13,7 +13,7 @@ pub mod handlers;
 pub mod io;
 
 // Re-export commonly used types
-pub use core::definitions::{menu_entries, palette_entries, Command};
+pub use core::definitions::{get_command, menu_entries, Command};
 pub use core::error::{CommandError, Result};
 pub use execution::executor::{
     AsyncCommandExecutor, CommandHandle, CommandProgress, CommandResult, ProgressSender,

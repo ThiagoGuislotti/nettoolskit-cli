@@ -24,7 +24,7 @@
 
 // Re-export management crate (command orchestration)
 pub use nettoolskit_management::{
-    menu_entries, palette_entries, process_command, process_text, AsyncCommandExecutor, Command,
+    get_command, menu_entries, process_command, process_text, AsyncCommandExecutor, Command,
     CommandHandle, CommandProgress, CommandResult, ProgressSender,
 };
 
