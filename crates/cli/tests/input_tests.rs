@@ -13,11 +13,13 @@ fn test_input_result_variants() {
     let command = InputResult::Command("test".to_string());
     let text = InputResult::Text("hello".to_string());
     let exit = InputResult::Exit;
+    let show_menu = InputResult::ShowMenu;
 
     // Assert
     assert!(matches!(command, InputResult::Command(_)));
     assert!(matches!(text, InputResult::Text(_)));
     assert!(matches!(exit, InputResult::Exit));
+    assert!(matches!(show_menu, InputResult::ShowMenu));
 }
 
 #[test]
@@ -44,6 +46,13 @@ fn test_input_result_debug() {
 
     // Assert
     assert!(debug_str.contains("Exit"));
+
+    // Arrange & Act
+    let show_menu = InputResult::ShowMenu;
+    let debug_str = format!("{:?}", show_menu);
+
+    // Assert
+    assert!(debug_str.contains("ShowMenu"));
 }
 
 #[test]
@@ -53,6 +62,7 @@ fn test_input_result_pattern_matching() {
         InputResult::Command("/list".to_string()),
         InputResult::Text("regular text".to_string()),
         InputResult::Exit,
+        InputResult::ShowMenu,
     ];
 
     // Act & Assert
@@ -66,6 +76,9 @@ fn test_input_result_pattern_matching() {
                 assert!(!text.is_empty());
             }
             InputResult::Exit => {
+                assert!(true);
+            }
+            InputResult::ShowMenu => {
                 assert!(true);
             }
         }
@@ -147,6 +160,7 @@ fn test_input_result_all_variants_handled() {
             InputResult::Command(_) => "command",
             InputResult::Text(_) => "text",
             InputResult::Exit => "exit",
+            InputResult::ShowMenu => "show_menu",
         }
     }
 
@@ -157,6 +171,7 @@ fn test_input_result_all_variants_handled() {
     );
     assert_eq!(handle_result(InputResult::Text("test".to_string())), "text");
     assert_eq!(handle_result(InputResult::Exit), "exit");
+    assert_eq!(handle_result(InputResult::ShowMenu), "show_menu");
 }
 
 #[test]
@@ -166,16 +181,19 @@ fn test_input_result_clone_behavior() {
     let create_command = || InputResult::Command("test".to_string());
     let create_text = || InputResult::Text("test".to_string());
     let create_exit = || InputResult::Exit;
+    let create_show_menu = || InputResult::ShowMenu;
 
     let cmd = create_command();
     let txt = create_text();
     let ext = create_exit();
+    let menu = create_show_menu();
 
     // Act
     // Should be able to move these values
     let _moved_cmd = cmd;
     let _moved_txt = txt;
     let _moved_ext = ext;
+    let _moved_menu = menu;
 
     // Assert
     assert!(true);
@@ -208,4 +226,42 @@ async fn test_input_module_integration() {
 
     let _result = InputResult::Command("/test".to_string());
     assert!(true);
+}
+
+#[test]
+fn test_show_menu_variant() {
+    // Arrange
+    let show_menu = InputResult::ShowMenu;
+
+    // Act & Assert
+    // ShowMenu is a unit variant (no data)
+    assert!(matches!(show_menu, InputResult::ShowMenu));
+
+    // Test pattern matching
+    match show_menu {
+        InputResult::ShowMenu => {
+            assert!(true); // Successfully matched
+        }
+        _ => panic!("Expected ShowMenu variant"),
+    }
+}
+
+#[test]
+fn test_show_menu_in_collection() {
+    // Arrange
+    let results = vec![
+        InputResult::ShowMenu,
+        InputResult::Command("/help".to_string()),
+        InputResult::ShowMenu,
+        InputResult::Exit,
+    ];
+
+    // Act
+    let show_menu_count = results
+        .iter()
+        .filter(|r| matches!(r, InputResult::ShowMenu))
+        .count();
+
+    // Assert
+    assert_eq!(show_menu_count, 2);
 }

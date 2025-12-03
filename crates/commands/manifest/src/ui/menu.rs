@@ -5,11 +5,9 @@
 
 use crate::core::definitions::ManifestAction;
 use inquire::Text;
-use nettoolskit_core::{ExitStatus, path_utils::directory::get_current_directory};
+use nettoolskit_core::{ExitStatus, MenuEntry, path_utils::directory::get_current_directory};
 use nettoolskit_ui::{
-    BoxConfig, MenuConfig, render_box, render_interactive_menu,
-    render_command_header, render_menu_instructions, render_section_title, format_menu_item,
-    PRIMARY_COLOR, WHITE_COLOR,
+    render_section_title, MenuConfig, render_interactive_menu, CommandPalette, PRIMARY_COLOR,
 };
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
@@ -21,32 +19,19 @@ pub enum ManifestMenuItem {
     Back,
 }
 
-impl ManifestMenuItem {
-    fn get_label(&self) -> String {
+impl MenuEntry for ManifestMenuItem {
+    fn label(&self) -> &str {
         match self {
-            ManifestMenuItem::Action(action) => format!("   {}", action.name()),
-            ManifestMenuItem::Back => "   Back".to_string(),
+            ManifestMenuItem::Action(action) => action.name(),
+            ManifestMenuItem::Back => "Back",
         }
     }
 
-    fn get_description(&self) -> &str {
+    fn description(&self) -> &str {
         match self {
             ManifestMenuItem::Action(action) => action.description(),
             ManifestMenuItem::Back => "To main menu",
         }
-    }
-}
-
-impl std::fmt::Display for ManifestMenuItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let label = self.get_label();
-        let desc = self.get_description();
-        let formatted = if desc.is_empty() {
-            label.clone()
-        } else {
-            format_menu_item(&label, Some(desc))
-        };
-        write!(f, "{}", formatted)
     }
 }
 
@@ -56,26 +41,7 @@ pub async fn show_menu() -> ExitStatus {
     let current_dir = get_current_directory();
 
     loop {
-        // Print command being executed
-        render_command_header("manifest");
-
-        // Render box using component
-        let box_config = BoxConfig::new("Manifest Commands Menu")
-            .with_title_prefix(">_")
-            .with_title_color(WHITE_COLOR)
-            .with_subtitle("Interactive menu for manifest operations")
-            .add_footer_item("directory", current_dir.clone(), WHITE_COLOR)
-            .with_border_color(PRIMARY_COLOR)
-            .with_width(89)
-            .with_spacing(false);
-
-        render_box(box_config);
-
-        println!();
-        render_menu_instructions();
-        println!();
-
-        // Render menu using component - Build menu from manifest definitions
+        // Build menu items
         let menu_items = vec![
             ManifestMenuItem::Action(ManifestAction::Check),
             ManifestMenuItem::Action(ManifestAction::Render),
@@ -83,27 +49,35 @@ pub async fn show_menu() -> ExitStatus {
             ManifestMenuItem::Back,
         ];
 
-        let menu_config = MenuConfig::new("Select a manifest command:", menu_items)
-            .with_cursor_color(PRIMARY_COLOR)
-            .with_page_size(6);
+        // Create and show palette menu
+        let palette = CommandPalette::new(menu_items)
+            .with_title("Manifest Commands Menu")
+            .with_subtitle("Interactive menu for manifest operations")
+            .with_directory(current_dir.clone());
 
-        let selection = render_interactive_menu(menu_config);
-
-        match selection {
-            Ok(ManifestMenuItem::Action(ManifestAction::Check)) => {
-                execute_check().await;
+        match palette.show() {
+            Some(selected_label) => {
+                // Match selected label to action
+                match selected_label.as_str() {
+                    "check" => {
+                        execute_check().await;
+                    }
+                    "render" => {
+                        execute_render().await;
+                    }
+                    "apply" => {
+                        execute_apply_interactive().await;
+                    }
+                    "Back" => {
+                        println!("{}", "← Returning to main menu...".yellow());
+                        return ExitStatus::Success;
+                    }
+                    _ => {
+                        println!("{}", format!("Unknown command: {}", selected_label).red());
+                    }
+                }
             }
-            Ok(ManifestMenuItem::Action(ManifestAction::Render)) => {
-                execute_render().await;
-            }
-            Ok(ManifestMenuItem::Action(ManifestAction::Apply)) => {
-                execute_apply_interactive().await;
-            }
-            Ok(ManifestMenuItem::Back) => {
-                println!("{}", "← Returning to main menu...".yellow());
-                return ExitStatus::Success;
-            }
-            Err(_) => {
+            None => {
                 println!("{}", "Menu cancelled".yellow());
                 return ExitStatus::Success;
             }

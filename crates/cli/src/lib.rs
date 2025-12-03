@@ -22,23 +22,12 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Menu context for hierarchical command palette navigation
-///
-/// Tracks which menu level is active to dynamically switch between
-/// root commands and domain-specific submenus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuContext {
-    /// Root menu: top-level commands like /help, /manifest, /quit
-    Root,
-    /// Manifest submenu: manifest-specific actions (check, render, apply)
-    Manifest,
-}
-
 pub mod display;
+pub mod events;
 pub mod input;
 
 use display::print_logo;
-use input::{read_line_with_palette, InputResult};
+use input::{read_line, InputResult};
 use nettoolskit_core::async_utils::with_timeout;
 use nettoolskit_commands::{process_command, process_text, ExitStatus};
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
@@ -171,22 +160,11 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
 async fn run_interactive_loop() -> io::Result<ExitStatus> {
     let mut input_buffer = String::new();
 
-    // Get menu entries from commands and create palette
-    let menu_entries = nettoolskit_commands::menu_entries();
-    let mut palette = CommandPalette::new(menu_entries);
-
-    // Track current context to manage menu switching
-    let mut current_context = MenuContext::Root;
-
     info!("Starting interactive loop");
-    run_input_loop(&mut input_buffer, &mut palette, &mut current_context).await
+    run_input_loop(&mut input_buffer).await
 }
 
-async fn run_input_loop(
-    input_buffer: &mut String,
-    palette: &mut CommandPalette,
-    current_context: &mut MenuContext,
-) -> io::Result<ExitStatus> {
+async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
     let mut raw_mode = RawModeGuard::new()?;
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_fallback = interrupted.clone();
@@ -202,16 +180,40 @@ async fn run_input_loop(
         render_prompt()?;
         input_buffer.clear();
 
-        match read_line_with_palette(input_buffer, palette, current_context, &interrupted).await? {
+        match read_line(input_buffer, &interrupted).await? {
+            InputResult::ShowMenu => {
+                // User typed "/" - show menu immediately
+                if let Some(selected) = show_main_menu() {
+                    raw_mode.disable()?;
+
+                    // Check if user selected quit command
+                    if is_quit_command(&selected) {
+                        print_goodbye();
+                        return Ok(ExitStatus::Success);
+                    }
+
+                    let status: ExitStatus = process_command(&selected).await;
+                    if matches!(status, ExitStatus::Interrupted) {
+                        return Ok(status);
+                    }
+                    raw_mode.enable()?;
+                    ensure_layout_guard();
+                }
+                // Clear buffer and prompt for next input
+                input_buffer.clear();
+                println!();
+                continue;
+            }
             InputResult::Command(cmd) => {
                 raw_mode.disable()?;
-                if cmd == "/quit" {
+
+                // Check if user typed quit command
+                if is_quit_command(&cmd) {
+                    print_goodbye();
                     return Ok(ExitStatus::Success);
                 }
+
                 let status: ExitStatus = process_command(&cmd).await;
-                if matches!(status, ExitStatus::Success) && cmd == "/quit" {
-                    return Ok(status);
-                }
                 if matches!(status, ExitStatus::Interrupted) {
                     return Ok(status);
                 }
@@ -233,7 +235,7 @@ async fn run_input_loop(
                 if interrupted.load(Ordering::SeqCst) {
                     println!("\n⚠️  {}", "Interrupted".yellow());
                 } else {
-                    println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
+                    print_goodbye();
                 }
                 return Ok(ExitStatus::Success);
             }
@@ -241,6 +243,32 @@ async fn run_input_loop(
 
         println!();
     }
+}
+
+/// Show main menu when user types "/"
+fn show_main_menu() -> Option<String> {
+    let menu_entries = nettoolskit_commands::menu_entries();
+    let current_dir = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| String::from("."));
+
+    let palette = CommandPalette::new(menu_entries)
+        .with_title("NetToolsKit Commands")
+        .with_subtitle("Select a command to execute")
+        .with_directory(current_dir);
+
+    palette.show()
+}
+
+/// Check if a command is a quit/exit command
+fn is_quit_command(cmd: &str) -> bool {
+    cmd == "/quit" || cmd == "quit"
+}
+
+/// Print goodbye message to user
+fn print_goodbye() {
+    println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
 }
 
 fn ensure_layout_guard() {

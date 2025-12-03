@@ -7,75 +7,12 @@
 //! 2. Verification that UI operations handle edge cases gracefully
 //! 3. A placeholder for future error-related tests if custom errors are introduced
 
-use nettoolskit_core::MenuEntry;
-use nettoolskit_ui::{clear_terminal, CommandPalette, UiWriter};
+use nettoolskit_ui::{clear_terminal, UiWriter};
 use std::io::Write;
 
-// Test helper for creating menu entries
-#[derive(Clone)]
-struct TestEntry {
-    label: String,
-    description: String,
-}
-
-impl MenuEntry for TestEntry {
-    fn label(&self) -> &str {
-        &self.label
-    }
-
-    fn description(&self) -> &str {
-        &self.description
-    }
-}
-
-fn create_test_entry(label: &str, desc: &str) -> TestEntry {
-    TestEntry {
-        label: label.to_string(),
-        description: desc.to_string(),
-    }
-}
-
 // CommandPalette Error Handling Tests
-
-#[test]
-fn test_palette_close_when_not_active() {
-    // Arrange
-    let entries: Vec<TestEntry> = vec![];
-    let mut palette = CommandPalette::new(entries);
-
-    // Act
-    let result = palette.close();
-
-    // Assert
-    // Palette close is idempotent, should succeed even if not active
-    assert!(result.is_ok() || result.is_err());
-}
-
-#[test]
-fn test_palette_get_selected_when_empty() {
-    // Arrange
-    let entries: Vec<TestEntry> = vec![];
-    let palette = CommandPalette::new(entries);
-
-    // Act
-    let selected = palette.get_selected_command();
-
-    // Assert
-    assert!(selected.is_none(), "Should return None for empty palette");
-}
-
-#[test]
-fn test_palette_update_query_with_empty() {
-    // Arrange
-    let entries: Vec<TestEntry> = vec![];
-    let mut palette = CommandPalette::new(entries);
-
-    // Act
-    let result = palette.update_query("");
-
-    // Assert
-    assert!(result.is_ok(), "Empty query should be valid");
-}
+// NOTE: Tests for old inline palette methods (open, close, update_query, etc.) have been removed
+// after simplification to use only boxed menu layout with show() method
 
 // UiWriter Error Handling Tests
 
@@ -146,19 +83,4 @@ fn test_clear_terminal_multiple_times() {
 }
 
 // Palette Open/Close Error Scenarios
-
-#[test]
-fn test_palette_double_open() {
-    // Arrange
-    let entries = vec![create_test_entry("test", "desc")];
-    let mut palette = CommandPalette::new(entries);
-
-    // Act
-    let result1 = palette.open("test");
-    let result2 = palette.open("test again");
-
-    // Assert
-    assert!(result1.is_ok());
-    // Second open may succeed (replaces state) or fail depending on implementation
-    assert!(result2.is_ok() || result2.is_err());
-}
+// NOTE: Test removed after palette simplification - open() method no longer exists

@@ -3,7 +3,7 @@
 //! Validates box rendering with borders, title, subtitle, and footer items.
 //! Tests padding calculations, color handling, and layout correctness.
 
-use nettoolskit_ui::components::BoxConfig;
+use nettoolskit_ui::BoxConfig;
 use owo_colors::Rgb;
 
 // Constructor and Builder Tests
