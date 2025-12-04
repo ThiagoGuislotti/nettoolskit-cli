@@ -8,26 +8,10 @@ name = "nettoolskit_commands"
 path = "lib.rs"
 
 [dependencies]
-# Workspace dependencies
-nettoolskit-core = { path = "../core" }
-nettoolskit-otel = { path = "../otel" }
-nettoolskit-ui = { path = "../ui" }
-
-# Internal modules (within commands/)
-nettoolskit-management = { path = "management" }
-nettoolskit-templating = { path = "templating" }
+# Command implementations
+nettoolskit-help = { path = "help" }
 nettoolskit-manifest = { path = "manifest" }
 nettoolskit-translate = { path = "translate" }
-
-# External dependencies
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-tokio = { version = "1.42", features = ["full"] }
-futures = "0.3"
-tracing = "0.1"
-owo-colors = "3.5"
-serde_yaml = "0.9"
-strum = { version = "0.26", features = ["derive"] }
 thiserror = "2.0"
 walkdir = "2.5"
 

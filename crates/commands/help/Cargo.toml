@@ -1,0 +1,33 @@
+[package]
+name = "nettoolskit-help"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "nettoolskit_help"
+path = "src/lib.rs"
+
+[dependencies]
+# Core types
+nettoolskit-core = { path = "../../core" }
+
+# Manifest for discovery
+nettoolskit-manifest = { path = "../manifest" }
+
+# Telemetry
+nettoolskit-otel = { path = "../../otel" }
+tracing = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+anyhow = { workspace = true }
+
+# File system traversal
+walkdir = "2.5"
+
+# Output formatting
+owo-colors = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.8"

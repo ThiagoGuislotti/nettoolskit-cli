@@ -1,61 +1,39 @@
-//! Tests for color constants
-//!
-//! Validates the color palette constants used throughout the UI.
-
-use nettoolskit_ui::{GRAY_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR};
+use nettoolskit_ui::Color;
 
 #[test]
-fn test_primary_color_rgb_values() {
-    // Arrange
-    let expected = (155, 114, 255);
+fn test_color_constants_exist() {
+    // Test that all colors are accessible
+    let _ = Color::WHITE;
+    let _ = Color::BLACK;
+    let _ = Color::GRAY;
+    let _ = Color::GRAY_LIGHT;
+    let _ = Color::GRAY_DARK;
 
-    // Act
-    let color = PRIMARY_COLOR;
+    let _ = Color::PURPLE;
+    let _ = Color::PURPLE_LIGHT;
+    let _ = Color::PURPLE_DARK;
 
-    // Assert
-    assert_eq!(color.0, expected.0);
-    assert_eq!(color.1, expected.1);
-    assert_eq!(color.2, expected.2);
+    let _ = Color::BLUE;
+    let _ = Color::BLUE_LIGHT;
+    let _ = Color::BLUE_DARK;
+
+    let _ = Color::GREEN;
+    let _ = Color::GREEN_LIGHT;
+    let _ = Color::GREEN_DARK;
+
+    let _ = Color::YELLOW;
+    let _ = Color::YELLOW_LIGHT;
+    let _ = Color::YELLOW_DARK;
+
+    let _ = Color::RED;
+    let _ = Color::RED_LIGHT;
+    let _ = Color::RED_DARK;
 }
 
 #[test]
-fn test_secondary_color_rgb_values() {
-    // Arrange
-    let expected = (204, 185, 254);
-
-    // Act
-    let color = SECONDARY_COLOR;
-
-    // Assert
-    assert_eq!(color.0, expected.0);
-    assert_eq!(color.1, expected.1);
-    assert_eq!(color.2, expected.2);
-}
-
-#[test]
-fn test_white_color_rgb_values() {
-    // Arrange
-    let expected = (255, 255, 255);
-
-    // Act
-    let color = WHITE_COLOR;
-
-    // Assert
-    assert_eq!(color.0, expected.0);
-    assert_eq!(color.1, expected.1);
-    assert_eq!(color.2, expected.2);
-}
-
-#[test]
-fn test_gray_color_rgb_values() {
-    // Arrange
-    let expected = (128, 128, 128);
-
-    // Act
-    let color = GRAY_COLOR;
-
-    // Assert
-    assert_eq!(color.0, expected.0);
-    assert_eq!(color.1, expected.1);
-    assert_eq!(color.2, expected.2);
+fn test_rgb_values() {
+    // Test some specific RGB values
+    assert_eq!(Color::WHITE, owo_colors::Rgb(255, 255, 255));
+    assert_eq!(Color::BLACK, owo_colors::Rgb(0, 0, 0));
+    assert_eq!(Color::PURPLE, owo_colors::Rgb(155, 114, 255));
 }

@@ -4,7 +4,7 @@ use crate::core::TranslateRequest;
 use nettoolskit_core::ExitStatus;
 use nettoolskit_otel::Metrics;
 use nettoolskit_templating::{Language, LanguageStrategy, LanguageStrategyFactory};
-use nettoolskit_ui::PRIMARY_COLOR;
+use nettoolskit_ui::Color;
 use owo_colors::OwoColorize;
 use std::path::Path;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ pub async fn handle_translate(request: TranslateRequest) -> ExitStatus {
         "Starting template translation"
     );
 
-    println!("{}", "🔄 Translating Template...".color(PRIMARY_COLOR));
+    println!("{}", "🏭 Translating Template...".color(Color::PURPLE));
     println!("  📋 Source Language: {}", request.from.yellow());
     println!("  🎯 Target Language: {}", request.to.cyan());
     println!("  📄 Template Path: {}", request.path.green());

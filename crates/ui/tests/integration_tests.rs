@@ -2,7 +2,7 @@
 //!
 //! Validates the color palette constants used throughout the UI.
 
-use nettoolskit_ui::{GRAY_COLOR, PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR};
+use nettoolskit_ui::Color;
 
 #[test]
 fn test_primary_color_rgb_values() {
@@ -10,7 +10,7 @@ fn test_primary_color_rgb_values() {
     let expected = (155, 114, 255);
 
     // Act
-    let color = PRIMARY_COLOR;
+    let color = Color::PURPLE;
 
     // Assert
     assert_eq!(color.0, expected.0);
@@ -24,7 +24,7 @@ fn test_secondary_color_rgb_values() {
     let expected = (204, 185, 254);
 
     // Act
-    let color = SECONDARY_COLOR;
+    let color = Color::PURPLE_LIGHT;
 
     // Assert
     assert_eq!(color.0, expected.0);
@@ -38,7 +38,7 @@ fn test_white_color_rgb_values() {
     let expected = (255, 255, 255);
 
     // Act
-    let color = WHITE_COLOR;
+    let color = Color::WHITE;
 
     // Assert
     assert_eq!(color.0, expected.0);
@@ -52,7 +52,7 @@ fn test_gray_color_rgb_values() {
     let expected = (128, 128, 128);
 
     // Act
-    let color = GRAY_COLOR;
+    let color = Color::GRAY;
 
     // Assert
     assert_eq!(color.0, expected.0);

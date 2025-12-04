@@ -4,7 +4,7 @@
 //! including branding, logo, and startup messages.
 
 use nettoolskit_core::path_utils::directory::get_current_directory;
-use nettoolskit_ui::{BoxConfig, render_box, PRIMARY_COLOR, WHITE_COLOR, GRAY_COLOR};
+use nettoolskit_ui::{BoxConfig, render_box, Color};
 use owo_colors::OwoColorize;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -26,10 +26,10 @@ pub fn print_welcome_box() {
 
     let config = BoxConfig::new(format!("NetToolsKit CLI ({})", VERSION))
         .with_title_prefix(">_")
-        .with_title_color(WHITE_COLOR)
+        .with_title_color(Color::WHITE)
         .with_subtitle("A comprehensive toolkit for backend development")
-        .add_footer_item("directory", current_dir, WHITE_COLOR)
-        .with_border_color(PRIMARY_COLOR)
+        .add_footer_item("directory", current_dir, Color::WHITE)
+        .with_border_color(Color::PURPLE)
         .with_width(89)
         .with_spacing(true);
 
@@ -42,7 +42,7 @@ pub fn print_welcome_box() {
 /// Displays a stylized ASCII representation of the NetToolsKit branding
 /// using the primary color scheme.
 pub fn print_ascii_logo() {
-    let logo_color = PRIMARY_COLOR;
+    let logo_color = Color::PURPLE;
 
     println!(" {}", "███╗   ██╗███████╗████████╗████████╗ ██████╗  ██████╗ ██╗     ███████╗██╗  ██╗██╗████████╗".color(logo_color));
     println!(" {}", "████╗  ██║██╔════╝╚══██╔══╝╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██╔════╝██║ ██╔╝██║╚══██╔══╝".color(logo_color));
@@ -55,11 +55,11 @@ pub fn print_ascii_logo() {
     println!();
     println!(
         "{}",
-        "💡 Tip: Type /help to see all commands, or / to open command palette".color(GRAY_COLOR)
+        "💡 Tip: Type /help to see all commands, or / to open command palette".color(Color::GRAY)
     );
     println!(
         "{}",
-        "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(GRAY_COLOR)
+        "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(Color::GRAY)
     );
     println!();
     println!();

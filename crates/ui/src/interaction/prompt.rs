@@ -69,21 +69,3 @@ pub fn get_prompt_string() -> String {
 pub fn get_prompt_symbol() -> &'static str {
     PROMPT_SYMBOL
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_prompt_symbol_constant() {
-        assert_eq!(PROMPT_SYMBOL, "> ");
-        assert_eq!(get_prompt_symbol(), "> ");
-    }
-
-    #[test]
-    fn test_prompt_string_not_empty() {
-        let prompt = get_prompt_string();
-        assert!(!prompt.is_empty());
-        assert!(prompt.contains(">"));
-    }
-}

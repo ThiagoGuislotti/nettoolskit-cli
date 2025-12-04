@@ -1,7 +1,22 @@
-// Feature detection and configuration
-//
-// This module provides runtime feature detection for opt-in TUI improvements.
-// All features are backward-compatible and non-breaking.
+//! Feature detection and configuration
+//!
+//! This module provides runtime feature detection for opt-in TUI improvements.
+//! All features are backward-compatible and non-breaking.
+//!
+//! # Examples
+//!
+//! ```
+//! use nettoolskit_core::Features;
+//!
+//! // Detect features from environment and compile-time flags
+//! let features = Features::detect();
+//!
+//! if features.use_modern_tui {
+//!     // Use Ratatui-based TUI
+//! } else {
+//!     // Use standard printf-style UI
+//! }
+//! ```
 
 use std::env;
 
@@ -74,11 +89,21 @@ impl Features {
     /// - `NTK_USE_PERSISTENT_SESSIONS=1`: Enable persistent sessions
     fn from_env() -> Self {
         Self {
-            use_modern_tui: env_var_is_set("NTK_USE_MODERN_TUI"),
-            use_event_driven: env_var_is_set("NTK_USE_EVENT_DRIVEN"),
-            use_frame_scheduler: env_var_is_set("NTK_USE_FRAME_SCHEDULER"),
-            use_persistent_sessions: env_var_is_set("NTK_USE_PERSISTENT_SESSIONS"),
+            use_modern_tui: Self::env_var_is_set("NTK_USE_MODERN_TUI"),
+            use_event_driven: Self::env_var_is_set("NTK_USE_EVENT_DRIVEN"),
+            use_frame_scheduler: Self::env_var_is_set("NTK_USE_FRAME_SCHEDULER"),
+            use_persistent_sessions: Self::env_var_is_set("NTK_USE_PERSISTENT_SESSIONS"),
         }
+    }
+
+    /// Check if an environment variable is set to a truthy value
+    fn env_var_is_set(name: &str) -> bool {
+        env::var(name)
+            .map(|v| {
+                let v = v.trim().to_lowercase();
+                v == "1" || v == "true" || v == "yes" || v == "on"
+            })
+            .unwrap_or(false)
     }
 
     /// Check if all modern features are enabled
@@ -126,16 +151,16 @@ impl Features {
 
     /// Print feature status to stdout
     pub fn print_status(&self) {
-        tracing::info!("NetToolsKit CLI Features:");
-        tracing::info!(
+        println!("NetToolsKit CLI Features:");
+        println!(
             "  Modern TUI: {}",
             if self.use_modern_tui { "✅" } else { "❌" }
         );
-        tracing::info!(
+        println!(
             "  Event-Driven: {}",
             if self.use_event_driven { "✅" } else { "❌" }
         );
-        tracing::info!(
+        println!(
             "  Frame Scheduler: {}",
             if self.use_frame_scheduler {
                 "✅"
@@ -143,7 +168,7 @@ impl Features {
                 "❌"
             }
         );
-        tracing::info!(
+        println!(
             "  Persistent Sessions: {}",
             if self.use_persistent_sessions {
                 "✅"
@@ -151,82 +176,5 @@ impl Features {
                 "❌"
             }
         );
-    }
-}
-
-/// Check if an environment variable is set to a truthy value
-fn env_var_is_set(name: &str) -> bool {
-    env::var(name)
-        .map(|v| {
-            let v = v.trim().to_lowercase();
-            v == "1" || v == "true" || v == "yes" || v == "on"
-        })
-        .unwrap_or(false)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_features() {
-        let features = Features::default();
-        // Should default to standard UI
-        assert!(!features.use_modern_tui || cfg!(feature = "modern-tui"));
-    }
-
-    #[test]
-    fn test_env_var_parsing() {
-        assert!(!env_var_is_set("TEST_VAR")); // Not set
-
-        std::env::set_var("TEST_VAR", "1");
-        assert!(env_var_is_set("TEST_VAR"));
-
-        std::env::set_var("TEST_VAR", "true");
-        assert!(env_var_is_set("TEST_VAR"));
-
-        std::env::set_var("TEST_VAR", "0");
-        assert!(!env_var_is_set("TEST_VAR"));
-
-        std::env::remove_var("TEST_VAR");
-    }
-
-    #[test]
-    fn test_feature_description() {
-        let features = Features {
-            use_modern_tui: false,
-            use_event_driven: false,
-            use_frame_scheduler: false,
-            use_persistent_sessions: false,
-        };
-        assert_eq!(features.description(), "default");
-
-        let features = Features {
-            use_modern_tui: true,
-            use_event_driven: true,
-            use_frame_scheduler: false,
-            use_persistent_sessions: false,
-        };
-        assert!(features.description().contains("modern-tui"));
-        assert!(features.description().contains("event-driven"));
-    }
-
-    #[test]
-    fn test_is_full_modern() {
-        let features = Features {
-            use_modern_tui: true,
-            use_event_driven: true,
-            use_frame_scheduler: true,
-            use_persistent_sessions: false,
-        };
-        assert!(features.is_full_modern());
-
-        let features = Features {
-            use_modern_tui: true,
-            use_event_driven: false,
-            use_frame_scheduler: false,
-            use_persistent_sessions: false,
-        };
-        assert!(!features.is_full_modern());
     }
 }

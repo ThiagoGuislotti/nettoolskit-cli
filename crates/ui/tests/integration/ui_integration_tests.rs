@@ -22,10 +22,10 @@ use nettoolskit_ui::*;
 #[test]
 fn test_ui_module_integration() {
     // Arrange
-    let _primary = PRIMARY_COLOR;
-    let _secondary = SECONDARY_COLOR;
-    let _white = WHITE_COLOR;
-    let _gray = GRAY_COLOR;
+    let _primary = Color::PURPLE;
+    let _secondary = Color::PURPLE_LIGHT;
+    let _white = Color::WHITE;
+    let _gray = Color::GRAY;
 
     // Act
     let path = "/test/path";
@@ -52,7 +52,7 @@ fn test_display_and_terminal_integration() {
 #[test]
 fn test_color_usage_with_display_functions() {
     // Arrange
-    let _colors = vec![PRIMARY_COLOR, SECONDARY_COLOR, WHITE_COLOR, GRAY_COLOR];
+    let _colors = vec![Color::PURPLE, Color::BLUE, Color::WHITE, Color::GRAY];
     let test_path = "/colored/path/with/ansi/codes";
 
     // Act
@@ -65,10 +65,10 @@ fn test_color_usage_with_display_functions() {
 #[test]
 fn test_module_completeness() {
     // Arrange - Colors
-    let _primary = PRIMARY_COLOR;
-    let _secondary = SECONDARY_COLOR;
-    let _white = WHITE_COLOR;
-    let _gray = GRAY_COLOR;
+    let _primary = Color::PURPLE;
+    let _secondary = Color::PURPLE_LIGHT;
+    let _white = Color::WHITE;
+    let _gray = Color::GRAY;
 
     // Act - Display and terminal functions
     let _truncated = truncate_directory("/test", 10);
@@ -125,7 +125,7 @@ fn test_ui_module_no_conflicts() {
     use nettoolskit_ui::*;
 
     // Act
-    let _color_test = PRIMARY_COLOR;
+    let _color_test = Color::PURPLE;
     let _path_test = truncate_directory("/test", 5);
     let _terminal_test = clear_terminal();
 
@@ -136,7 +136,7 @@ fn test_ui_module_no_conflicts() {
 #[test]
 fn test_ui_synchronous_operations() {
     // Arrange
-    let _color = PRIMARY_COLOR;
+    let _color = Color::PURPLE;
 
     // Act
     let _path = truncate_directory("/sync/test/path", 15);

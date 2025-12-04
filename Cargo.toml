@@ -4,11 +4,12 @@ members = [
     "crates/core",
     "crates/ui",
     "crates/otel",
+    "crates/orchestrator",
     "crates/commands",
-    "crates/commands/management",
     "crates/commands/templating",
     "crates/commands/manifest",
     "crates/commands/translate",
+    "crates/commands/help",
 ]
 resolver = "2"
 

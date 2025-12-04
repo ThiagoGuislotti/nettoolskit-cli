@@ -5,11 +5,8 @@
 
 // Module-specific test suites (hierarchical organization)
 mod core;
-mod rendering;
-mod interaction;
-
-// Error tests (mandatory)
+mod enum_menu_tests;
 mod error_tests;
-
-// Integration tests
 mod integration;
+mod interaction;
+mod rendering;

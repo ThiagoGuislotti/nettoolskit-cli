@@ -3,37 +3,14 @@
 //! This module provides the interactive UI menu for selecting and executing
 //! manifest subcommands (check, render, apply).
 
-use crate::core::definitions::ManifestAction;
+use crate::models::ManifestAction;
 use inquire::Text;
-use nettoolskit_core::{ExitStatus, MenuEntry, path_utils::directory::get_current_directory};
+use nettoolskit_core::{ExitStatus, path_utils::directory::get_current_directory};
 use nettoolskit_ui::{
-    render_section_title, MenuConfig, render_interactive_menu, CommandPalette, PRIMARY_COLOR,
+    render_section_title, EnumMenuConfig, render_enum_menu, MenuConfig, render_interactive_menu, Color,
 };
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
-
-/// Manifest menu item (action or back)
-#[derive(Debug, Clone)]
-pub enum ManifestMenuItem {
-    Action(ManifestAction),
-    Back,
-}
-
-impl MenuEntry for ManifestMenuItem {
-    fn label(&self) -> &str {
-        match self {
-            ManifestMenuItem::Action(action) => action.name(),
-            ManifestMenuItem::Back => "Back",
-        }
-    }
-
-    fn description(&self) -> &str {
-        match self {
-            ManifestMenuItem::Action(action) => action.description(),
-            ManifestMenuItem::Back => "To main menu",
-        }
-    }
-}
 
 /// Display manifest menu and handle selection
 pub async fn show_menu() -> ExitStatus {
@@ -41,44 +18,32 @@ pub async fn show_menu() -> ExitStatus {
     let current_dir = get_current_directory();
 
     loop {
-        // Build menu items
-        let menu_items = vec![
-            ManifestMenuItem::Action(ManifestAction::Check),
-            ManifestMenuItem::Action(ManifestAction::Render),
-            ManifestMenuItem::Action(ManifestAction::Apply),
-            ManifestMenuItem::Back,
-        ];
+        // Use the generic enum menu renderer
+        let menu_config = EnumMenuConfig::new(
+            "Manifest Commands Menu",
+            "Interactive menu for manifest operations",
+            current_dir.clone(),
+        )
+        .with_theme_color(Color::PURPLE)
+        .with_width(89);
 
-        // Create and show palette menu
-        let palette = CommandPalette::new(menu_items)
-            .with_title("Manifest Commands Menu")
-            .with_subtitle("Interactive menu for manifest operations")
-            .with_directory(current_dir.clone());
-
-        match palette.show() {
-            Some(selected_label) => {
-                // Match selected label to action
-                match selected_label.as_str() {
-                    "check" => {
+        match render_enum_menu::<ManifestAction>(menu_config) {
+            Ok(action) => {
+                // Execute the selected action
+                match action {
+                    ManifestAction::Check => {
                         execute_check().await;
                     }
-                    "render" => {
+                    ManifestAction::Render => {
                         execute_render().await;
                     }
-                    "apply" => {
+                    ManifestAction::Apply => {
                         execute_apply_interactive().await;
-                    }
-                    "Back" => {
-                        println!("{}", "← Returning to main menu...".yellow());
-                        return ExitStatus::Success;
-                    }
-                    _ => {
-                        println!("{}", format!("Unknown command: {}", selected_label).red());
                     }
                 }
             }
-            None => {
-                println!("{}", "Menu cancelled".yellow());
+            Err(_) => {
+                println!("{}", "← Returning to main menu...".yellow());
                 return ExitStatus::Success;
             }
         }
@@ -144,7 +109,7 @@ async fn execute_apply_interactive() -> ExitStatus {
     // Prompt for dry-run
     let dry_run_options = vec!["No - Apply changes", "Yes - Dry-run (preview only)"];
     let dry_run_menu = MenuConfig::new("Run in dry-run mode?", dry_run_options)
-        .with_cursor_color(PRIMARY_COLOR)
+        .with_cursor_color(Color::PURPLE)
         .with_help_message("Dry-run will preview changes without modifying files");
 
     let dry_run_selection = render_interactive_menu(dry_run_menu);

@@ -6,7 +6,7 @@
 //! 2. A future location for error-related tests if custom errors are introduced
 //! 3. A verification that error propagation from dependencies works correctly
 
-use nettoolskit_commands::ExitStatus;
+use nettoolskit_orchestrator::ExitStatus;
 
 #[test]
 fn test_exit_status_error_variant() {

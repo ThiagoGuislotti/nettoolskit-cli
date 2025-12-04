@@ -24,10 +24,13 @@ path = "src/lib.rs"
 
 [dependencies]
 # Workspace dependencies
-nettoolskit-commands = { path = "../commands" }
+nettoolskit-orchestrator = { path = "../orchestrator" }
 nettoolskit-ui = { path = "../ui" }
 nettoolskit-core = { path = "../core" }
 nettoolskit-otel = { path = "../otel" }
+
+# Commands for main.rs
+nettoolskit-translate = { path = "../commands/translate" }
 
 # Async and standard dependencies
 anyhow = { workspace = true }
@@ -38,13 +41,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
-strum = { workspace = true }
-strum_macros = { workspace = true }
 owo-colors = { workspace = true }
 supports-color = { workspace = true }
-futures = { workspace = true }
-futures-util = { workspace = true }
-handlebars = { workspace = true }
 
 # Tracing and observability
 tracing = { workspace = true }
