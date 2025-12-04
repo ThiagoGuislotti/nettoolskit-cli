@@ -1,20 +1,12 @@
-//! Tests for color style conversion utilities
-//!
-//! Validates RGB to crossterm color conversion and foreground color commands.
-
-use crossterm::style::Color;
-use nettoolskit_ui::style::{rgb_to_crossterm, set_fg};
+use nettoolskit_ui::core::style::{rgb_to_crossterm, set_fg};
 use owo_colors::Rgb;
+use crossterm::style::{Color, SetForegroundColor};
 
 #[test]
-fn test_rgb_to_crossterm_primary_color() {
-    // Arrange
+fn test_rgb_to_crossterm_conversion() {
     let rgb = Rgb(155, 114, 255);
-
-    // Act
     let color = rgb_to_crossterm(rgb);
 
-    // Assert
     match color {
         Color::Rgb { r, g, b } => {
             assert_eq!(r, 155);
@@ -26,63 +18,34 @@ fn test_rgb_to_crossterm_primary_color() {
 }
 
 #[test]
-fn test_rgb_to_crossterm_white() {
-    // Arrange
-    let rgb = Rgb(255, 255, 255);
-
-    // Act
-    let color = rgb_to_crossterm(rgb);
-
-    // Assert
-    match color {
-        Color::Rgb { r, g, b } => {
-            assert_eq!(r, 255);
-            assert_eq!(g, 255);
-            assert_eq!(b, 255);
-        }
-        _ => panic!("Expected Color::Rgb variant"),
-    }
-}
-
-#[test]
-fn test_rgb_to_crossterm_black() {
-    // Arrange
-    let rgb = Rgb(0, 0, 0);
-
-    // Act
-    let color = rgb_to_crossterm(rgb);
-
-    // Assert
-    match color {
-        Color::Rgb { r, g, b } => {
-            assert_eq!(r, 0);
-            assert_eq!(g, 0);
-            assert_eq!(b, 0);
-        }
-        _ => panic!("Expected Color::Rgb variant"),
-    }
-}
-
-#[test]
 fn test_set_fg_creates_valid_command() {
-    // Arrange
-    let rgb = Rgb(100, 150, 200);
+    let rgb = Rgb(255, 255, 255);
+    let cmd = set_fg(rgb);
 
-    // Act
-    let _cmd = set_fg(rgb);
-
-    // Assert - compile-time type check is sufficient
-    assert!(true);
+    // Verify it's the correct type (compile-time check)
+    let _: SetForegroundColor = cmd;
 }
 
 #[test]
-fn test_set_fg_with_primary_color() {
-    // Arrange
-    let rgb = Rgb(155, 114, 255);
+fn test_common_colors() {
+    let test_cases = [
+        (Rgb(255, 255, 255), (255, 255, 255)), // White
+        (Rgb(0, 0, 0), (0, 0, 0)),             // Black
+        (Rgb(155, 114, 255), (155, 114, 255)), // Primary
+    ];
 
-    // Act
-    let _cmd = set_fg(rgb);
-
-    // Assert
-    assert!(true);
+    for (input_rgb, expected) in test_cases {
+        let color = rgb_to_crossterm(input_rgb);
+        match color {
+            Color::Rgb { r, g, b } => {
+                assert_eq!(
+                    (r, g, b),
+                    expected,
+                    "Color conversion mismatch for {:?}",
+                    input_rgb
+                );
+            }
+            _ => panic!("Expected Color::Rgb variant"),
+        }
+    }
 }

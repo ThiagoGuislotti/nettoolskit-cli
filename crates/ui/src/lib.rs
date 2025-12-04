@@ -27,8 +27,9 @@ pub use core::style;
 // Re-export components
 pub use rendering::components::{
     BoxConfig, render_box,
+    EnumMenuConfig, render_enum_menu,
     MenuConfig, render_interactive_menu,
-    render_command_header, render_menu_instructions, render_section_title, format_menu_item,
+    render_command, render_menu_instructions, render_section_title, format_menu_item,
 };
 pub use rendering::writer::UiWriter;
 pub use interaction::palette::CommandPalette;

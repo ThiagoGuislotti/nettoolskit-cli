@@ -1,9 +1,11 @@
-//! NetToolsKit CLI application entry point and orchestration
+//! NetToolsKit CLI application - UI layer only
 //!
-//! This crate coordinates the main CLI application logic, including:
-//! - Interactive command input and execution
-//! - Terminal event handling and rendering
-//! - Integration between UI, commands, and telemetry layers
+//! This crate provides the terminal user interface for NetToolsKit CLI:
+//! - Interactive command input and display
+//! - Terminal event handling
+//! - Layout and rendering
+//!
+//! Command orchestration is handled by the `nettoolskit-orchestrator` crate.
 //!
 //! # Features
 //!
@@ -11,10 +13,9 @@
 //!
 //! # Architecture
 //!
-//! The CLI follows a layered architecture:
-//! - Input layer: Handles user input and command palette
-//! - Execution layer: Async command processing with progress tracking
-//! - Rendering layer: Terminal output and layout management
+//! - Input layer: User input and command palette
+//! - Display layer: Terminal output and layout
+//! - Event layer: Terminal events (Ctrl+C, Enter, etc.)
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use owo_colors::OwoColorize;
@@ -29,11 +30,11 @@ pub mod input;
 use display::print_logo;
 use input::{read_line, InputResult};
 use nettoolskit_core::async_utils::with_timeout;
-use nettoolskit_commands::{process_command, process_text, Command, ExitStatus};
+use nettoolskit_orchestrator::{process_command, process_text, Command, ExitStatus};
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
-    render_prompt, CommandPalette, TerminalLayout, PRIMARY_COLOR,
+    render_prompt, CommandPalette, TerminalLayout, Color,
 };
 use tracing::{error, info, warn};
 
@@ -208,7 +209,7 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
                 raw_mode.disable()?;
 
                 // Check if user typed quit command
-                if let Some(Command::Quit) = nettoolskit_commands::get_command(&cmd) {
+                if let Some(Command::Quit) = nettoolskit_orchestrator::get_command(&cmd) {
                     print_goodbye();
                     return Ok(ExitStatus::Success);
                 }
@@ -247,7 +248,8 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
 
 /// Show main menu when user types "/" - returns Command enum directly
 fn show_main_menu() -> Option<Command> {
-    let menu_entries = nettoolskit_commands::menu_entries();
+    use nettoolskit_core::MenuProvider;
+    let menu_entries = Command::all_variants();
     let current_dir = std::env::current_dir()
         .ok()
         .and_then(|p| p.to_str().map(String::from))
@@ -268,7 +270,7 @@ fn show_main_menu() -> Option<Command> {
 
 /// Print goodbye message to user
 fn print_goodbye() {
-    println!("{}", "👋 Goodbye!".color(PRIMARY_COLOR));
+    println!("{}", "👋 Goodbye!".color(Color::PURPLE));
 }
 
 fn ensure_layout_guard() {

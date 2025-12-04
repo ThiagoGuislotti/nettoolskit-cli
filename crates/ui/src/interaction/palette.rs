@@ -1,8 +1,8 @@
-use crate::core::colors::{PRIMARY_COLOR, WHITE_COLOR};
+use crate::core::colors::Color;
 use crate::core::formatting::format_menu_item;
 use crate::rendering::components::{
     BoxConfig, MenuConfig, render_box, render_interactive_menu,
-    render_command_header, render_menu_instructions,
+    render_command, render_menu_instructions,
 };
 use nettoolskit_core::MenuEntry;
 use owo_colors::OwoColorize;
@@ -157,7 +157,7 @@ impl CommandPalette {
             if title.starts_with('/') || title.contains("Commands") {
                 let cmd = title.trim_start_matches('/').to_lowercase();
                 if !cmd.is_empty() && !cmd.contains("commands") {
-                    render_command_header(&cmd);
+                    render_command(&cmd);
                 }
             }
         }
@@ -170,19 +170,22 @@ impl CommandPalette {
         if !is_main_menu {
             // Render box with title for submenus
             if let Some(title) = &self.title {
+                let title_width = title.len() + 4;
+                let current_dir = std::env::current_dir()
+                    .ok()
+                    .and_then(|p| p.to_str().map(String::from));
+
                 let mut box_config = BoxConfig::new(title)
-                    .with_title_prefix(">_")
-                    .with_title_color(WHITE_COLOR)
-                    .with_border_color(PRIMARY_COLOR)
-                    .with_width(89)
-                    .with_spacing(false);
+                    .with_title_color(Color::WHITE)
+                    .with_border_color(Color::PURPLE)
+                    .with_width(title_width);
 
                 if let Some(subtitle) = &self.subtitle {
                     box_config = box_config.with_subtitle(subtitle);
                 }
 
-                if let Some(directory) = &self.directory {
-                    box_config = box_config.add_footer_item("directory", directory, WHITE_COLOR);
+                if let Some(directory) = current_dir {
+                    box_config = box_config.add_footer_item("directory", directory, Color::WHITE);
                 }
 
                 render_box(box_config);
@@ -208,8 +211,7 @@ impl CommandPalette {
         // Render interactive menu
         let prompt = self.prompt.as_deref().unwrap_or("Select →");
         let menu_config = MenuConfig::new(prompt, display_items)
-            .with_cursor_color(PRIMARY_COLOR)
-            .with_page_size(10);
+            .with_cursor_color(Color::PURPLE);
 
         match render_interactive_menu(menu_config) {
             Ok(selected) => {

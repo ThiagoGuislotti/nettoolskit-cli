@@ -675,20 +675,6 @@ dependencies = [
 
 [[package]]
 name = "handlebars"
-version = "4.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faa67bab9ff362228eb3d00bd024a4965d8231bbb7921167f0cfa66c6626b225"
-dependencies = [
- "log",
- "pest",
- "pest_derive",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "handlebars"
 version = "6.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "759e2d5aea3287cb1190c8ec394f42866cb5bf74fcbf213f354e3c856ea26098"
@@ -959,19 +945,15 @@ dependencies = [
  "clap_complete",
  "crossterm 0.28.1",
  "ctrlc",
- "futures",
- "futures-util",
- "handlebars 4.5.0",
- "nettoolskit-commands",
  "nettoolskit-core",
+ "nettoolskit-orchestrator",
  "nettoolskit-otel",
+ "nettoolskit-translate",
  "nettoolskit-ui",
  "owo-colors",
  "ratatui",
  "serde",
  "serde_json",
- "strum 0.25.0",
- "strum_macros 0.25.3",
  "supports-color",
  "tokio",
  "tokio-test",
@@ -983,23 +965,11 @@ dependencies = [
 name = "nettoolskit-commands"
 version = "1.0.0"
 dependencies = [
- "anyhow",
- "clap",
- "futures",
- "nettoolskit-core",
- "nettoolskit-management",
+ "nettoolskit-help",
  "nettoolskit-manifest",
- "nettoolskit-otel",
- "nettoolskit-templating",
  "nettoolskit-translate",
- "nettoolskit-ui",
- "owo-colors",
- "serde_yaml",
- "strum 0.26.3",
  "tempfile",
  "thiserror 2.0.17",
- "tokio",
- "tracing",
  "walkdir",
 ]
 
@@ -1021,24 +991,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "nettoolskit-management"
+name = "nettoolskit-help"
 version = "1.0.0"
 dependencies = [
  "anyhow",
- "futures",
- "handlebars 6.3.2",
- "inquire",
  "nettoolskit-core",
  "nettoolskit-manifest",
  "nettoolskit-otel",
- "nettoolskit-ui",
  "owo-colors",
- "regex",
- "serde_json",
- "strum 0.26.3",
  "tempfile",
- "thiserror 2.0.17",
  "tokio",
+ "tokio-test",
  "tracing",
  "walkdir",
 ]
@@ -1068,6 +1031,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nettoolskit-orchestrator"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "nettoolskit-core",
+ "nettoolskit-help",
+ "nettoolskit-manifest",
+ "nettoolskit-otel",
+ "owo-colors",
+ "strum 0.25.0",
+ "strum_macros 0.25.3",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "nettoolskit-otel"
 version = "1.0.0"
 dependencies = [
@@ -1088,7 +1068,7 @@ dependencies = [
  "async-trait",
  "dashmap",
  "futures",
- "handlebars 6.3.2",
+ "handlebars",
  "nettoolskit-core",
  "num_cpus",
  "serde",

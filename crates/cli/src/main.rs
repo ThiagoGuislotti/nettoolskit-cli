@@ -1,6 +1,7 @@
 use clap::Parser;
 use nettoolskit_cli::interactive_mode;
-use nettoolskit_commands::{nettoolskit_translate, ExitStatus};
+use nettoolskit_orchestrator::ExitStatus;
+use nettoolskit_translate;
 use nettoolskit_otel::init_tracing;
 
 /// Global arguments available across all commands
@@ -43,10 +44,10 @@ pub enum Commands {
 impl Commands {
     /// Execute this command
     pub async fn execute(self) -> ExitStatus {
-        use nettoolskit_commands::{process_command, Command};
+        use nettoolskit_orchestrator::{process_command, MainAction};
 
         match self {
-            Commands::Manifest => process_command(Command::Manifest.slash_static()).await,
+            Commands::Manifest => process_command(MainAction::Manifest.slash_static()).await,
             Commands::Translate { from, to, path } => {
                 let request = nettoolskit_translate::TranslateRequest { from, to, path };
                 nettoolskit_translate::handle_translate(request).await

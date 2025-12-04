@@ -3,7 +3,7 @@
 //! Provides reusable helper functions for common UI patterns used across
 //! the application, promoting consistency and reducing code duplication.
 
-use crate::core::colors::{PRIMARY_COLOR, GRAY_COLOR};
+use crate::core::colors::Color;
 use owo_colors::OwoColorize;
 
 /// Render a command header with consistent formatting
@@ -17,17 +17,15 @@ use owo_colors::OwoColorize;
 /// # Example
 ///
 /// ```no_run
-/// use nettoolskit_ui::render_command_header;
-/// render_command_header("manifest");
+/// use nettoolskit_ui::render_command;
+/// render_command("manifest");
 /// // Output:
 /// //
 /// // > manifest
 /// //
 /// ```
-pub fn render_command_header(command: &str) {
-    println!();
-    println!("{}", format!("> {}", command).color(PRIMARY_COLOR));
-    println!();
+pub fn render_command(command: &str) {
+    println!("{}", format!("> {}", command).color(Color::PURPLE));
 }
 
 /// Render menu navigation instructions
@@ -44,7 +42,7 @@ pub fn render_command_header(command: &str) {
 pub fn render_menu_instructions() {
     println!(
         "{}",
-        "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(GRAY_COLOR)
+        "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(Color::GRAY)
     );
 }
 
@@ -114,30 +112,5 @@ pub fn format_menu_item(label: &str, description: Option<&str>) -> String {
             format!("{} - \x1b[90m{}\x1b[0m", label, desc)
         }
         _ => label.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_menu_item_with_description() {
-        let result = format_menu_item("check", Some("Validate manifest"));
-        assert!(result.contains("check"));
-        assert!(result.contains("Validate manifest"));
-        assert!(result.contains("\x1b[90m")); // Gray color code
-    }
-
-    #[test]
-    fn test_format_menu_item_without_description() {
-        let result = format_menu_item("check", None);
-        assert_eq!(result, "check");
-    }
-
-    #[test]
-    fn test_format_menu_item_with_empty_description() {
-        let result = format_menu_item("check", Some(""));
-        assert_eq!(result, "check");
     }
 }

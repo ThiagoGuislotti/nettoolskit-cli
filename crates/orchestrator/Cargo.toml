@@ -1,0 +1,32 @@
+[package]
+name = "nettoolskit-orchestrator"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "nettoolskit_orchestrator"
+path = "src/lib.rs"
+
+[dependencies]
+# Core and utilities
+nettoolskit-core = { path = "../core" }
+nettoolskit-otel = { path = "../otel" }
+
+# Command implementations
+nettoolskit-manifest = { path = "../commands/manifest" }
+nettoolskit-help = { path = "../commands/help" }
+
+# Async runtime
+tokio = { workspace = true }
+anyhow = { workspace = true }
+
+# Menu and utilities
+strum = { workspace = true }
+strum_macros = { workspace = true }
+owo-colors = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"

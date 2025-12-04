@@ -1,37 +1,20 @@
-//! Command processing and execution for NetToolsKit CLI
+//! Command implementations for NetToolsKit CLI
 //!
-//! This crate provides the core command processing logic, including:
-//! - Command parsing and validation
-//! - Async command execution with progress tracking
-//! - Template rendering and application
-//! - Manifest orchestration
-//! - Exit status handling
+//! This crate aggregates individual command implementations:
+//! - **help**: Help and manifest discovery
+//! - **manifest**: Manifest-driven code generation
+//! - **translate**: Code translation between languages
+//!
+//! Command orchestration is provided by the `nettoolskit-orchestrator` crate.
 //!
 //! # Architecture
 //!
-//! Commands are organized into feature-specific modules:
-//! - **management**: Command definitions, registry, processor, executor
-//! - **manifest**: Manifest-driven code generation
-//! - **templating**: Template rendering engine
-//! - **translate**: Code translation between languages
-//!
-//! # Features
-//!
-//! - **Management**: Centralized command orchestration
-//! - **Templating**: Code generation via Handlebars templates
-//! - **Manifest**: Manifest-driven workflows
-//! - **Translate**: Cross-language code translation
+//! Each command is in its own sub-crate with:
+//! - handlers/: Command execution logic
+//! - models/: Command-specific data structures
+//! - lib.rs: Public API
 
-// Re-export management crate (command orchestration)
-pub use nettoolskit_management::{
-    get_command, menu_entries, process_command, process_text, AsyncCommandExecutor, Command,
-    CommandHandle, CommandProgress, CommandResult, ProgressSender,
-};
-
-// Re-export core types
-pub use nettoolskit_core::ExitStatus;
-
-// Re-export internal feature crates
+// Re-export command implementations for convenient access
+pub use nettoolskit_help;
 pub use nettoolskit_manifest;
-pub use nettoolskit_templating;
 pub use nettoolskit_translate;

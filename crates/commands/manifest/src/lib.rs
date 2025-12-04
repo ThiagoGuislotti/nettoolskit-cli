@@ -44,6 +44,8 @@
 // Organized module structure
 pub mod core;
 pub mod execution;
+pub mod handlers;
+pub mod models;
 pub mod parsing;
 pub mod tasks;
 pub mod ui;
@@ -53,18 +55,25 @@ pub mod parser {
     pub use crate::parsing::*;
 }
 
-pub mod models {
-    pub use crate::core::models::*;
-}
-
 pub mod files {
     pub use crate::execution::files::*;
 }
 
+pub mod definitions {
+    pub use crate::models::manifest_action::*;
+}
+
 // Re-export core types
-pub use core::definitions::{menu_entries, ManifestAction};
+pub use models::ManifestAction;
 pub use core::{ManifestError, ManifestResult};
-pub use core::models::*;
+
+// Re-export domain models from core
+pub use core::models::{
+    ArtifactKind, ExecutionSummary, FileChange, FileChangeKind, ManifestAggregate,
+    ManifestContext, ManifestConventions, ManifestDomainEvent, ManifestEntity, ManifestEnum,
+    ManifestEnumValue, ManifestField, ManifestKind, ManifestPolicy, ManifestProjectKind,
+    ManifestRepository, ManifestUseCase, ManifestValueObject, RenderTask, TemplateMapping,
+};
 
 // Re-export execution types
 pub use execution::{
@@ -75,8 +84,11 @@ pub use execution::{
 // Re-export parsing types
 pub use parsing::ManifestParser;
 
+// Re-export handlers
+pub use handlers::{execute_apply, check_file, display_validation_result, ValidationError, ValidationResult};
+
 // Re-export ui types
-pub use ui::{show_menu, ManifestMenuItem};
+pub use ui::show_menu;
 
 // Re-export TemplateResolver from templating (no duplication)
 pub use nettoolskit_templating::TemplateResolver;

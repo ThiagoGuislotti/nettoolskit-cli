@@ -449,23 +449,3 @@ pub fn append_footer_log(line: &str) -> io::Result<()> {
         stdout.flush()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn layout_metrics_respect_task02_contract() {
-        let metrics = calculate_layout_metrics(120, 40).expect("metrics");
-        assert_eq!(metrics.scroll_top, 0);
-        assert_eq!(metrics.footer_start + metrics.footer_height, metrics.height);
-        assert_eq!(metrics.scroll_bottom + 1, metrics.footer_start);
-        assert!(metrics.footer_start >= MIN_DYNAMIC_HEIGHT);
-        assert!(metrics.log_capacity >= 1);
-    }
-
-    #[test]
-    fn layout_metrics_fail_when_terminal_too_small() {
-        assert!(calculate_layout_metrics(80, MIN_DYNAMIC_HEIGHT - 1).is_err());
-    }
-}

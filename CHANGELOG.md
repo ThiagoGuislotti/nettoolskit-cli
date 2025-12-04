@@ -5,6 +5,49 @@ All notable changes to the NetToolsKit CLI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2025-01-04
+
+### Changed - Major Architecture Refactoring ✅
+
+#### Created Orchestrator Layer
+- **New Crate**: `crates/orchestrator/` for command orchestration
+  - Centralized command dispatch and routing
+  - Async execution with progress tracking
+  - Command models (MainAction, ExitStatus)
+  - Clean separation from UI and command implementations
+
+#### CLI Layer Cleanup
+- **CLI Now UI-Only**: `crates/cli/` simplified to terminal interface
+  - Removed: execution/, models/, handlers/ (moved to orchestrator)
+  - Kept: display.rs, events.rs, input.rs (UI concerns only)
+  - Dependencies reduced: removed strum, walkdir, inquire, regex, futures, handlebars
+  - Clear responsibility: user interaction and display
+
+#### Command Structure Reorganization
+- **Removed**: `crates/commands/management/` (deprecated, replaced by orchestrator)
+- **Help Command**: Moved from `cli/src/handlers/help.rs` to `crates/commands/help/`
+  - Created dedicated `nettoolskit-help` crate
+  - Structure matches other commands (manifest, translate)
+- **Commands Crate**: Now pure aggregator of command implementations
+  - Simplified to re-export help, manifest, translate
+  - No orchestration logic
+
+#### Architecture Benefits
+- **Clear Separation of Concerns**:
+  - CLI: User interface (input, display, events)
+  - Orchestrator: Command routing and execution
+  - Commands: Business logic implementations
+- **Reduced Coupling**: Each layer has minimal dependencies
+- **Easier Testing**: Isolated test suites per layer
+- **Better Scalability**: Easy to add new commands without touching CLI
+
+#### Testing
+- **8 tests passing** across new structure:
+  - Orchestrator: 4 tests (execution, progress tracking)
+  - Help: 2 tests (discovery handlers)
+  - Manifest: 2 tests (apply handlers)
+- Clean workspace build with proper dependency graph
+
 ## [0.3.0] - 2025-11-10
 
 ### Added - Phase 3: Templating Engine Refactoring ✅

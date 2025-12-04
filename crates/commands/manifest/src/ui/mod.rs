@@ -5,4 +5,4 @@
 
 pub mod menu;
 
-pub use menu::{ManifestMenuItem, show_menu};
+pub use menu::show_menu;
