@@ -5,8 +5,10 @@
 
 mod core;
 mod execution;
+mod handlers;
 mod parsing;
 mod tasks;
+mod ui;
 
 // Integration tests in subdirectory
 #[path = "integration/integration_tests.rs"]

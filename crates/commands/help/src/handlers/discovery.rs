@@ -126,21 +126,4 @@ async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     .await?
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[tokio::test]
-    async fn test_discover_manifests_empty_directory() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let manifests = discover_manifests(Some(temp_dir.path().to_path_buf())).await;
-        assert_eq!(manifests.len(), 0);
-    }
-
-    #[test]
-    fn test_display_manifests_empty() {
-        let manifests: Vec<ManifestInfo> = vec![];
-        // Should not panic
-        display_manifests(&manifests);
-    }
-}

@@ -8,6 +8,7 @@ mod async_utils;
 mod error_tests;
 mod features;
 mod file_search;
+mod menu;
 #[path = "path-utils/mod.rs"]
 mod path_utils;
 mod string_utils;
