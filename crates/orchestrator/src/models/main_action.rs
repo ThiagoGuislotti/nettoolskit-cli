@@ -2,7 +2,7 @@
 //!
 //! This module contains the canonical MainAction enum used throughout the CLI main menu.
 
-use nettoolskit_core::{MenuEntry, MenuProvider};
+use nettoolskit_core::{CommandEntry, MenuEntry, MenuProvider};
 use strum::{Display, EnumIter, EnumString, IntoEnumIterator, IntoStaticStr};
 
 // Re-export ExitStatus from core
@@ -28,6 +28,9 @@ pub enum MainAction {
     Quit,
 }
 
+// Implement CommandEntry to get default name() and slash_static()
+impl CommandEntry for MainAction {}
+
 impl MainAction {
     /// Get the user-facing description for this action
     pub fn description(&self) -> &'static str {
@@ -38,26 +41,16 @@ impl MainAction {
             MainAction::Quit => "Exit NetToolsKit CLI",
         }
     }
+}
 
-    /// Get the slash command string
-    pub fn slash(&self) -> String {
-        format!("/{}", <&str>::from(self))
-    }
-
-    /// Get the slash command as static string
-    pub fn slash_static(&self) -> &'static str {
+impl MenuEntry for MainAction {
+    fn label(&self) -> &str {
         match self {
             MainAction::Help => "/help",
             MainAction::Manifest => "/manifest",
             MainAction::Translate => "/translate",
             MainAction::Quit => "/quit",
         }
-    }
-}
-
-impl MenuEntry for MainAction {
-    fn label(&self) -> &str {
-        self.slash_static()
     }
 
     fn description(&self) -> &str {
@@ -68,8 +61,10 @@ impl MenuEntry for MainAction {
 /// Implement MenuProvider to enable generic menu rendering
 impl MenuProvider for MainAction {
     fn menu_items() -> Vec<String> {
+        use nettoolskit_ui::core::formatting::format_menu_item;
+
         Self::iter()
-            .map(|item| format!("{} - {}", item.label(), item.description()))
+            .map(|item| format_menu_item(item.label(), item.description(), 20))
             .collect()
     }
 

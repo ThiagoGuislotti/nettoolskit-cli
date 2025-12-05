@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 # Core and utilities
 nettoolskit-core = { path = "../core" }
+nettoolskit-ui = { path = "../ui" }
 nettoolskit-otel = { path = "../otel" }
 
 # Command implementations

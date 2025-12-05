@@ -1,8 +1,11 @@
 /// Factory pattern for language strategy instantiation
-use super::strategy::{
-    ClojureStrategy, DotNetStrategy, GoStrategy, JavaStrategy, LanguageStrategy, PythonStrategy,
-    RustStrategy,
-};
+use super::clojure::ClojureStrategy;
+use super::dotnet::DotNetStrategy;
+use super::go::GoStrategy;
+use super::java::JavaStrategy;
+use super::language_strategy::LanguageStrategy;
+use super::python::PythonStrategy;
+use super::rust::RustStrategy;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;

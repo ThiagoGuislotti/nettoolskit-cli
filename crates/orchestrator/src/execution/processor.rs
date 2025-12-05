@@ -1,6 +1,7 @@
 //! Command processor implementation
 
 use crate::models::{MainAction, ExitStatus};
+use nettoolskit_core::CommandEntry;
 use nettoolskit_otel::{Metrics, Timer};
 use owo_colors::OwoColorize;
 use strum::IntoEnumIterator;
@@ -48,42 +49,44 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
 
     let result = match parsed {
         Some(MainAction::Help) => {
-            println!("{}", "� NetToolsKit CLI - Help".cyan().bold());
-            println!("\n{}", "Available Commands:".white().bold());
+            use nettoolskit_ui::Color;
+            println!("{}", "� NetToolsKit CLI - Help".color(Color::CYAN).bold());
+            println!("\n{}", "Available Commands:".color(Color::WHITE).bold());
             println!();
 
             for command in MainAction::iter() {
-                println!("  {} - {}", command.slash().green(), command.description());
+                println!("  {} - {}", command.slash_static().color(Color::GREEN), command.description());
             }
 
-            println!("\n{}", "Usage:".white().bold());
-            println!("  • Type {} to open the command palette", "/".green());
-            println!("  • Type a command directly (e.g., {})", "/help".green());
-            println!("  • Use {} to navigate in the palette", "↑↓".cyan());
-            println!("  • Press {} to select a command", "Enter".cyan());
+            println!("\n{}", "Usage:".color(Color::WHITE).bold());
+            println!("  • Type {} to open the command palette", "/".color(Color::GREEN));
+            println!("  • Type a command directly (e.g., {})", "/help".color(Color::GREEN));
+            println!("  • Use {} to navigate in the palette", "↑↓".color(Color::CYAN));
+            println!("  • Press {} to select a command", "Enter".color(Color::CYAN));
 
-            println!("\n{}", "Examples:".white().bold());
-            println!("  {} - Show this help", "/help".green());
-            println!("  {} - Manage manifests", "/manifest".green());
-            println!("  {} - Exit the CLI", "/quit".green());
+            println!("\n{}", "Examples:".color(Color::WHITE).bold());
+            println!("  {} - Show this help", "/help".color(Color::GREEN));
+            println!("  {} - Manage manifests", "/manifest".color(Color::GREEN));
+            println!("  {} - Exit the CLI", "/quit".color(Color::GREEN));
 
             ExitStatus::Success
         }
         Some(MainAction::Manifest) => {
+            use nettoolskit_ui::Color;
             match subcommand {
                 Some("list") => {
-                    println!("{}", "📋 Discovering Manifests...".cyan().bold());
-                    println!("\n{}", "ℹ️  Manifest discovery will list all available manifest files".yellow());
+                    println!("{}", "📋 Discovering Manifests...".color(Color::CYAN).bold());
+                    println!("\n{}", "ℹ️  Manifest discovery will list all available manifest files".color(Color::YELLOW));
                     ExitStatus::Success
                 }
                 Some("check") => {
-                    println!("{}", "✅ Validating Manifest...".cyan().bold());
-                    println!("\n{}", "ℹ️  Manifest validation will check structure and dependencies".yellow());
+                    println!("{}", "✅ Validating Manifest...".color(Color::CYAN).bold());
+                    println!("\n{}", "ℹ️  Manifest validation will check structure and dependencies".color(Color::YELLOW));
                     ExitStatus::Success
                 }
                 Some("render") => {
-                    println!("{}", "🎨 Rendering Preview...".cyan().bold());
-                    println!("\n{}", "ℹ️  Manifest rendering will preview generated files".yellow());
+                    println!("{}", "🎨 Rendering Preview...".color(Color::CYAN).bold());
+                    println!("\n{}", "ℹ️  Manifest rendering will preview generated files".color(Color::YELLOW));
                     ExitStatus::Success
                 }
                 Some("apply") => {
@@ -108,13 +111,13 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
                             ).await
                         }
                         None => {
-                            println!("{}", "⚠️  Missing manifest path".red().bold());
-                            println!("\n{}", "Usage:".white().bold());
-                            println!("  {} <PATH> [--dry-run] [--output DIR]", "/manifest apply".green());
-                            println!("\n{}", "Examples:".white().bold());
-                            println!("  {} manifest.yaml", "/manifest apply".green());
-                            println!("  {} feature.manifest.yaml --dry-run", "/manifest apply".green());
-                            println!("  {} domain.manifest.yaml --output ./src", "/manifest apply".green());
+                            println!("{}", "⚠️  Missing manifest path".color(Color::RED).bold());
+                            println!("\n{}", "Usage:".color(Color::WHITE).bold());
+                            println!("  {} <PATH> [--dry-run] [--output DIR]", "/manifest apply".color(Color::GREEN));
+                            println!("\n{}", "Examples:".color(Color::WHITE).bold());
+                            println!("  {} manifest.yaml", "/manifest apply".color(Color::GREEN));
+                            println!("  {} feature.manifest.yaml --dry-run", "/manifest apply".color(Color::GREEN));
+                            println!("  {} domain.manifest.yaml --output ./src", "/manifest apply".color(Color::GREEN));
                             ExitStatus::Error
                         }
                     }
@@ -125,27 +128,29 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
                     nettoolskit_manifest::show_menu().await
                 }
                 _ => {
-                    println!("{}", "📋 Manifest Commands".cyan().bold());
+                    println!("{}", "📋 Manifest Commands".color(Color::CYAN).bold());
                     println!("\nAvailable subcommands:");
-                    println!("  {} - Discover available manifests in the workspace", "/manifest list".green());
-                    println!("  {} - Validate manifest structure and dependencies", "/manifest check".green());
-                    println!("  {} - Preview generated files without creating them", "/manifest render".green());
-                    println!("  {} - Apply manifest to generate/update project files", "/manifest apply".green());
-                    println!("\n{}", "💡 Type a subcommand to continue or just type /manifest for interactive menu".yellow());
+                    println!("  {} - Discover available manifests in the workspace", "/manifest list".color(Color::GREEN));
+                    println!("  {} - Validate manifest structure and dependencies", "/manifest check".color(Color::GREEN));
+                    println!("  {} - Preview generated files without creating them", "/manifest render".color(Color::GREEN));
+                    println!("  {} - Apply manifest to generate/update project files", "/manifest apply".color(Color::GREEN));
+                    println!("\n{}", "💡 Type a subcommand to continue or just type /manifest for interactive menu".color(Color::YELLOW));
                     ExitStatus::Success
                 }
             }
         }
         Some(MainAction::Translate) => {
-            println!("{}", "🔄 Translate Command".cyan().bold());
-            println!("\n{}", "ℹ️  Translation feature is deferred to a future release".yellow());
+            use nettoolskit_ui::Color;
+            println!("{}", "🔄 Translate Command".color(Color::CYAN).bold());
+            println!("\n{}", "ℹ️  Translation feature is deferred to a future release".color(Color::YELLOW));
             ExitStatus::Success
         }
         Some(MainAction::Quit) => ExitStatus::Success, // Handled by CLI loop
         None => {
+            use nettoolskit_ui::Color;
             tracing::warn!("Unknown command attempted: {}", cmd);
             metrics.increment_counter("unknown_command_attempts");
-            println!("{}: {}", "Unknown command".red(), cmd);
+            println!("{}: {}", "Unknown command".color(Color::RED), cmd);
             ExitStatus::Error
         }
     };
