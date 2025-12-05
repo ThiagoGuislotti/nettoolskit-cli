@@ -11,6 +11,9 @@ path = "src/lib.rs"
 # Core types
 nettoolskit-core = { path = "../../core" }
 
+# UI components
+nettoolskit-ui = { path = "../../ui" }
+
 # Manifest for discovery
 nettoolskit-manifest = { path = "../manifest" }
 

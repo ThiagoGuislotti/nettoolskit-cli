@@ -2,6 +2,7 @@
 //!
 //! Tests for MainAction enum and its slash command functionality.
 
+use nettoolskit_core::CommandEntry;
 use nettoolskit_orchestrator::MainAction;
 
 // MainAction Variant Tests

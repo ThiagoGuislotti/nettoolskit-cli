@@ -3,7 +3,7 @@
 //! Provides a configurable menu component using the inquire library
 //! with consistent styling and behavior across the application.
 
-use inquire::ui::{RenderConfig, Color, Styled};
+use inquire::ui::{RenderConfig, Color as InquireColor, Styled};
 use inquire::Select;
 use owo_colors::{OwoColorize, Rgb};
 use std::fmt::Display;
@@ -67,32 +67,33 @@ where
     T: Display + Clone,
 {
     // Print custom help message if provided
+    use crate::Color;
     if let Some(help_msg) = &config.help_message {
         println!();
-        println!("{}", help_msg.yellow());
+        println!("{}", help_msg.color(Color::YELLOW));
         println!();
     }
 
     // Configure render config with cursor color
     let mut render_config = RenderConfig::default();
-    render_config.prompt_prefix = Styled::new("?").with_fg(Color::Rgb {
+    render_config.prompt_prefix = Styled::new("?").with_fg(InquireColor::Rgb {
         r: config.cursor_color.0,
         g: config.cursor_color.1,
         b: config.cursor_color.2
     });
-    render_config.highlighted_option_prefix = Styled::new("❯").with_fg(Color::Rgb {
+    render_config.highlighted_option_prefix = Styled::new("❯").with_fg(InquireColor::Rgb {
         r: config.cursor_color.0,
         g: config.cursor_color.1,
         b: config.cursor_color.2
     });
     render_config.selected_option = Some(
-        render_config.selected_option.unwrap_or_default().with_fg(Color::Rgb {
+        render_config.selected_option.unwrap_or_default().with_fg(InquireColor::Rgb {
             r: config.cursor_color.0,
             g: config.cursor_color.1,
             b: config.cursor_color.2
         })
     );
-    render_config.help_message = render_config.help_message.with_fg(Color::DarkYellow);
+    render_config.help_message = render_config.help_message.with_fg(InquireColor::DarkYellow);
 
     // Build and execute the select prompt
     // Always disable inquire's built-in help message
