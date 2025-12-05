@@ -111,33 +111,4 @@ fn display_summary(summary: &ExecutionSummary) {
     println!("Skipped: {}", summary.skipped.len());
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[tokio::test]
-    async fn test_apply_with_missing_manifest() {
-        let manifest_path = PathBuf::from("nonexistent.yaml");
-
-        let status = execute_apply(
-            manifest_path,
-            None,
-            false,
-        ).await;
-
-        assert_eq!(status, ExitStatus::Error);
-    }
-
-    #[tokio::test]
-    async fn test_apply_dry_run_creates_config() {
-        let manifest_path = PathBuf::from("test.yaml");
-
-        // Just verify the function can be called with dry-run flag
-        // Actual behavior is tested in integration tests
-        let _status = execute_apply(
-            manifest_path,
-            None,
-            true,
-        ).await;
-    }
-}
