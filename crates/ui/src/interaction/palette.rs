@@ -204,7 +204,7 @@ impl CommandPalette {
             .collect();
 
         if display_items.is_empty() {
-            println!("{}", "No menu options available".red());
+            println!("{}", "No menu options available".color(Color::RED));
             return None;
         }
 

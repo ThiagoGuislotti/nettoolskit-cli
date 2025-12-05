@@ -1,3 +1,4 @@
 //! Parsing module tests
 
-mod parser_tests;
+pub mod parser;
+pub mod test_helpers;

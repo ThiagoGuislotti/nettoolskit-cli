@@ -40,10 +40,12 @@ pub async fn show_menu() -> ExitStatus {
                     ManifestAction::Apply => {
                         execute_apply_interactive().await;
                     }
+                    ManifestAction::Back => {
+                        return ExitStatus::Success;
+                    }
                 }
             }
             Err(_) => {
-                println!("{}", "← Returning to main menu...".yellow());
                 return ExitStatus::Success;
             }
         }
@@ -63,13 +65,13 @@ async fn execute_check() -> ExitStatus {
     match manifest_path {
         Ok(path) if !path.is_empty() => {
             println!();
-            println!("Validating: {}", path.green());
+            println!("Validating: {}", path.color(Color::GREEN));
             // TODO: Implement actual validation
-            println!("{}", "ℹ️  Manifest validation will check structure and dependencies".yellow());
+            println!("{}", "ℹ️  Manifest validation will check structure and dependencies".color(Color::YELLOW));
             println!();
         }
         _ => {
-            println!("{}", "Validation cancelled".yellow());
+            println!("{}", "Validation cancelled".color(Color::YELLOW));
         }
     }
 
@@ -81,7 +83,7 @@ async fn execute_render() -> ExitStatus {
     render_section_title("Rendering Preview...", Some("🎨"));
 
     // TODO: Implement actual rendering
-    println!("{}", "ℹ️  Manifest rendering will preview generated files".yellow());
+    println!("{}", "ℹ️  Manifest rendering will preview generated files".color(Color::YELLOW));
     println!("{}", "   Features: syntax highlighting, variable substitution".dimmed());
     println!();
 
@@ -101,7 +103,7 @@ async fn execute_apply_interactive() -> ExitStatus {
     let _path = match manifest_path {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
         _ => {
-            println!("{}", "Apply cancelled".yellow());
+            println!("{}", "Apply cancelled".color(Color::YELLOW));
             return ExitStatus::Success;
         }
     };
@@ -117,7 +119,7 @@ async fn execute_apply_interactive() -> ExitStatus {
     let _dry_run = match dry_run_selection {
         Ok(option) => option.starts_with("Yes"),
         Err(_) => {
-            println!("{}", "Apply cancelled".yellow());
+            println!("{}", "Apply cancelled".color(Color::YELLOW));
             return ExitStatus::Success;
         }
     };
@@ -134,10 +136,10 @@ async fn execute_apply_interactive() -> ExitStatus {
     };
 
     println!();
-    println!("{}", "Executing manifest apply...".cyan());
+    println!("{}", "Executing manifest apply...".color(Color::CYAN));
 
     // TODO: Call the actual apply handler when available
     // For now, just return success
-    println!("{}", "ℹ️  Apply handler integration pending".yellow());
+    println!("{}", "ℹ️  Apply handler integration pending".color(Color::YELLOW));
     ExitStatus::Success
 }

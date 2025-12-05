@@ -68,6 +68,7 @@ pub fn render_menu_instructions() {
 /// //
 /// ```
 pub fn render_section_title(title: &str, icon: Option<&str>) {
+    use crate::Color;
     println!();
 
     let display_text = if let Some(icon_str) = icon {
@@ -76,7 +77,7 @@ pub fn render_section_title(title: &str, icon: Option<&str>) {
         title.to_string()
     };
 
-    println!("{}", display_text.cyan().bold());
+    println!("{}", display_text.color(Color::CYAN).bold());
 
     // Calculate underline length based on visible characters (excluding ANSI codes)
     let underline_len = if icon.is_some() {
@@ -85,7 +86,7 @@ pub fn render_section_title(title: &str, icon: Option<&str>) {
         title.len()
     };
 
-    println!("{}", "─".repeat(underline_len).cyan());
+    println!("{}", "─".repeat(underline_len).color(Color::CYAN));
     println!();
 }
 

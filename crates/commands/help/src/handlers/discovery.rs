@@ -57,31 +57,32 @@ pub async fn discover_manifests(root: Option<PathBuf>) -> Vec<ManifestInfo> {
 /// # Arguments
 /// * `manifests` - Slice of manifest information to display
 pub fn display_manifests(manifests: &[ManifestInfo]) {
+    use nettoolskit_ui::Color;
     if manifests.is_empty() {
-        println!("{}", "No manifest files found in workspace.".yellow());
+        println!("{}", "No manifest files found in workspace.".color(Color::YELLOW));
         return;
     }
 
-    println!("\n{}", "📋 Discovered Manifests:".cyan().bold());
-    println!("{}", "─".repeat(80).dimmed());
+    println!("\n{}", "📋 Discovered Manifests:".color(Color::CYAN).bold());
+    println!();
 
     for (i, manifest) in manifests.iter().enumerate() {
         println!(
             "{}. {} ({})",
-            (i + 1).to_string().green(),
-            manifest.project_name.cyan().bold(),
-            manifest.language.yellow()
+            (i + 1).to_string().color(Color::GREEN),
+            manifest.project_name.color(Color::CYAN).bold(),
+            manifest.language.color(Color::YELLOW)
         );
-        println!("   📁 Path: {}", manifest.path.display().to_string().dimmed());
-        println!("   🔢 Contexts: {}", manifest.context_count.to_string().green());
+        println!("   📁 Path: {}", manifest.path.display());
+        println!("   🔢 Contexts: {}", manifest.context_count.to_string().color(Color::GREEN));
 
         if i < manifests.len() - 1 {
             println!();
         }
     }
 
-    println!("{}", "─".repeat(80).dimmed());
-    println!("\n{} {}", "Total:".bold(), manifests.len().to_string().green().bold());
+    println!();
+    println!("{} {}", "Total:".bold(), manifests.len().to_string().color(Color::GREEN).bold());
 }
 
 /// Find manifest files in directory tree

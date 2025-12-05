@@ -18,6 +18,7 @@
 //! - Event layer: Terminal events (Ctrl+C, Enter, etc.)
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use nettoolskit_core::CommandEntry;
 use owo_colors::OwoColorize;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -147,7 +148,8 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
                 session_counters = ?metrics.counters_snapshot(),
                 "CLI session ended with error"
             );
-            eprintln!("{}: {}", "Error".red().bold(), e);
+            use nettoolskit_ui::Color;
+            eprintln!("{}: {}", "Error".color(Color::RED).bold(), e);
             ExitStatus::Error
         }
     };
@@ -193,7 +195,7 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
                         return Ok(ExitStatus::Success);
                     }
 
-                    let status: ExitStatus = process_command(selected_cmd.slash_static()).await;
+                    let status: ExitStatus = process_command(&selected_cmd.slash_static()).await;
                     if matches!(status, ExitStatus::Interrupted) {
                         return Ok(status);
                     }
