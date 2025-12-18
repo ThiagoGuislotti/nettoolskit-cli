@@ -1,4 +1,4 @@
-///! DDD bounded context
+//! DDD bounded context
 
 use serde::Deserialize;
 use super::manifest_aggregate::ManifestAggregate;

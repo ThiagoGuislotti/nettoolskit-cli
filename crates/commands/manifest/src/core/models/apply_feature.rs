@@ -1,4 +1,4 @@
-///! Apply feature configuration
+//! Apply feature configuration
 
 use serde::Deserialize;
 

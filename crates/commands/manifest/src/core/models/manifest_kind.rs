@@ -1,4 +1,4 @@
-///! Manifest document kind enumeration
+//! Manifest document kind enumeration
 
 use serde::Deserialize;
 

@@ -1,4 +1,4 @@
-///! Guards for validation and safety checks
+//! Guards for validation and safety checks
 
 use serde::Deserialize;
 use super::missing_project_action::MissingProjectAction;

@@ -1,6 +1,6 @@
-//! MenuProvider trait tests
+//! `MenuProvider` trait tests
 //!
-//! Tests for menu providers with all() method.
+//! Tests for menu providers with `all()` method.
 
 use nettoolskit_core::{MenuEntry, MenuProvider};
 use strum::IntoEnumIterator;

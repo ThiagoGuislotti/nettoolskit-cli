@@ -62,7 +62,7 @@ pub fn init_tracing_with_config(config: TracingConfig) -> Result<()> {
             .with_file(config.with_file)
             .with_line_number(config.with_line_numbers)
             .with_span_events(fmt::format::FmtSpan::ENTER | fmt::format::FmtSpan::CLOSE)
-            .with_writer(|| nettoolskit_ui::UiWriter::new())
+            .with_writer(nettoolskit_ui::UiWriter::new)
             .compact();
 
         registry.with(compact_layer).try_init()?;

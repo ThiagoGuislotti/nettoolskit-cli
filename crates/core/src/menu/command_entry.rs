@@ -12,7 +12,7 @@ use super::MenuEntry;
 pub trait CommandEntry: MenuEntry + Into<&'static str> + Copy {
     /// Get the command name (e.g., "help", "manifest")
     ///
-    /// Default implementation uses strum's IntoStaticStr conversion.
+    /// Default implementation uses strum's `IntoStaticStr` conversion.
     fn name(&self) -> &'static str {
         (*self).into()
     }

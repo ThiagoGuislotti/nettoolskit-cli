@@ -2,6 +2,13 @@
 name = "nettoolskit-orchestrator"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Command orchestration layer for NetToolsKit CLI"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["cli", "orchestration", "dotnet"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "nettoolskit_orchestrator"

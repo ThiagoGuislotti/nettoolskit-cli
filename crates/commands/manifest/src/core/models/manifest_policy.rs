@@ -1,4 +1,4 @@
-///! Code generation policies
+//! Code generation policies
 
 use serde::Deserialize;
 use super::manifest_collision_policy::ManifestCollisionPolicy;

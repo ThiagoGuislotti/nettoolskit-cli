@@ -31,6 +31,10 @@ impl Default for SearchConfig {
 }
 
 /// Search for files matching the given configuration
+///
+/// # Errors
+/// Returns an error if any glob pattern in `config` is invalid, if building the glob sets fails,
+/// or if directory traversal fails.
 pub fn search_files<P: AsRef<Path>>(root: P, config: &SearchConfig) -> Result<Vec<PathBuf>> {
     let root = root.as_ref();
 
@@ -84,6 +88,10 @@ pub fn search_files<P: AsRef<Path>>(root: P, config: &SearchConfig) -> Result<Ve
 }
 
 /// Search for files asynchronously with parallel processing
+///
+/// # Errors
+/// Returns an error if spawning the blocking task fails, or if the underlying
+/// [`search_files`] call fails.
 pub async fn search_files_async<P: AsRef<Path>>(
     root: P,
     config: &SearchConfig,
@@ -97,6 +105,9 @@ pub async fn search_files_async<P: AsRef<Path>>(
 }
 
 /// Search for files in multiple directories concurrently
+///
+/// # Errors
+/// Returns the first error produced by any of the underlying searches.
 pub async fn search_files_concurrent<P: AsRef<Path>>(
     roots: Vec<P>,
     config: &SearchConfig,
@@ -122,6 +133,9 @@ pub async fn search_files_concurrent<P: AsRef<Path>>(
 }
 
 /// Find template files in a directory
+///
+/// # Errors
+/// Returns an error if glob compilation fails or if directory traversal fails.
 pub fn find_templates<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
     let config = SearchConfig {
         include_patterns: vec!["*.hbs".to_string(), "*.template".to_string()],
@@ -135,6 +149,10 @@ pub fn find_templates<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
 }
 
 /// Find template files asynchronously
+///
+/// # Errors
+/// Returns an error if spawning the blocking task fails, or if the underlying
+/// search fails.
 pub async fn find_templates_async<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
     let config = SearchConfig {
         include_patterns: vec!["*.hbs".to_string(), "*.template".to_string()],
@@ -148,6 +166,9 @@ pub async fn find_templates_async<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf
 }
 
 /// Find manifest files in a directory
+///
+/// # Errors
+/// Returns an error if glob compilation fails or if directory traversal fails.
 pub fn find_manifests<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>> {
     let config = SearchConfig {
         include_patterns: vec![

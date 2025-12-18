@@ -1,4 +1,4 @@
-///! DDD entity
+//! DDD entity
 
 use serde::Deserialize;
 use super::manifest_field::ManifestField;

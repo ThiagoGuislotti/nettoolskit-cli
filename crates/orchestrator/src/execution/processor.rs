@@ -34,11 +34,11 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
 
     // Parse command - pass full command string to get_command
     // It will handle "/ help", "/help", or "help" formats
-    let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
 
     // If command is "/ help" (with space), parts = ["/", "help"], subcommand = parts[2]
     // If command is "/help list", parts = ["/help", "list"], subcommand = parts[1]
-    let subcommand = if parts.get(0) == Some(&"/") {
+    let subcommand = if parts.first().copied() == Some("/") {
         parts.get(2).copied()
     } else {
         parts.get(1).copied()

@@ -1,4 +1,4 @@
-///! Repository definition
+//! Repository definition
 
 use serde::Deserialize;
 use super::manifest_repository_method::ManifestRepositoryMethod;

@@ -1,4 +1,4 @@
-///! Method argument
+//! Method argument
 
 use serde::Deserialize;
 

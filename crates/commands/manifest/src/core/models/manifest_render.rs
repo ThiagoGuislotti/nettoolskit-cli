@@ -1,4 +1,4 @@
-///! Render rules configuration
+//! Render rules configuration
 
 use serde::Deserialize;
 use super::render_rule::RenderRule;

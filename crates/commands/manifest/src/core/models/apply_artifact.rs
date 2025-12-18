@@ -1,4 +1,4 @@
-///! Apply artifact configuration
+//! Apply artifact configuration
 
 use serde::Deserialize;
 

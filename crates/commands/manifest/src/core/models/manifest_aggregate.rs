@@ -1,4 +1,4 @@
-///! DDD aggregate root
+//! DDD aggregate root
 
 use serde::Deserialize;
 use super::manifest_domain_event::ManifestDomainEvent;

@@ -14,5 +14,5 @@ fn test_print_logo_executes() {
 fn test_display_module_exists() {
     // Verify display module is accessible
     // More tests can be added as display functionality grows
-    assert!(true, "Display module is accessible");
+    print_logo();
 }

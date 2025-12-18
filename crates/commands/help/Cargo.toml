@@ -2,6 +2,13 @@
 name = "nettoolskit-help"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Help and documentation commands for NetToolsKit CLI"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["cli", "help", "documentation"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "nettoolskit_help"

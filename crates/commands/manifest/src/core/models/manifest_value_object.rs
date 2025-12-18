@@ -1,4 +1,4 @@
-///! DDD value object
+//! DDD value object
 
 use serde::Deserialize;
 use super::manifest_field::ManifestField;

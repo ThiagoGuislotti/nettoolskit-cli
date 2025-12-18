@@ -1,4 +1,4 @@
-///! Project definition
+//! Project definition
 
 use serde::Deserialize;
 use std::path::PathBuf;

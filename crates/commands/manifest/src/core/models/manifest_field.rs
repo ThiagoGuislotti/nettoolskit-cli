@@ -1,4 +1,4 @@
-///! Field definition
+//! Field definition
 
 use serde::Deserialize;
 

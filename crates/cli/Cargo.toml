@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Interactive command-line interface for .NET development workflows"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["dotnet", "cli", "templates", "automation"]
+categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = []

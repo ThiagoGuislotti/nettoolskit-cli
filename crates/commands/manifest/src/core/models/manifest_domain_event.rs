@@ -1,4 +1,4 @@
-///! DDD domain event
+//! DDD domain event
 
 use serde::Deserialize;
 

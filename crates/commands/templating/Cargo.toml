@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 authors = ["NetToolsKit Contributors"]
 description = "Template rendering engine for NetToolsKit CLI"
+license = "MIT"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["cli", "templates", "rendering", "handlebars"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "nettoolskit_templating"

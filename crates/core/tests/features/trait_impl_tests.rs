@@ -1,6 +1,6 @@
 //! Tests for Features trait implementations
 //!
-//! Validates Debug, Clone, Copy, PartialEq, and Eq trait behavior.
+//! Validates Debug, Clone, Copy, `PartialEq`, and Eq trait behavior.
 
 use nettoolskit_core::Features;
 
@@ -15,7 +15,7 @@ fn test_features_debug_format() {
     };
 
     // Act
-    let debug_str = format!("{:?}", features);
+    let debug_str = format!("{features:?}");
 
     // Assert
     assert!(debug_str.contains("Features"));

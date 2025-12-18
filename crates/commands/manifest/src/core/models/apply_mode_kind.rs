@@ -1,4 +1,4 @@
-///! Apply mode enumeration
+//! Apply mode enumeration
 
 use serde::Deserialize;
 

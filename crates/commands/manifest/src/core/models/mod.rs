@@ -1,7 +1,7 @@
-///! Domain models for manifest documents (YAML structure)
-///!
-///! This module follows "1 struct = 1 file" organization for maximum maintainability.
-///! Each model type is defined in its own file within this directory.
+//! Domain models for manifest documents (YAML structure)
+//!
+//! This module follows "1 struct = 1 file" organization for maximum maintainability.
+//! Each model type is defined in its own file within this directory.
 
 pub mod apply_artifact;
 pub mod apply_feature;

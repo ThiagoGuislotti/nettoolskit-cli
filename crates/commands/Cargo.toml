@@ -2,6 +2,13 @@
 name = "nettoolskit-commands"
 version = "1.0.0"
 edition = "2021"
+authors = ["NetToolsKit Team"]
+license = "MIT"
+description = "Command collection and dispatcher for NetToolsKit CLI"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["cli", "commands", "dotnet"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "nettoolskit_commands"

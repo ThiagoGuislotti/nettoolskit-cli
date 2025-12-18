@@ -1,4 +1,4 @@
-///! Regex for placeholder detection in templates
+//! Regex for placeholder detection in templates
 
 use once_cell::sync::Lazy;
 use regex::Regex;

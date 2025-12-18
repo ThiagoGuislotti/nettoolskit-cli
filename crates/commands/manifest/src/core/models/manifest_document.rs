@@ -1,4 +1,4 @@
-///! Manifest document root
+//! Manifest document root
 
 use serde::Deserialize;
 use std::collections::BTreeMap;

@@ -147,10 +147,10 @@ fn test_ui_writer_incremental_writes() {
     let mut writer = UiWriter::new();
 
     // Act
-    writer.write(b"Hel").unwrap();
-    writer.write(b"lo ").unwrap();
-    writer.write(b"Wor").unwrap();
-    writer.write(b"ld\n").unwrap();
+    writer.write_all(b"Hel").unwrap();
+    writer.write_all(b"lo ").unwrap();
+    writer.write_all(b"Wor").unwrap();
+    writer.write_all(b"ld\n").unwrap();
     let flush_result = writer.flush();
 
     // Assert

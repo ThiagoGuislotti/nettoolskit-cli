@@ -1,4 +1,4 @@
-///! Enum definition
+//! Enum definition
 
 use serde::Deserialize;
 use super::manifest_enum_value::ManifestEnumValue;

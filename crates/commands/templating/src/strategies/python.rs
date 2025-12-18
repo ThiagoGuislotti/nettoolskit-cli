@@ -1,4 +1,4 @@
-///! Python language strategy implementation
+//! Python language strategy implementation
 
 use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};

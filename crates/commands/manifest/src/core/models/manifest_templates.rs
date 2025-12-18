@@ -1,4 +1,4 @@
-///! Template mappings configuration
+//! Template mappings configuration
 
 use serde::Deserialize;
 use std::collections::BTreeMap;

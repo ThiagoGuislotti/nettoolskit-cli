@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Core utilities and shared types for NetToolsKit CLI"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["cli", "utilities", "filesystem", "async"]
+categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = []

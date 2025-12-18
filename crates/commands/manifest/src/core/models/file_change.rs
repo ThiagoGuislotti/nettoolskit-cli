@@ -1,4 +1,4 @@
-///! File change operation
+//! File change operation
 
 use std::path::PathBuf;
 use super::file_change_kind::FileChangeKind;

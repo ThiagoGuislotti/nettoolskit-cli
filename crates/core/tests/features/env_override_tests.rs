@@ -1,6 +1,6 @@
 //! Tests for environment variable override behavior
 //!
-//! Validates that NTK_USE_* environment variables correctly override
+//! Validates that `NTK_USE_*` environment variables correctly override
 //! compile-time feature flags at runtime.
 
 use nettoolskit_core::Features;

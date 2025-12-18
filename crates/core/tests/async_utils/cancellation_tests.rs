@@ -1,14 +1,14 @@
 //! Tests for cancellation token functionality
 //!
 //! Validates token creation, cancellation propagation, concurrent cancellation,
-//! error handling (CancellationError), and integration with async operations.
+//! error handling (`CancellationError`), and integration with async operations.
 //!
 //! ## Test Coverage
 //! - Token creation (new, default, clone)
 //! - Successful operation completion (no cancellation)
 //! - Cancellation propagation (cancelled operations)
 //! - Concurrent cancellation scenarios
-//! - Error type validation (CancellationError)
+//! - Error type validation (`CancellationError`)
 
 use nettoolskit_core::async_utils::{CancellationError, CancellationToken};
 use std::time::Duration;
@@ -23,8 +23,8 @@ async fn test_cancellation_token_creation() {
     let token_default = CancellationToken::default();
 
     // Assert
-    assert!(!format!("{:?}", token).is_empty());
-    assert!(!format!("{:?}", token_default).is_empty());
+    assert!(!format!("{token:?}").is_empty());
+    assert!(!format!("{token_default:?}").is_empty());
 }
 
 #[tokio::test]
@@ -150,7 +150,7 @@ fn test_cancellation_error_display() {
     let error = CancellationError;
 
     // Act
-    let display = format!("{}", error);
+    let display = format!("{error}");
 
     // Assert
     assert_eq!(display, "operation was cancelled");
@@ -162,7 +162,7 @@ fn test_cancellation_error_debug() {
     let error = CancellationError;
 
     // Act
-    let debug = format!("{:?}", error);
+    let debug = format!("{error:?}");
 
     // Assert
     assert_eq!(debug, "CancellationError");

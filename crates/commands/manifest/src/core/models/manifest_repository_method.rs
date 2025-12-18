@@ -1,4 +1,4 @@
-///! Repository method
+//! Repository method
 
 use serde::Deserialize;
 use super::manifest_method_argument::ManifestMethodArgument;

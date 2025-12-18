@@ -4,7 +4,6 @@
 
 use nettoolskit_manifest::execution::rendering::*;
 use serde_json::json;
-use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::fs;
 

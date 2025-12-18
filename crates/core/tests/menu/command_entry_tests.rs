@@ -1,4 +1,4 @@
-//! CommandEntry trait tests
+//! `CommandEntry` trait tests
 //!
 //! Tests for command-like menu entries with slash notation.
 

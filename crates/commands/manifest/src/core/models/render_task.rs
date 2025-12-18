@@ -1,4 +1,4 @@
-///! Template rendering task
+//! Template rendering task
 
 use serde_json::Value;
 use std::path::PathBuf;

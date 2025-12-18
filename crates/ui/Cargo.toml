@@ -2,6 +2,13 @@
 name = "nettoolskit-ui"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Terminal UI components for NetToolsKit CLI"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["tui", "terminal", "cli", "ui"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 crossterm = { version = "0.28", features = ["event-stream"] }

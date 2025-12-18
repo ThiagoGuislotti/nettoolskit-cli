@@ -4,5 +4,4 @@
 #[test]
 fn test_terminal_module_compiles() {
     // Basic smoke test to ensure module compiles
-    assert!(true);
 }
