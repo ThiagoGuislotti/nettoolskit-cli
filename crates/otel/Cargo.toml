@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "OpenTelemetry integration for NetToolsKit CLI"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["opentelemetry", "telemetry", "tracing", "cli"]
+categories = ["development-tools"]
 
 [dependencies]
 tracing = { workspace = true }

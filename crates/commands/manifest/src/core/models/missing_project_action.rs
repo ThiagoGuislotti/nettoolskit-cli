@@ -1,4 +1,4 @@
-///! Action to take when project is missing
+//! Action to take when project is missing
 
 use serde::Deserialize;
 

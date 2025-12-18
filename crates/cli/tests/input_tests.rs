@@ -237,19 +237,13 @@ fn test_show_menu_variant() {
     // ShowMenu is a unit variant (no data)
     assert!(matches!(show_menu, InputResult::ShowMenu));
 
-    // Test pattern matching
-    match show_menu {
-        InputResult::ShowMenu => {
-            assert!(true); // Successfully matched
-        }
-        _ => panic!("Expected ShowMenu variant"),
-    }
+    // Pattern already validated above; keep test focused and warning-free.
 }
 
 #[test]
 fn test_show_menu_in_collection() {
     // Arrange
-    let results = vec![
+    let results = [
         InputResult::ShowMenu,
         InputResult::Command("/help".to_string()),
         InputResult::ShowMenu,

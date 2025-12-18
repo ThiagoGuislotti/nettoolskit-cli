@@ -18,48 +18,48 @@
 //! - Zero coupling to domain concerns
 //! - Thread-safe: Arc + DashMap for concurrent access
 //! - Extensible: Easy to add new languages via LanguageStrategy
-///
-/// # Performance
-///
-/// - **Cache hit**: ~10-50ns (DashMap lookup)
-/// - **Cache miss**: ~100μs-1ms (I/O + compile + render)
-/// - **Parallel rendering**: Linear speedup with CPU cores
-///
-/// # Example: Simple Rendering
-///
-/// ```no_run
-/// use nettoolskit_templating::{TemplateEngine, TemplateResolver};
-/// use serde_json::json;
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let resolver = TemplateResolver::new("templates");
-/// let template_path = resolver.resolve("dotnet/Domain/Entity.cs.hbs").await?;
-///
-/// let engine = TemplateEngine::new();
-/// let data = json!({"name": "User"});
-/// let rendered = engine.render_from_file(&template_path, &data).await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Example: Batch Rendering (Parallel)
-///
-/// ```no_run
-/// use nettoolskit_templating::{BatchRenderer, RenderRequest};
-/// use serde_json::json;
-/// use std::path::PathBuf;
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let renderer = BatchRenderer::new("templates");
-/// let requests = vec![
-///     RenderRequest {
-///         template: "dotnet/Domain/Entity.cs.hbs".to_string(),
-///         data: json!({"name": "User"}),
-///         output: PathBuf::from("output/User.cs"),
-///     },
-/// ];
-/// let result = renderer.render_batch(requests).await?;
-/// # Ok(())
-/// # }
-/// ```
+//!
+//! # Performance
+//!
+//! - **Cache hit**: ~10-50ns (DashMap lookup)
+//! - **Cache miss**: ~100μs-1ms (I/O + compile + render)
+//! - **Parallel rendering**: Linear speedup with CPU cores
+//!
+//! # Example: Simple Rendering
+//!
+//! ```no_run
+//! use nettoolskit_templating::{TemplateEngine, TemplateResolver};
+//! use serde_json::json;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let resolver = TemplateResolver::new("templates");
+//! let template_path = resolver.resolve("dotnet/Domain/Entity.cs.hbs").await?;
+//!
+//! let engine = TemplateEngine::new();
+//! let data = json!({"name": "User"});
+//! let rendered = engine.render_from_file(&template_path, &data).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Example: Batch Rendering (Parallel)
+//!
+//! ```no_run
+//! use nettoolskit_templating::{BatchRenderer, RenderRequest};
+//! use serde_json::json;
+//! use std::path::PathBuf;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let renderer = BatchRenderer::new("templates");
+//! let requests = vec![
+//!     RenderRequest {
+//!         template: "dotnet/Domain/Entity.cs.hbs".to_string(),
+//!         data: json!({"name": "User"}),
+//!         output: PathBuf::from("output/User.cs"),
+//!     },
+//! ];
+//! let result = renderer.render_batch(requests).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 // Organized module structure
 pub mod core;

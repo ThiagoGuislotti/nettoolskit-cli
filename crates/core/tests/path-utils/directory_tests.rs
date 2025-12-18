@@ -1,6 +1,6 @@
 //! Tests for directory utilities
 //!
-//! Validates get_current_directory function for home path substitution
+//! Validates `get_current_directory` function for home path substitution
 
 use nettoolskit_core::path_utils::directory::get_current_directory;
 
@@ -32,8 +32,7 @@ fn test_get_current_directory_contains_tilde_when_in_home() {
         // If we have a home var, we should be able to process it
         assert!(
             has_home_substitute || !dir.contains("home") && !dir.contains("Users"),
-            "Directory should use ~ for home or not contain home path: {}",
-            dir
+            "Directory should use ~ for home or not contain home path: {dir}"
         );
     }
 }
@@ -48,8 +47,7 @@ fn test_get_current_directory_format() {
     if dir != "~" {
         assert!(
             !dir.ends_with('/') && !dir.ends_with('\\'),
-            "Directory should not have trailing separator: {}",
-            dir
+            "Directory should not have trailing separator: {dir}"
         );
     }
 }
@@ -99,8 +97,7 @@ fn test_get_current_directory_tilde_replacement() {
         // If tilde is used, there should be no absolute home path in the result
         assert!(
             !dir.contains("home/") && !dir.contains("Users\\"),
-            "Tilde should replace home path, not be combined with it: {}",
-            dir
+            "Tilde should replace home path, not be combined with it: {dir}"
         );
     }
 }

@@ -1,6 +1,6 @@
 //! Tests for Features struct constructor behavior
 //!
-//! Validates default() and detect() methods produce consistent results.
+//! Validates `default()` and `detect()` methods produce consistent results.
 
 use nettoolskit_core::Features;
 use super::test_helpers::{ENV_LOCK, clear_feature_env_vars};

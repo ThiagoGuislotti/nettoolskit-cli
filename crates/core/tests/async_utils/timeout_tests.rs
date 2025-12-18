@@ -2,13 +2,13 @@
 //!
 //! Validates timeout behavior for async operations, including successful completion
 //! before timeout, timeout expiration, edge cases (zero duration, boundary timing),
-//! and error handling (TimeoutError).
+//! and error handling (`TimeoutError`).
 //!
 //! ## Test Coverage
 //! - Successful operation completion (before timeout)
 //! - Timeout expiration (operation exceeds limit)
 //! - Edge cases (zero duration, boundary timing)
-//! - Error type validation (TimeoutError)
+//! - Error type validation (`TimeoutError`)
 
 use nettoolskit_core::async_utils::{with_timeout, TimeoutError};
 use std::time::Duration;
@@ -97,7 +97,7 @@ fn test_timeout_error_display() {
     let error = TimeoutError;
 
     // Act
-    let display = format!("{}", error);
+    let display = format!("{error}");
 
     // Assert
     assert_eq!(display, "operation timed out");
@@ -109,7 +109,7 @@ fn test_timeout_error_debug() {
     let error = TimeoutError;
 
     // Act
-    let debug = format!("{:?}", error);
+    let debug = format!("{error:?}");
 
     // Assert
     assert_eq!(debug, "TimeoutError");

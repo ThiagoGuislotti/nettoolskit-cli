@@ -4,7 +4,6 @@
 //! Tests cross-module interactions, color usage in real scenarios, and UI
 //! component composition.
 
-#![allow(clippy::assertions_on_constants)]
 #![allow(clippy::useless_vec)]
 //!
 //! ## Test Coverage
@@ -29,11 +28,11 @@ fn test_ui_module_integration() {
 
     // Act
     let path = "/test/path";
-    let _truncated = truncate_directory(path, 10);
-    let _clear_result = clear_terminal();
+    let truncated = truncate_directory(path, 10);
+    let _ = clear_terminal();
 
     // Assert
-    assert!(true);
+    assert!(!truncated.is_empty());
 }
 
 #[test]
@@ -56,10 +55,10 @@ fn test_color_usage_with_display_functions() {
     let test_path = "/colored/path/with/ansi/codes";
 
     // Act
-    let _truncated = truncate_directory(test_path, 15);
+    let truncated = truncate_directory(test_path, 15);
 
     // Assert
-    assert!(true);
+    assert!(!truncated.is_empty());
 }
 
 #[test]
@@ -71,11 +70,11 @@ fn test_module_completeness() {
     let _gray = Color::GRAY;
 
     // Act - Display and terminal functions
-    let _truncated = truncate_directory("/test", 10);
-    let _clear_result = clear_terminal();
+    let truncated = truncate_directory("/test", 10);
+    let _ = clear_terminal();
 
     // Assert
-    assert!(true);
+    assert!(!truncated.is_empty());
 }
 
 // Error Handling and Consistency Tests
@@ -83,20 +82,11 @@ fn test_module_completeness() {
 #[test]
 fn test_ui_error_handling_integration() {
     // Act
-    let result = clear_terminal();
+    let _ = clear_terminal();
+    let truncated = truncate_directory("/test/path", 10);
 
     // Assert
-    // Critical: display operations work regardless of terminal operations
-    match result {
-        Ok(()) => {
-            let _truncated = truncate_directory("/test/path", 10);
-            assert!(true);
-        }
-        Err(_) => {
-            let _truncated = truncate_directory("/test/path", 10);
-            assert!(true);
-        }
-    }
+    assert!(!truncated.is_empty());
 }
 
 #[test]
@@ -121,16 +111,13 @@ fn test_ui_consistency() {
 
 #[test]
 fn test_ui_module_no_conflicts() {
-    // Arrange
-    use nettoolskit_ui::*;
-
     // Act
     let _color_test = Color::PURPLE;
-    let _path_test = truncate_directory("/test", 5);
-    let _terminal_test = clear_terminal();
+    let path_test = truncate_directory("/test", 5);
+    let _ = clear_terminal();
 
     // Assert
-    assert!(true);
+    assert!(!path_test.is_empty());
 }
 
 #[test]
@@ -144,7 +131,6 @@ fn test_ui_synchronous_operations() {
     let _clear = clear_terminal();
 
     // Assert
-    assert!(true);
 }
 
 #[test]
@@ -168,7 +154,6 @@ fn test_ui_thread_safety() {
         handle.join().unwrap();
     }
 
-    assert!(true);
 }
 
 #[test]

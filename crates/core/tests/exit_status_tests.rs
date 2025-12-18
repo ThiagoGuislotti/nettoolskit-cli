@@ -1,4 +1,4 @@
-//! Tests for ExitStatus enum
+//! Tests for `ExitStatus` enum
 //!
 //! Validates exit status conversions and behavior.
 

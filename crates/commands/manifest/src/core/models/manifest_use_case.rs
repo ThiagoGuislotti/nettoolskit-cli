@@ -1,4 +1,4 @@
-///! Use case definition
+//! Use case definition
 
 use serde::Deserialize;
 use super::manifest_field::ManifestField;

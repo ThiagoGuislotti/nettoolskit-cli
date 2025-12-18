@@ -42,6 +42,10 @@ impl From<ExitStatus> for i32 {
 
 impl From<ExitStatus> for std::process::ExitCode {
     fn from(status: ExitStatus) -> Self {
-        std::process::ExitCode::from(i32::from(status) as u8)
+        match status {
+            ExitStatus::Success => Self::SUCCESS,
+            ExitStatus::Error => Self::FAILURE,
+            ExitStatus::Interrupted => Self::from(130),
+        }
     }
 }

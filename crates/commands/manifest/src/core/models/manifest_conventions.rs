@@ -1,4 +1,4 @@
-///! Naming and code generation conventions
+//! Naming and code generation conventions
 
 use serde::Deserialize;
 use super::manifest_policy::ManifestPolicy;

@@ -125,10 +125,9 @@ pub fn render_box(config: BoxConfig) {
         let padding = " ".repeat(width.saturating_sub(content_len));
 
         let line = format!(
-            "{}{}{}{}{}",
+            "{} {prefix} {}{}{}",
             "│".color(border_color),
-            format!(" {}", prefix),
-            format!(" {}", config.title).color(config.title_color).bold(),
+            config.title.color(config.title_color).bold(),
             padding,
             "│".color(border_color)
         );
@@ -177,12 +176,10 @@ pub fn render_box(config: BoxConfig) {
         let available_width = width - label_text.len() - 1 - 4 - 4;
         let truncated_value = if label.to_lowercase().contains("directory") {
             truncate_directory_with_middle(value, available_width)
+        } else if value.len() > available_width {
+            format!("{}...", &value[..available_width.saturating_sub(3)])
         } else {
-            if value.len() > available_width {
-                format!("{}...", &value[..available_width.saturating_sub(3)])
-            } else {
-                value.clone()
-            }
+            value.clone()
         };
 
         let line_len = label_text.len() + truncated_value.len() + 2; // +2 for borders │ │

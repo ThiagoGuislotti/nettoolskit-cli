@@ -1,4 +1,4 @@
-///! Project kind/type enumeration
+//! Project kind/type enumeration
 
 use serde::Deserialize;
 

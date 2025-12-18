@@ -1,4 +1,4 @@
-///! File collision handling policy
+//! File collision handling policy
 
 use serde::Deserialize;
 

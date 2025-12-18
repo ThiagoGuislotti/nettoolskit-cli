@@ -2,7 +2,6 @@ use clap::Parser;
 use nettoolskit_cli::interactive_mode;
 use nettoolskit_core::CommandEntry;
 use nettoolskit_orchestrator::ExitStatus;
-use nettoolskit_translate;
 use nettoolskit_otel::init_tracing;
 
 /// Global arguments available across all commands

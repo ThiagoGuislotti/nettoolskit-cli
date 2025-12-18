@@ -8,7 +8,7 @@
 //! - Solution detection (.sln)
 //! - Template detection (.hbs, .template)
 //! - Manifest detection (ntk-manifest.yml, ntk-config.yaml)
-//! - Directory ignore rules (target, node_modules, .git, bin, obj)
+//! - Directory ignore rules (target, `node_modules`, .git, bin, obj)
 //! - Search configuration (default, custom patterns)
 
 use nettoolskit_core::file_search::{FileFilters, SearchConfig};

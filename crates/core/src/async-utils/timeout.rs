@@ -3,14 +3,14 @@ use std::time::Duration;
 use tokio::time;
 
 /// Runs a future with a timeout
+///
+/// # Errors
+/// Returns [`TimeoutError`] if `future` does not complete before `timeout`.
 pub async fn with_timeout<T, F>(timeout: Duration, future: F) -> Result<T, TimeoutError>
 where
     F: Future<Output = T>,
 {
-    match time::timeout(timeout, future).await {
-        Ok(result) => Ok(result),
-        Err(_) => Err(TimeoutError),
-    }
+    time::timeout(timeout, future).await.map_err(|_| TimeoutError)
 }
 
 /// Runs multiple futures concurrently with individual timeouts
@@ -33,6 +33,9 @@ where
 }
 
 /// Runs futures concurrently with a global timeout for all operations
+///
+/// # Errors
+/// Returns [`TimeoutError`] if not all futures complete before `timeout`.
 pub async fn with_global_timeout<T, F>(
     timeout: Duration,
     futures: Vec<F>,
@@ -44,10 +47,9 @@ where
     use futures::future::join_all;
 
     let all_futures = join_all(futures);
-    match time::timeout(timeout, all_futures).await {
-        Ok(results) => Ok(results),
-        Err(_) => Err(TimeoutError),
-    }
+    time::timeout(timeout, all_futures)
+        .await
+        .map_err(|_| TimeoutError)
 }
 
 /// Error returned when an operation times out

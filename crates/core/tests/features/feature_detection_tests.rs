@@ -4,7 +4,6 @@
 //! corresponding runtime feature fields in the Features struct.
 
 use nettoolskit_core::Features;
-use std::env;
 
 #[test]
 fn test_modern_tui_feature_flag() {
@@ -20,6 +19,7 @@ fn test_modern_tui_feature_flag() {
 
     #[cfg(not(feature = "modern-tui"))]
     {
+        use std::env;
         if env::var("NTK_USE_MODERN_TUI").is_err() {
             assert!(!features.use_modern_tui);
         }
@@ -37,6 +37,7 @@ fn test_event_driven_feature_flag() {
 
     #[cfg(not(feature = "event-driven"))]
     {
+        use std::env;
         if env::var("NTK_USE_EVENT_DRIVEN").is_err() {
             assert!(!features.use_event_driven);
         }
@@ -54,6 +55,7 @@ fn test_frame_scheduler_feature_flag() {
 
     #[cfg(not(feature = "frame-scheduler"))]
     {
+        use std::env;
         if env::var("NTK_USE_FRAME_SCHEDULER").is_err() {
             assert!(!features.use_frame_scheduler);
         }
@@ -71,6 +73,7 @@ fn test_persistent_sessions_feature_flag() {
 
     #[cfg(not(feature = "persistent-sessions"))]
     {
+        use std::env;
         if env::var("NTK_USE_PERSISTENT_SESSIONS").is_err() {
             assert!(!features.use_persistent_sessions);
         }

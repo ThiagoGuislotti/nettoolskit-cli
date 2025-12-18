@@ -1,4 +1,4 @@
-///! Render rule definition
+//! Render rule definition
 
 use serde::Deserialize;
 

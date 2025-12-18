@@ -1,6 +1,6 @@
 use std::path::Path;
 
-/// Common file filters for NetToolsKit
+/// Common file filters for `NetToolsKit`
 pub struct FileFilters;
 
 impl FileFilters {
@@ -9,8 +9,7 @@ impl FileFilters {
         path.as_ref()
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| matches!(ext, "csproj" | "vbproj" | "fsproj"))
-            .unwrap_or(false)
+            .is_some_and(|ext| matches!(ext, "csproj" | "vbproj" | "fsproj"))
     }
 
     /// Check if file is a solution file
@@ -18,8 +17,7 @@ impl FileFilters {
         path.as_ref()
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| matches!(ext, "sln"))
-            .unwrap_or(false)
+            .is_some_and(|ext| matches!(ext, "sln"))
     }
 
     /// Check if file is a template file
@@ -27,8 +25,7 @@ impl FileFilters {
         path.as_ref()
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| matches!(ext, "hbs" | "template"))
-            .unwrap_or(false)
+            .is_some_and(|ext| matches!(ext, "hbs" | "template"))
     }
 
     /// Check if file is a manifest file
@@ -39,8 +36,7 @@ impl FileFilters {
         let has_yaml_ext = path
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| matches!(ext, "yml" | "yaml"))
-            .unwrap_or(false);
+            .is_some_and(|ext| matches!(ext, "yml" | "yaml"));
 
         if !has_yaml_ext {
             return false;
@@ -49,8 +45,7 @@ impl FileFilters {
         // Check filename pattern
         path.file_name()
             .and_then(|name| name.to_str())
-            .map(|name| name.starts_with("ntk-"))
-            .unwrap_or(false)
+            .is_some_and(|name| name.starts_with("ntk-"))
     }
 
     /// Check if directory should be ignored
@@ -58,12 +53,11 @@ impl FileFilters {
         path.as_ref()
             .file_name()
             .and_then(|name| name.to_str())
-            .map(|name| {
+            .is_some_and(|name| {
                 matches!(
                     name,
                     "target" | "node_modules" | ".git" | "bin" | "obj" | ".vs" | ".vscode"
                 )
             })
-            .unwrap_or(false)
     }
 }

@@ -1,4 +1,4 @@
-//! MenuEntry trait tests
+//! `MenuEntry` trait tests
 //!
 //! Tests for basic menu entry functionality.
 

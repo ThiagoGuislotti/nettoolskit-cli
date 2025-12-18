@@ -164,7 +164,7 @@ fn test_main_action_clone() {
     let original = MainAction::Manifest;
 
     // Act
-    let cloned = original.clone();
+    let cloned = original;
 
     // Assert
     assert!(

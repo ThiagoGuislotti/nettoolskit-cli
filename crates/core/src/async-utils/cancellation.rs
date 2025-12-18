@@ -9,6 +9,7 @@ pub struct CancellationToken {
 
 impl CancellationToken {
     /// Create a new cancellation token
+    #[must_use]
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(1);
         Self { sender }
@@ -20,6 +21,7 @@ impl CancellationToken {
     }
 
     /// Get a receiver for cancellation notifications
+    #[must_use]
     pub fn receiver(&self) -> CancellationReceiver {
         CancellationReceiver {
             receiver: self.sender.subscribe(),
@@ -27,6 +29,9 @@ impl CancellationToken {
     }
 
     /// Run a future that can be cancelled
+    ///
+    /// # Errors
+    /// Returns [`CancellationError`] if the token is cancelled before `future` completes.
     pub async fn with_cancellation<T, F>(&self, future: F) -> Result<T, CancellationError>
     where
         F: Future<Output = T>,
@@ -34,13 +39,14 @@ impl CancellationToken {
         let mut receiver = self.receiver();
         tokio::select! {
             result = future => Ok(result),
-            _ = receiver.cancelled() => Err(CancellationError),
+            () = receiver.cancelled() => Err(CancellationError),
         }
     }
 
     /// Create a child token that gets cancelled when this token is cancelled
-    pub fn child(&self) -> CancellationToken {
-        let child = CancellationToken::new();
+    #[must_use]
+    pub fn child(&self) -> Self {
+        let child = Self::new();
         let child_sender = child.sender.clone();
         let mut parent_receiver = self.receiver();
 
@@ -53,6 +59,9 @@ impl CancellationToken {
     }
 
     /// Run multiple futures concurrently with cancellation support
+    ///
+    /// # Errors
+    /// Returns [`CancellationError`] if cancellation happens before all futures complete.
     pub async fn with_cancellation_concurrent<T, F>(
         &self,
         futures: Vec<F>,

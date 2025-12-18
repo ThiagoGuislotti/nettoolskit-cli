@@ -6,7 +6,7 @@ use super::MenuEntry;
 
 /// Trait for enums that can provide interactive menu functionality
 ///
-/// This trait combines MenuEntry with iteration capabilities to enable
+/// This trait combines `MenuEntry` with iteration capabilities to enable
 /// generic menu rendering. Any enum that implements this trait can be
 /// used with the generic menu system.
 ///

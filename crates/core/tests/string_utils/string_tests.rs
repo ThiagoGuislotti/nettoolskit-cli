@@ -85,7 +85,7 @@ fn test_truncate_directory_with_middle_unix_path() {
     // Assert
     assert!(result.len() <= 40);
     assert!(result.contains("/.../"));
-    assert!(result.starts_with("/"));
+    assert!(result.starts_with('/'));
     assert!(result.ends_with("nettoolskit-cli"));
 }
 
@@ -100,7 +100,7 @@ fn test_truncate_directory_with_middle_home_path() {
     // Assert
     assert!(result.len() <= 60);
     assert!(result.contains("\\...\\"));
-    assert!(result.starts_with("~"));
+    assert!(result.starts_with('~'));
     assert!(result.ends_with("nettoolskit-cli"));
 
     let parts: Vec<&str> = result.split("\\...\\").collect();
@@ -152,7 +152,7 @@ fn test_truncate_directory_with_middle_preserves_separators() {
     // Assert
     if result.contains("\\...\\") {
         assert!(!result.contains("\\\\...\\\\"));
-        assert!(result.contains("\\"));
+        assert!(result.contains('\\'));
     }
 }
 

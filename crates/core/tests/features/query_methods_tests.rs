@@ -1,6 +1,6 @@
 //! Tests for feature query methods
 //!
-//! Validates is_full_modern(), has_any_modern(), and description()
+//! Validates `is_full_modern()`, `has_any_modern()`, and `description()`
 //! methods for querying feature configuration state.
 
 use nettoolskit_core::Features;

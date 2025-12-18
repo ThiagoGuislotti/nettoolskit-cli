@@ -1,4 +1,4 @@
-///! Summary of manifest execution
+//! Summary of manifest execution
 
 use owo_colors::OwoColorize;
 use std::path::PathBuf;

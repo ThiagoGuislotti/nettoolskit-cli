@@ -26,6 +26,7 @@ use std::env;
 /// // On Unix: ~/projects/my-app
 /// // On Windows: ~\Documents\projects\my-app
 /// ```
+#[must_use]
 pub fn get_current_directory() -> String {
     if let Ok(current_dir) = env::current_dir() {
         let current_dir_str = current_dir.to_string_lossy().to_string();
@@ -33,7 +34,7 @@ pub fn get_current_directory() -> String {
         // Try to replace home directory with ~
         if let Ok(home) = env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
             if let Some(relative) = current_dir_str.strip_prefix(&home) {
-                return format!("~{}", relative);
+                return format!("~{relative}");
             }
         }
 

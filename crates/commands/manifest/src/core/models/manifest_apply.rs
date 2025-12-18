@@ -1,4 +1,4 @@
-///! Apply configuration
+//! Apply configuration
 
 use serde::Deserialize;
 use super::apply_artifact::ApplyArtifact;

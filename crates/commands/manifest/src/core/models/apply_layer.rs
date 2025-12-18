@@ -1,4 +1,4 @@
-///! Apply layer configuration
+//! Apply layer configuration
 
 use serde::Deserialize;
 

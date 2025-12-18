@@ -1,4 +1,4 @@
-///! Enum value
+//! Enum value
 
 use serde::Deserialize;
 

@@ -1,4 +1,4 @@
-///! Artifact kinds for code generation
+//! Artifact kinds for code generation
 
 /// Artifact kinds for code generation
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

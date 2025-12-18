@@ -1,4 +1,4 @@
-///! Template mapping definition
+//! Template mapping definition
 
 use serde::Deserialize;
 

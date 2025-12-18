@@ -1,4 +1,4 @@
-///! Manifest metadata
+//! Manifest metadata
 
 use serde::Deserialize;
 
