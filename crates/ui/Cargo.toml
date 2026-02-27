@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 crossterm = { version = "0.28", features = ["event-stream"] }
-inquire = "0.7"
+inquire = { workspace = true }
 owo-colors = "3.5"
 thiserror = "1.0"
 tracing = "0.1"

@@ -1,6 +1,6 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use nettoolskit_core::async_utils::with_timeout;
-use nettoolskit_ui::{append_footer_log, handle_resize};
+use nettoolskit_ui::{append_footer_log, handle_resize, process_pending_resize};
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,7 +52,11 @@ pub async fn read_line(
             },
             Ok(Err(e)) => return Err(e),
             Err(_) => {
-                // Timeout - continue polling
+                // Timeout — process any pending deferred resize before continuing
+                if let Err(err) = process_pending_resize() {
+                    let _ =
+                        append_footer_log(&format!("Warning: resize processing failed: {err}"));
+                }
                 continue;
             }
         }

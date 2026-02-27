@@ -8,6 +8,12 @@
 
 NetToolsKit CLI solves the problem of fragmented .NET development workflows by providing a unified, interactive command-line interface for project scaffolding, template management, and development automation. The technical approach follows a modular Rust-based architecture inspired by GitHub Codex CLI, featuring an interactive command palette system and high-performance async operations.
 
+Objectives:
+- Provide a fast, interactive CLI for common .NET development tasks
+- Standardize project setup via templates and manifest-driven configuration
+- Enable repeatable automation flows (without ad-hoc scripts per repo)
+- Keep the UX discoverable with a command palette and consistent navigation
+
 ---
 
 ## Features
@@ -29,6 +35,8 @@ NetToolsKit CLI solves the problem of fragmented .NET development workflows by p
 - [Features](#features)
 - [Contents](#contents)
   - [Crates](#crates)
+-  - [Documentation](#documentation)
+-  - [References](#references)
 - [Build and Tests](#build-and-tests)
 - [Contributing](#contributing)
 - [Dependencies](#dependencies)
@@ -91,6 +99,8 @@ Keep commit messages aligned with Conventional Commits.
 
 ## References
 
+### Documentation
+
 - Crate documentation:
   - [crates/cli/README.md](crates/cli/README.md)
   - [crates/commands/README.md](crates/commands/README.md)
@@ -102,6 +112,8 @@ Keep commit messages aligned with Conventional Commits.
   - [crates/orchestrator/README.md](crates/orchestrator/README.md)
   - [crates/otel/README.md](crates/otel/README.md)
   - [crates/ui/README.md](crates/ui/README.md)
+
+### References
 
 - [Rust Async Programming](https://rust-lang.github.io/async-book/)
 - [Clap CLI Framework](https://docs.rs/clap/latest/clap/)

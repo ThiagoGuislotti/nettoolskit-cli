@@ -199,9 +199,7 @@ pub fn disable_interactive_logging();
 
 pub struct TerminalLayout { /* fields omitted */ }
 impl TerminalLayout {
-	pub fn initialize<F>(render_header: Option<F>) -> std::io::Result<Self>
-	where
-		F: FnOnce();
+	pub fn initialize(render_header: Option<fn()>) -> std::io::Result<Self>;
 
 	pub fn append_log_line(line: &str) -> std::io::Result<()>;
 }
