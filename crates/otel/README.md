@@ -1,22 +1,42 @@
 # nettoolskit-otel
 
-> OpenTelemetry helpers and tracing integration for NetToolsKit CLI.
+> Telemetry, metrics, and structured logging for NetToolsKit CLI.
 
 ---
 
 ## Introduction
 
-`nettoolskit-otel` provides observability utilities for the CLI, including tracing initialization and lightweight in-process metrics.
+`nettoolskit-otel` provides lightweight, in-process observability utilities for the CLI, including structured logging via `tracing` and a custom metrics/timer system.
 It is designed to be easy to integrate and safe to use in both interactive and non-interactive modes.
+
+> **Note:** Despite the crate name, this module does **not** use the OpenTelemetry SDK.
+> It provides a purpose-built, zero-dependency metrics layer optimized for short-lived CLI
+> processes. See [Design Decision](#design-decision) below.
 
 ---
 
 ## Features
 
 -   ✅ Tracing initialization helpers for common environments (`init_tracing`, `init_development_tracing`)
--   ✅ Metrics collector (`Metrics`) with counters, gauges, and timings
--   ✅ Timing helper (`Timer`) and macros (`time_operation!`, `log_operation!`)
+-   ✅ Metrics collector (`Metrics`) with counters, gauges, and timings (custom, in-process)
+-   ✅ Timing helper (`Timer`) with RAII auto-record and macros (`time_operation!`, `log_operation!`)
 -   ✅ Interactive-mode tracing support via `nettoolskit-ui::UiWriter`
+
+---
+
+## Design Decision
+
+This crate intentionally uses a custom metrics implementation rather than the full OpenTelemetry SDK:
+
+| Aspect | Custom (current) | Full OTEL SDK |
+|--------|-----------------|---------------|
+| Dependencies | `tracing` only | `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp` |
+| Runtime overhead | Zero when not queried | Batch exporter thread, network I/O |
+| External collector | Not needed | Required (Jaeger, Grafana, etc.) |
+| CLI suitability | Excellent (short-lived) | Designed for long-lived services |
+
+If future requirements demand distributed tracing or OTLP export, the `tracing-opentelemetry`
+bridge can be added as a subscriber layer without changing the existing `Metrics`/`Timer` API.
 
 ---
 
@@ -162,7 +182,6 @@ impl Timer {
 
 - https://docs.rs/tracing/
 - https://docs.rs/tracing-subscriber/
-- https://opentelemetry.io/
 - https://github.com/ThiagoGuislotti/NetToolsKit/issues
 
 ---

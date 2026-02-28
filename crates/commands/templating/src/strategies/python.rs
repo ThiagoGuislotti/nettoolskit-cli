@@ -1,7 +1,7 @@
 //! Python language strategy implementation
 
-use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};
+use async_trait::async_trait;
 
 /// Python language strategy
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct PythonStrategy {
 }
 
 impl PythonStrategy {
+    /// Create a new Python strategy with default conventions.
     pub fn new() -> Self {
         Self {
             conventions: LanguageConventions {

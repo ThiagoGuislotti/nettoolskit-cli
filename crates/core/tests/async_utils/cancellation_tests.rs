@@ -176,3 +176,133 @@ fn test_cancellation_error_is_error() {
     // Assert
     assert!(std::error::Error::source(&error).is_none());
 }
+
+// Child Token Tests
+
+#[tokio::test]
+async fn test_child_token_cancelled_by_parent() {
+    let parent = CancellationToken::new();
+    let child = parent.child();
+
+    let parent_clone = parent.clone();
+    tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        parent_clone.cancel();
+    });
+
+    // The child should detect cancellation when parent is cancelled
+    let result = child
+        .with_cancellation(async {
+            sleep(Duration::from_millis(500)).await;
+            "should be cancelled"
+        })
+        .await;
+
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), CancellationError));
+}
+
+#[tokio::test]
+async fn test_child_token_independent_cancel() {
+    let parent = CancellationToken::new();
+    let child = parent.child();
+
+    // Cancel child directly without cancelling parent
+    let child_clone = child.clone();
+    tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        child_clone.cancel();
+    });
+
+    let result = child
+        .with_cancellation(async {
+            sleep(Duration::from_millis(500)).await;
+            "should be cancelled"
+        })
+        .await;
+
+    // Child was directly cancelled
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_child_token_completes_before_cancel() {
+    let parent = CancellationToken::new();
+    let child = parent.child();
+
+    let result = child
+        .with_cancellation(async {
+            sleep(Duration::from_millis(10)).await;
+            "completed"
+        })
+        .await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "completed");
+}
+
+// with_cancellation_concurrent Tests
+
+#[tokio::test]
+async fn test_cancellation_concurrent_all_succeed() {
+    let token = CancellationToken::new();
+
+    let futures = vec![
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            1
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>,
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            2
+        }),
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            3
+        }),
+    ];
+
+    let result = token.with_cancellation_concurrent(futures).await;
+
+    assert!(result.is_ok());
+    let values = result.unwrap();
+    assert_eq!(values, vec![1, 2, 3]);
+}
+
+#[tokio::test]
+async fn test_cancellation_concurrent_cancelled() {
+    let token = CancellationToken::new();
+    let token_clone = token.clone();
+
+    tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        token_clone.cancel();
+    });
+
+    let futures = vec![
+        Box::pin(async {
+            sleep(Duration::from_millis(500)).await;
+            1
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>,
+        Box::pin(async {
+            sleep(Duration::from_millis(500)).await;
+            2
+        }),
+    ];
+
+    let result = token.with_cancellation_concurrent(futures).await;
+
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), CancellationError));
+}
+
+#[tokio::test]
+async fn test_cancellation_concurrent_empty() {
+    let token = CancellationToken::new();
+    let futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>> = vec![];
+
+    let result = token.with_cancellation_concurrent(futures).await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+}

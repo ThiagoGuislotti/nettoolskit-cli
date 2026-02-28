@@ -1,4 +1,5 @@
-/// Async template file resolution with caching and strategy pattern
+//! Async template file resolution with caching and strategy pattern
+
 use crate::core::error::{TemplateError, TemplateResult};
 use crate::strategies::LanguageStrategyFactory;
 use dashmap::DashMap;

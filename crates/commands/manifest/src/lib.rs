@@ -47,48 +47,20 @@ pub mod execution;
 pub mod handlers;
 pub mod models;
 pub mod parsing;
+/// Task generation definitions.
 pub mod tasks;
 pub mod ui;
 
 // Backward compatibility aliases
+/// Backward-compatible re-export of the parsing module.
 pub mod parser {
     pub use crate::parsing::*;
 }
 
-pub mod files {
-    pub use crate::execution::files::*;
-}
-
-pub mod definitions {
-    pub use crate::models::manifest_action::*;
-}
-
-// Re-export core types
-pub use models::ManifestAction;
+// Public API — externally consumed types
 pub use core::{ManifestError, ManifestResult};
-
-// Re-export domain models from core
-pub use core::models::{
-    ArtifactKind, ExecutionSummary, FileChange, FileChangeKind, ManifestAggregate,
-    ManifestContext, ManifestConventions, ManifestDomainEvent, ManifestEntity, ManifestEnum,
-    ManifestEnumValue, ManifestField, ManifestKind, ManifestPolicy, ManifestProjectKind,
-    ManifestRepository, ManifestUseCase, ManifestValueObject, RenderTask, TemplateMapping,
-};
-
-// Re-export execution types
-pub use execution::{
-    build_project_payload, build_project_stub, build_solution_stub, ensure_directory,
-    execute_plan, normalize_line_endings, ExecutionConfig, ManifestExecutor,
-};
-
-// Re-export parsing types
+pub use execution::{ExecutionConfig, ManifestExecutor};
+pub use handlers::execute_apply;
+pub use models::ManifestAction;
 pub use parsing::ManifestParser;
-
-// Re-export handlers
-pub use handlers::{execute_apply, check_file, display_validation_result, ValidationError, ValidationResult};
-
-// Re-export ui types
 pub use ui::show_menu;
-
-// Re-export TemplateResolver from templating (no duplication)
-pub use nettoolskit_templating::TemplateResolver;

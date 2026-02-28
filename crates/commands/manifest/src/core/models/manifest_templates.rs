@@ -1,13 +1,14 @@
 //! Template mappings configuration
 
-use serde::Deserialize;
-use std::collections::BTreeMap;
 use super::artifact_kind::ArtifactKind;
 use super::template_mapping::TemplateMapping;
+use serde::Deserialize;
+use std::collections::BTreeMap;
 
 /// Template mappings configuration
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct ManifestTemplates {
+    /// Template-to-artifact mappings.
     #[serde(default)]
     pub mapping: Vec<TemplateMapping>,
 }

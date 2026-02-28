@@ -19,5 +19,10 @@ pub enum TranslateError {
 
     /// Translation not supported
     #[error("Translation from {from} to {to} is not supported")]
-    UnsupportedTranslation { from: String, to: String },
+    UnsupportedTranslation {
+        /// Source language identifier.
+        from: String,
+        /// Target language identifier.
+        to: String,
+    },
 }

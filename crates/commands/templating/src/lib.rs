@@ -62,18 +62,24 @@
 //! ```
 
 // Organized module structure
+
+/// Core types: errors and helper utilities.
 pub mod core;
+/// Template rendering engine, batch processing, and path resolution.
 pub mod rendering;
+/// Language-specific template resolution strategies.
 pub mod strategies;
 
-// Re-export core types
+/// Core error and result types.
 pub use core::{TemplateError, TemplateResult};
 
-// Re-export rendering types
-pub use rendering::{BatchRenderResult, BatchRenderer, RenderRequest, TemplateEngine, TemplateResolver};
+/// Rendering primitives re-exported for convenience.
+pub use rendering::{
+    BatchRenderResult, BatchRenderer, RenderRequest, TemplateEngine, TemplateResolver,
+};
 
-// Re-export strategy types
+/// Strategy types re-exported for convenience.
 pub use strategies::{
     ClojureStrategy, DotNetStrategy, GoStrategy, JavaStrategy, Language, LanguageConventions,
-    LanguageStrategy, LanguageStrategyFactory, PythonStrategy, RustStrategy,
+    LanguageStrategy, LanguageStrategyFactory, PythonStrategy, RustStrategy, TypeScriptStrategy,
 };

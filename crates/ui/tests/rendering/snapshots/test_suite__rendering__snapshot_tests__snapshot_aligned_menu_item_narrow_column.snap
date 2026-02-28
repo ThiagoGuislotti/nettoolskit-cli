@@ -1,0 +1,6 @@
+---
+source: crates/ui/tests/rendering/snapshot_tests.rs
+assertion_line: 54
+expression: result
+---
+   / help - [90mDisplay help[0m

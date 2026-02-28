@@ -231,3 +231,80 @@ fn test_large_numbers() {
     metrics.set_gauge("small_gauge", f64::MIN);
     assert_eq!(metrics.get_gauge("small_gauge"), Some(f64::MIN));
 }
+
+// Timer Single-Record Tests
+
+#[test]
+fn test_timer_stop_records_exactly_once() {
+    // Arrange
+    let metrics = Metrics::new();
+
+    // Act — stop() records timing, then Timer is dropped.
+    // Previously the Drop impl would record a SECOND time.
+    {
+        let timer = nettoolskit_otel::Timer::start("op_stop", metrics.clone());
+        let _duration = timer.stop();
+    } // Timer already consumed by stop(); Drop must NOT double-record.
+
+    // Assert
+    assert_eq!(
+        metrics.timing_count("op_stop"),
+        1,
+        "stop() must record exactly once — Drop must be a no-op after stop()"
+    );
+}
+
+#[test]
+fn test_timer_drop_without_stop_records_once() {
+    // Arrange
+    let metrics = Metrics::new();
+
+    // Act — drop Timer without calling stop()
+    {
+        let _timer = nettoolskit_otel::Timer::start("op_drop", metrics.clone());
+        // intentionally NOT calling stop()
+    }
+
+    // Assert
+    assert_eq!(
+        metrics.timing_count("op_drop"),
+        1,
+        "Drop without stop() must record exactly once"
+    );
+}
+
+#[test]
+fn test_timer_records_nonzero_duration() {
+    // Arrange
+    let metrics = Metrics::new();
+
+    // Act
+    let timer = nettoolskit_otel::Timer::start("op_duration", metrics.clone());
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let duration = timer.stop();
+
+    // Assert
+    assert!(
+        duration.as_millis() >= 4,
+        "Timer should record a nonzero duration (got {}ms)",
+        duration.as_millis()
+    );
+    assert!(metrics.get_average_timing("op_duration").is_some());
+}
+
+#[test]
+fn test_time_operation_macro_records_once() {
+    // Arrange
+    let metrics = Metrics::new();
+
+    // Act
+    let result = nettoolskit_otel::time_operation!(metrics, "macro_op", { 42_u32 });
+
+    // Assert
+    assert_eq!(result, 42);
+    assert_eq!(
+        metrics.timing_count("macro_op"),
+        1,
+        "time_operation! macro must record exactly once"
+    );
+}

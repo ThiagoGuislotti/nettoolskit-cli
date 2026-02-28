@@ -3,9 +3,9 @@
 //! Validates that `NTK_USE_*` environment variables correctly override
 //! compile-time feature flags at runtime.
 
+use super::test_helpers::{clear_feature_env_vars, ENV_LOCK};
 use nettoolskit_core::Features;
 use std::env;
-use super::test_helpers::{ENV_LOCK, clear_feature_env_vars};
 
 #[test]
 fn test_env_var_enables_modern_tui() {

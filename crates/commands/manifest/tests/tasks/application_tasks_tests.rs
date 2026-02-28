@@ -3,10 +3,10 @@
 //! Validates append_application_tasks() generates correct RenderTasks
 //! for use cases (commands, queries, etc).
 
-use nettoolskit_manifest::models::{ArtifactKind, ManifestContext, RenderTask};
 use super::test_helpers::{
     build_template_index, create_test_context_with_all_artifacts, create_test_conventions,
 };
+use nettoolskit_manifest::models::{ArtifactKind, ManifestContext, RenderTask};
 
 #[test]
 fn test_append_application_tasks_generates_use_cases() {

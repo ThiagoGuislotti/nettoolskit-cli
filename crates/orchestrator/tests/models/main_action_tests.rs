@@ -50,6 +50,18 @@ fn test_main_action_translate_variant() {
 }
 
 #[test]
+fn test_main_action_config_variant() {
+    // Arrange
+    let action = MainAction::Config;
+
+    // Act
+    let is_config = matches!(action, MainAction::Config);
+
+    // Assert
+    assert!(is_config, "MainAction::Config should match Config variant");
+}
+
+#[test]
 fn test_main_action_quit_variant() {
     // Arrange
     let action = MainAction::Quit;
@@ -106,6 +118,21 @@ fn test_main_action_slash_static_translate() {
 }
 
 #[test]
+fn test_main_action_slash_static_config() {
+    // Arrange
+    let action = MainAction::Config;
+
+    // Act
+    let slash_cmd = action.slash_static();
+
+    // Assert
+    assert_eq!(
+        slash_cmd, "/config",
+        "Config should produce /config command"
+    );
+}
+
+#[test]
 fn test_main_action_slash_static_quit() {
     // Arrange
     let action = MainAction::Quit;
@@ -126,6 +153,7 @@ fn test_main_action_pattern_matching_exhaustive() {
         MainAction::Help,
         MainAction::Manifest,
         MainAction::Translate,
+        MainAction::Config,
         MainAction::Quit,
     ];
 
@@ -135,6 +163,7 @@ fn test_main_action_pattern_matching_exhaustive() {
             MainAction::Help => true,
             MainAction::Manifest => true,
             MainAction::Translate => true,
+            MainAction::Config => true,
             MainAction::Quit => true,
         };
         assert!(matched, "All MainAction variants should be handled");

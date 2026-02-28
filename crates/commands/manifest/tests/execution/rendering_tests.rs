@@ -37,7 +37,10 @@ async fn test_render_template_not_found() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        matches!(err, nettoolskit_manifest::core::error::ManifestError::TemplateNotFound { .. }),
+        matches!(
+            err,
+            nettoolskit_manifest::core::error::ManifestError::TemplateNotFound { .. }
+        ),
         "Expected TemplateNotFound error"
     );
 }

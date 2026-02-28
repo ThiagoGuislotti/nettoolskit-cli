@@ -1,4 +1,5 @@
-/// Telemetry utilities for NetToolsKit CLI
+//! Telemetry utilities for NetToolsKit CLI
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -93,6 +94,12 @@ impl Metrics {
         None
     }
 
+    /// Get the number of timing samples recorded for an operation
+    pub fn timing_count(&self, name: &str) -> usize {
+        let timings = self.timings.lock().unwrap();
+        timings.get(name).map_or(0, Vec::len)
+    }
+
     /// Get all counters snapshot
     pub fn counters_snapshot(&self) -> HashMap<String, u64> {
         let counters = self.counters.lock().unwrap();
@@ -126,11 +133,16 @@ impl Metrics {
     }
 }
 
-/// Timer utility for measuring operation duration
+/// Timer utility for measuring operation duration.
+///
+/// Records timing once — either via [`Timer::stop`] (preferred) or automatically
+/// when the `Timer` is dropped without an explicit stop.  The internal `stopped`
+/// flag prevents the previous double-record bug where both paths would fire.
 pub struct Timer {
     name: String,
     start: Instant,
     metrics: Metrics,
+    stopped: bool,
 }
 
 impl Timer {
@@ -143,11 +155,15 @@ impl Timer {
             name,
             start: Instant::now(),
             metrics,
+            stopped: false,
         }
     }
 
-    /// Stop the timer and record the measurement
-    pub fn stop(self) -> Duration {
+    /// Stop the timer and record the measurement.
+    ///
+    /// Marks the timer as stopped so that `Drop` will **not** record again.
+    pub fn stop(mut self) -> Duration {
+        self.stopped = true;
         let duration = self.start.elapsed();
 
         info!(
@@ -163,6 +179,10 @@ impl Timer {
 
 impl Drop for Timer {
     fn drop(&mut self) {
+        if self.stopped {
+            return;
+        }
+
         let duration = self.start.elapsed();
         warn!(
             operation = %self.name,

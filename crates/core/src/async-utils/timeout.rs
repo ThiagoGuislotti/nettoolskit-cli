@@ -10,7 +10,9 @@ pub async fn with_timeout<T, F>(timeout: Duration, future: F) -> Result<T, Timeo
 where
     F: Future<Output = T>,
 {
-    time::timeout(timeout, future).await.map_err(|_| TimeoutError)
+    time::timeout(timeout, future)
+        .await
+        .map_err(|_| TimeoutError)
 }
 
 /// Runs multiple futures concurrently with individual timeouts

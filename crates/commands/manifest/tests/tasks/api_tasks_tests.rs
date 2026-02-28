@@ -3,10 +3,10 @@
 //! Validates append_api_tasks() generates correct RenderTasks
 //! for controllers, endpoints, and API infrastructure.
 
-use nettoolskit_manifest::models::{ArtifactKind, RenderTask};
 use super::test_helpers::{
     build_template_index, create_test_context_with_all_artifacts, create_test_conventions,
 };
+use nettoolskit_manifest::models::{ArtifactKind, RenderTask};
 
 #[test]
 fn test_append_api_tasks_generates_controllers() {

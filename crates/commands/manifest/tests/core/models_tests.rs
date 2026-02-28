@@ -3,7 +3,7 @@
 //! Tests for manifest domain models including ManifestKind, ManifestProjectKind,
 //! and ExecutionSummary serialization and behavior.
 
-use nettoolskit_manifest::{ExecutionSummary, ManifestKind, ManifestProjectKind};
+use nettoolskit_manifest::models::{ExecutionSummary, ManifestKind, ManifestProjectKind};
 use std::path::PathBuf;
 
 // ManifestKind Tests

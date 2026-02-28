@@ -1,8 +1,12 @@
-use clap::Parser;
+//! NetToolsKit CLI binary entry point.
+
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 use nettoolskit_cli::interactive_mode;
-use nettoolskit_core::CommandEntry;
+use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
 use nettoolskit_orchestrator::ExitStatus;
 use nettoolskit_otel::init_tracing;
+use nettoolskit_ui::{set_color_override, set_unicode_override, ColorLevel};
 
 /// Global arguments available across all commands
 #[derive(Debug, Clone, Parser)]
@@ -39,6 +43,13 @@ pub enum Commands {
         /// Template file path to translate
         path: String,
     },
+
+    /// Generate shell completions for the specified shell
+    Completions {
+        /// Target shell (bash, zsh, fish, powershell)
+        #[clap(value_enum)]
+        shell: Shell,
+    },
 }
 
 impl Commands {
@@ -51,6 +62,10 @@ impl Commands {
             Commands::Translate { from, to, path } => {
                 let request = nettoolskit_translate::TranslateRequest { from, to, path };
                 nettoolskit_translate::handle_translate(request).await
+            }
+            Commands::Completions { shell } => {
+                clap_complete::generate(shell, &mut Cli::command(), "ntk", &mut std::io::stdout());
+                ExitStatus::Success
             }
         }
     }
@@ -81,17 +96,46 @@ async fn main() {
     // Parse command line arguments
     let cli = Cli::parse();
 
+    // Load configuration (file → env → defaults), then apply CLI overrides
+    let config = match &cli.global.config {
+        Some(path) => {
+            let p = std::path::Path::new(path);
+            match AppConfig::load_from(p) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Warning: Failed to load config from {}: {}", path, e);
+                    AppConfig::load()
+                }
+            }
+        }
+        None => AppConfig::load(),
+    };
+
+    let verbose = cli.global.verbose || config.general.verbose;
+
+    // Wire user config into the terminal capabilities system
+    match config.display.color {
+        ColorMode::Always => set_color_override(Some(ColorLevel::TrueColor)),
+        ColorMode::Never => set_color_override(Some(ColorLevel::None)),
+        ColorMode::Auto => {} // capabilities auto-detect
+    }
+    match config.display.unicode {
+        UnicodeMode::Always => set_unicode_override(Some(true)),
+        UnicodeMode::Never => set_unicode_override(Some(false)),
+        UnicodeMode::Auto => {} // capabilities auto-detect
+    }
+
     let run_interactive = cli.subcommand.is_none();
 
     if !run_interactive {
-        if let Err(e) = init_tracing(cli.global.verbose) {
+        if let Err(e) = init_tracing(verbose) {
             eprintln!("Warning: Failed to initialize tracing: {}", e);
         }
     }
 
     let exit_status: ExitStatus = match cli.subcommand {
         Some(command) => command.execute().await,
-        None => interactive_mode(cli.global.verbose).await,
+        None => interactive_mode(verbose).await,
     };
 
     // Exit with appropriate code

@@ -86,7 +86,10 @@ pub fn build_project_stub(name: &str, target_framework: &str, author: &str) -> S
 
 /// Build project payload for rendering
 #[allow(dead_code)]
-pub fn build_project_payload(manifest: &ManifestDocument, project: &ManifestProject) -> Value {
+pub(crate) fn build_project_payload(
+    manifest: &ManifestDocument,
+    project: &ManifestProject,
+) -> Value {
     let mut map = Map::new();
     map.insert("name".to_string(), Value::String(project.name.clone()));
     map.insert(

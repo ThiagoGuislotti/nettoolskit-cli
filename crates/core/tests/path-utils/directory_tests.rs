@@ -64,7 +64,8 @@ fn test_get_current_directory_is_valid_path() {
         "Directory should not contain null bytes"
     );
     assert!(
-        dir.chars().all(|c| !c.is_control() || c == '\\' || c == '/'),
+        dir.chars()
+            .all(|c| !c.is_control() || c == '\\' || c == '/'),
         "Directory should contain valid path characters"
     );
 }

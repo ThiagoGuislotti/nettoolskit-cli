@@ -6,12 +6,19 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 /// Tracing configuration for different environments
 #[derive(Debug, Clone)]
 pub struct TracingConfig {
+    /// Enable verbose (debug-level) log output.
     pub verbose: bool,
+    /// Emit log records in structured JSON format.
     pub json_format: bool,
+    /// Include the source-file path in each log line.
     pub with_file: bool,
+    /// Include source line numbers in each log line.
     pub with_line_numbers: bool,
+    /// OpenTelemetry service name used for resource identification.
     pub service_name: String,
+    /// Semantic version of the service reported to the telemetry backend.
     pub service_version: String,
+    /// When `true`, tracing output is routed through the interactive UI writer.
     pub interactive_mode: bool,
 }
 

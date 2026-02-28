@@ -1,4 +1,4 @@
-/// Error types for manifest operations
+//! Error types for manifest operations
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -10,12 +10,17 @@ pub type ManifestResult<T> = Result<T, ManifestError>;
 pub enum ManifestError {
     /// Manifest file not found
     #[error("manifest not found: {path}")]
-    ManifestNotFound { path: String },
+    ManifestNotFound {
+        /// Path to the missing manifest file.
+        path: String,
+    },
 
     /// Failed to read manifest file
     #[error("failed to read manifest from {path}: {source}")]
     ReadError {
+        /// Path to the manifest file that could not be read.
         path: String,
+        /// Underlying I/O error.
         source: std::io::Error,
     },
 
@@ -29,7 +34,10 @@ pub enum ManifestError {
 
     /// Template not found
     #[error("template not found: {path}")]
-    TemplateNotFound { path: String },
+    TemplateNotFound {
+        /// Path to the missing template.
+        path: String,
+    },
 
     /// Template rendering failed
     #[error("template rendering failed: {0}")]
@@ -37,7 +45,12 @@ pub enum ManifestError {
 
     /// Template rendering failed with details
     #[error("failed to render template '{template}': {reason}")]
-    TemplateRenderError { template: String, reason: String },
+    TemplateRenderError {
+        /// Name of the template that failed to render.
+        template: String,
+        /// Reason for the rendering failure.
+        reason: String,
+    },
 
     /// File system error
     #[error("file system error: {0}")]
@@ -45,19 +58,33 @@ pub enum ManifestError {
 
     /// Solution root not found
     #[error("solution root not found: {path}")]
-    SolutionNotFound { path: PathBuf },
+    SolutionNotFound {
+        /// Path to the expected solution root.
+        path: PathBuf,
+    },
 
     /// Project not found
     #[error("project not found: {path}")]
-    ProjectNotFound { path: PathBuf },
+    ProjectNotFound {
+        /// Path to the missing project.
+        path: PathBuf,
+    },
 
     /// Collision policy violation
     #[error("file collision detected: {path} (policy: {policy})")]
-    CollisionDetected { path: PathBuf, policy: String },
+    CollisionDetected {
+        /// Path of the file that collided.
+        path: PathBuf,
+        /// Collision policy that was violated.
+        policy: String,
+    },
 
     /// Missing required field
     #[error("missing required field: {field}")]
-    MissingField { field: String },
+    MissingField {
+        /// Name of the missing field.
+        field: String,
+    },
 
     /// Validation error
     #[error("validation error: {0}")]

@@ -2,8 +2,8 @@
 //!
 //! Tests for manifest apply command execution and validation.
 
-use nettoolskit_manifest::handlers::apply::execute_apply;
 use nettoolskit_core::ExitStatus;
+use nettoolskit_manifest::handlers::apply::execute_apply;
 use std::path::PathBuf;
 
 #[tokio::test]

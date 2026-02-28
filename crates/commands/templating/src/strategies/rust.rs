@@ -1,7 +1,7 @@
 //! Rust language strategy implementation
 
-use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};
+use async_trait::async_trait;
 
 /// Rust language strategy
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct RustStrategy {
 }
 
 impl RustStrategy {
+    /// Create a new Rust strategy with default conventions.
     pub fn new() -> Self {
         Self {
             conventions: LanguageConventions {

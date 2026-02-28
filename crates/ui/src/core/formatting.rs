@@ -1,5 +1,7 @@
 //! Text formatting utilities for menu items and display
 
+use crate::core::capabilities::maybe_gray;
+
 /// Format a menu item with aligned description.
 ///
 /// Calculates padding to align descriptions at a fixed column,
@@ -40,10 +42,10 @@ pub fn format_menu_item(label: &str, description: &str, align_column: usize) -> 
     };
 
     format!(
-        "{}{}{}- \x1b[90m{}\x1b[0m",
+        "{}{}{}- {}",
         prefix,
         label,
         " ".repeat(spaces_needed),
-        description
+        maybe_gray(description)
     )
 }

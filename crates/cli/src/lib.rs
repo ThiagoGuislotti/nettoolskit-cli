@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub mod display;
-pub mod events;
+/// User input handling and command parsing.
 pub mod input;
 
 use display::print_logo;
@@ -35,7 +35,7 @@ use nettoolskit_orchestrator::{process_command, process_text, Command, ExitStatu
 use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
-    render_prompt, CommandPalette, TerminalLayout, Color,
+    render_prompt, Color, CommandPalette, TerminalLayout,
 };
 use tracing::{error, info, warn};
 
@@ -79,20 +79,21 @@ impl Drop for RawModeGuard {
 pub async fn interactive_mode(verbose: bool) -> ExitStatus {
     let mut log_guard = begin_interactive_logging();
 
-    let (layout_failure_notice, _terminal_layout) = match TerminalLayout::initialize(Some(print_logo)) {
-        Ok(layout) => (None, Some(layout)),
-        Err(e) => {
-            let failure_message = format!("Failed to initialize terminal layout: {e}");
-            let _ = append_footer_log(&format!("Warning: {failure_message}"));
-            log_guard.deactivate();
-            if let Err(clear_error) = clear_terminal() {
-                let clear_failure = format!("Failed to clear terminal: {clear_error}");
-                let _ = append_footer_log(&format!("Warning: {clear_failure}"));
+    let (layout_failure_notice, _terminal_layout) =
+        match TerminalLayout::initialize(Some(print_logo)) {
+            Ok(layout) => (None, Some(layout)),
+            Err(e) => {
+                let failure_message = format!("Failed to initialize terminal layout: {e}");
+                let _ = append_footer_log(&format!("Warning: {failure_message}"));
+                log_guard.deactivate();
+                if let Err(clear_error) = clear_terminal() {
+                    let clear_failure = format!("Failed to clear terminal: {clear_error}");
+                    let _ = append_footer_log(&format!("Warning: {clear_failure}"));
+                }
+                print_logo();
+                (Some(failure_message), None)
             }
-            print_logo();
-            (Some(failure_message), None)
-        }
-    };
+        };
 
     // Initialize telemetry with development configuration
     let tracing_config = TracingConfig {
@@ -226,7 +227,7 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
             }
             InputResult::Text(text) => {
                 raw_mode.disable()?;
-                std::mem::drop(process_text(&text));
+                let _ = process_text(&text).await;
                 raw_mode.enable()?;
                 // NOTE: Commented out to prevent screen clearing after text input
                 // This was causing input to disappear after Enter
@@ -281,5 +282,70 @@ fn ensure_layout_guard() {
         let _ = append_footer_log(&format!(
             "Warning: failed to ensure layout integrity: {err}"
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Try to create a `RawModeGuard`. Returns `None` if a terminal is not
+    /// available (e.g., headless CI), allowing tests to be silently skipped
+    /// rather than failing.
+    fn try_guard() -> Option<RawModeGuard> {
+        RawModeGuard::new().ok()
+    }
+
+    #[test]
+    fn new_guard_is_active() {
+        let Some(guard) = try_guard() else { return };
+        assert!(guard.active);
+        drop(guard); // cleanup
+    }
+
+    #[test]
+    fn disable_sets_active_false() {
+        let Some(mut guard) = try_guard() else { return };
+        guard.disable().expect("disable should succeed");
+        assert!(!guard.active);
+    }
+
+    #[test]
+    fn enable_after_disable_restores_active() {
+        let Some(mut guard) = try_guard() else { return };
+        guard.disable().expect("disable should succeed");
+        assert!(!guard.active);
+        guard.enable().expect("enable should succeed");
+        assert!(guard.active);
+    }
+
+    #[test]
+    fn double_disable_is_idempotent() {
+        let Some(mut guard) = try_guard() else { return };
+        guard.disable().expect("first disable");
+        guard.disable().expect("second disable");
+        assert!(!guard.active);
+    }
+
+    #[test]
+    fn double_enable_is_idempotent() {
+        let Some(mut guard) = try_guard() else { return };
+        guard.enable().expect("first enable");
+        guard.enable().expect("second enable");
+        assert!(guard.active);
+    }
+
+    #[test]
+    fn drop_does_not_panic() {
+        let guard = try_guard();
+        drop(guard); // should not panic
+    }
+
+    #[test]
+    fn drop_after_disable_does_not_panic() {
+        if let Some(mut guard) = try_guard() {
+            let _ = guard.disable();
+            drop(guard);
+        }
     }
 }

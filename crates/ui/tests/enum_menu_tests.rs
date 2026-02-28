@@ -1,6 +1,6 @@
 //! Tests for enum-based menu functionality
 
-use nettoolskit_ui::{EnumMenuConfig, Color};
+use nettoolskit_ui::{Color, EnumMenuConfig};
 
 // Test enum for demonstration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -44,11 +44,7 @@ impl nettoolskit_core::MenuProvider for TestCommand {
 #[test]
 fn test_enum_menu_config_creation() {
     // Act
-    let config = EnumMenuConfig::new(
-        "Test Menu",
-        "Select an option",
-        "/test/dir",
-    );
+    let config = EnumMenuConfig::new("Test Menu", "Select an option", "/test/dir");
 
     // Assert
     assert_eq!(config.title, "Test Menu");
@@ -64,8 +60,7 @@ fn test_enum_menu_config_with_theme_color() {
     let custom_color = Color::WHITE;
 
     // Act
-    let config = EnumMenuConfig::new("Test", "Subtitle", "/dir")
-        .with_theme_color(custom_color);
+    let config = EnumMenuConfig::new("Test", "Subtitle", "/dir").with_theme_color(custom_color);
 
     // Assert
     assert_eq!(config.theme_color, custom_color);
@@ -74,8 +69,7 @@ fn test_enum_menu_config_with_theme_color() {
 #[test]
 fn test_enum_menu_config_with_width() {
     // Act
-    let config = EnumMenuConfig::new("Test", "Subtitle", "/dir")
-        .with_width(120);
+    let config = EnumMenuConfig::new("Test", "Subtitle", "/dir").with_width(120);
 
     // Assert
     assert_eq!(config.width, 120);

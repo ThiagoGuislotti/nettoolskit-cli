@@ -1,7 +1,8 @@
-/// Batch rendering with parallelism for high-throughput template generation
+//! Batch rendering with parallelism for high-throughput template generation
+
 use super::engine::TemplateEngine;
-use crate::core::error::{TemplateError, TemplateResult};
 use super::resolver::TemplateResolver;
+use crate::core::error::{TemplateError, TemplateResult};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -7,8 +7,11 @@ use std::path::{Path, PathBuf};
 /// Configuration for manifest execution
 #[derive(Debug, Clone)]
 pub struct ExecutionConfig {
+    /// Path to the manifest YAML file.
     pub manifest_path: PathBuf,
+    /// Root directory for generated output.
     pub output_root: PathBuf,
+    /// When `true`, validate without writing files.
     pub dry_run: bool,
 }
 
@@ -60,8 +63,8 @@ impl ManifestExecutor {
         manifest: ManifestDocument,
         config: ExecutionConfig,
     ) -> ManifestResult<ExecutionSummary> {
-        use crate::core::models::{FileChange, FileChangeKind, ManifestCollisionPolicy};
         use super::rendering::{normalize_line_endings, render_template};
+        use crate::core::models::{FileChange, FileChangeKind, ManifestCollisionPolicy};
         use std::fs;
 
         let mut summary = ExecutionSummary::default();

@@ -2,8 +2,8 @@
 //!
 //! Tests for manifest interactive menu functionality.
 
-use nettoolskit_manifest::models::ManifestAction;
 use nettoolskit_core::MenuEntry;
+use nettoolskit_manifest::models::ManifestAction;
 
 #[test]
 fn test_manifest_action_menu_entries() {

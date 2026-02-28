@@ -3,9 +3,9 @@
 //! Validates `is_full_modern()`, `has_any_modern()`, and `description()`
 //! methods for querying feature configuration state.
 
+use super::test_helpers::{clear_feature_env_vars, ENV_LOCK};
 use nettoolskit_core::Features;
 use std::env;
-use super::test_helpers::{ENV_LOCK, clear_feature_env_vars};
 
 #[test]
 fn test_is_full_modern_with_all_features() {

@@ -15,6 +15,9 @@ pub mod exit_status;
 /// Feature detection and configuration for opt-in TUI improvements
 pub mod features;
 
+/// User configuration with layered loading (file → env → defaults)
+pub mod config;
+
 /// String manipulation utilities
 #[path = "string-utils/lib.rs"]
 pub mod string_utils;
@@ -32,6 +35,7 @@ pub mod file_search;
 pub mod path_utils;
 
 // Re-export commonly used types
+pub use config::{AppConfig, ColorMode, UnicodeMode};
 pub use exit_status::ExitStatus;
 pub use features::Features;
 pub use menu::{CommandEntry, MenuEntry, MenuProvider};

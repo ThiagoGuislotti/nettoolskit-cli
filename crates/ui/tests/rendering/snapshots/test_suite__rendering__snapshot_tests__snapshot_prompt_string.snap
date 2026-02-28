@@ -1,0 +1,6 @@
+---
+source: crates/ui/tests/rendering/snapshot_tests.rs
+assertion_line: 86
+expression: result
+---
+[37m> [39m

@@ -10,6 +10,7 @@ members = [
     "crates/commands/manifest",
     "crates/commands/translate",
     "crates/commands/help",
+    "benchmarks",
 ]
 resolver = "2"
 
@@ -22,7 +23,7 @@ license = "MIT"
 [workspace.dependencies]
 # Core dependencies
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 clap = { version = "4.4", features = ["derive"] }
 clap_complete = "4.4"
 tokio = { version = "1.34", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
@@ -33,8 +34,9 @@ serde_json = "1.0"
 crossterm = "0.28"
 
 # String manipulation
-strum = { version = "0.25", features = ["derive"] }
-strum_macros = "0.25"
+strum = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"
+heck = "0.5"
 
 # Color support
 owo-colors = "3.5"
@@ -50,8 +52,10 @@ futures-util = "0.3"
 # Tracing/observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = "0.21"
-opentelemetry_sdk = "0.21"
+
+# Configuration
+toml = "0.8"
+dirs = "5.0"
 
 # File system
 walkdir = "2.4"
@@ -62,7 +66,16 @@ globset = "0.4"
 reqwest = { version = "0.11", features = ["json"] }
 
 # Template engine
-handlebars = "4.5"
+handlebars = "6.2"
+
+# Testing
+serial_test = "3.2"
+insta = "1.41"
+assert_cmd = "2.0"
+predicates = "3.1"
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.10"
+serde_yaml = "0.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -70,9 +83,11 @@ missing_docs = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-cargo = { level = "warn", priority = -1 }
+# Keep pedantic/nursery/cargo as opt-in signals for local improvement work.
+# CI quality gate should focus on broadly actionable `clippy::all` findings.
+pedantic = "allow"
+nursery = "allow"
+cargo = "allow"
 cargo_common_metadata = "allow"
 
 # Feature flags for incremental TUI improvements

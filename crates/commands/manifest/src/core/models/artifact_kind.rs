@@ -3,17 +3,26 @@
 /// Artifact kinds for code generation
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ArtifactKind {
+    /// DDD value object.
     ValueObject,
+    /// DDD entity.
     Entity,
+    /// DDD domain event.
     DomainEvent,
+    /// Repository interface.
     RepositoryInterface,
+    /// Enumeration type.
     EnumType,
+    /// Use-case command.
     UseCaseCommand,
+    /// API endpoint.
     Endpoint,
+    /// Unrecognised artifact kind.
     Unknown(String),
 }
 
 impl ArtifactKind {
+    /// Parse a string into an [`ArtifactKind`].
     pub fn parse_kind(value: &str) -> Self {
         match value {
             "value-object" => Self::ValueObject,
@@ -27,6 +36,7 @@ impl ArtifactKind {
         }
     }
 
+    /// Return the canonical string label.
     pub fn label(&self) -> &str {
         match self {
             Self::ValueObject => "value-object",

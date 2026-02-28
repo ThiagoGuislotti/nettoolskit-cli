@@ -5,9 +5,10 @@
 
 use crate::models::ManifestAction;
 use inquire::Text;
-use nettoolskit_core::{ExitStatus, path_utils::directory::get_current_directory};
+use nettoolskit_core::{path_utils::directory::get_current_directory, ExitStatus};
 use nettoolskit_ui::{
-    render_section_title, EnumMenuConfig, render_enum_menu, MenuConfig, render_interactive_menu, Color,
+    render_enum_menu, render_interactive_menu, render_section_title, Color, EnumMenuConfig,
+    MenuConfig,
 };
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
@@ -64,11 +65,18 @@ async fn execute_check() -> ExitStatus {
 
     match manifest_path {
         Ok(path) if !path.is_empty() => {
+            let file_path = PathBuf::from(&path);
             println!();
             println!("Validating: {}", path.color(Color::GREEN));
-            // TODO: Implement actual validation
-            println!("{}", "ℹ️  Manifest validation will check structure and dependencies".color(Color::YELLOW));
-            println!();
+
+            match crate::handlers::check::check_file(&file_path, false).await {
+                Ok(validation) => {
+                    crate::handlers::check::display_validation_result(&file_path, &validation);
+                }
+                Err(e) => {
+                    println!("{} {e}", "❌ Validation failed:".color(Color::RED));
+                }
+            }
         }
         _ => {
             println!("{}", "Validation cancelled".color(Color::YELLOW));
@@ -78,14 +86,89 @@ async fn execute_check() -> ExitStatus {
     ExitStatus::Success
 }
 
-/// Execute manifest render command
+/// Execute manifest render command (dry-run preview)
 async fn execute_render() -> ExitStatus {
     render_section_title("Rendering Preview...", Some("🎨"));
 
-    // TODO: Implement actual rendering
-    println!("{}", "ℹ️  Manifest rendering will preview generated files".color(Color::YELLOW));
-    println!("{}", "   Features: syntax highlighting, variable substitution".dimmed());
+    let manifest_path = Text::new("Manifest file path:")
+        .with_help_message("Enter the path to preview rendering")
+        .with_placeholder("manifest.yaml")
+        .prompt();
+
+    let path = match manifest_path {
+        Ok(p) if !p.is_empty() => PathBuf::from(p),
+        _ => {
+            println!("{}", "Render preview cancelled".color(Color::YELLOW));
+            return ExitStatus::Success;
+        }
+    };
+
+    let output_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
     println!();
+    println!("{}", "Rendering preview (dry-run)...".color(Color::CYAN));
+    println!("{}", "No files will be modified.".dimmed());
+    println!();
+
+    let config = crate::ExecutionConfig {
+        manifest_path: path,
+        output_root,
+        dry_run: true,
+    };
+
+    let executor = crate::ManifestExecutor::new();
+    match executor.execute(config).await {
+        Ok(summary) => {
+            println!("{}", "✓ Render preview completed".color(Color::GREEN));
+            println!();
+
+            if !summary.created.is_empty() {
+                println!(
+                    "{}",
+                    format!("Files to create: {}", summary.created.len()).color(Color::GREEN)
+                );
+                for p in &summary.created {
+                    println!("  + {}", p.display());
+                }
+                println!();
+            }
+
+            if !summary.updated.is_empty() {
+                println!(
+                    "{}",
+                    format!("Files to update: {}", summary.updated.len()).color(Color::GREEN)
+                );
+                for p in &summary.updated {
+                    println!("  ~ {}", p.display());
+                }
+                println!();
+            }
+
+            if !summary.skipped.is_empty() {
+                println!("Files to skip: {}", summary.skipped.len());
+                for (p, reason) in &summary.skipped {
+                    println!("  - {} ({})", p.display(), reason);
+                }
+                println!();
+            }
+
+            if !summary.notes.is_empty() {
+                println!("{}", "Notes:".color(Color::CYAN));
+                for note in &summary.notes {
+                    println!("  • {note}");
+                }
+                println!();
+            }
+
+            println!(
+                "Total artifacts: {}",
+                summary.created.len() + summary.updated.len()
+            );
+        }
+        Err(e) => {
+            println!("{} {e}", "❌ Render preview failed:".color(Color::RED));
+        }
+    }
 
     ExitStatus::Success
 }
@@ -100,7 +183,7 @@ async fn execute_apply_interactive() -> ExitStatus {
         .with_placeholder("feature.manifest.yaml")
         .prompt();
 
-    let _path = match manifest_path {
+    let path = match manifest_path {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
         _ => {
             println!("{}", "Apply cancelled".color(Color::YELLOW));
@@ -116,7 +199,7 @@ async fn execute_apply_interactive() -> ExitStatus {
 
     let dry_run_selection = render_interactive_menu(dry_run_menu);
 
-    let _dry_run = match dry_run_selection {
+    let dry_run = match dry_run_selection {
         Ok(option) => option.starts_with("Yes"),
         Err(_) => {
             println!("{}", "Apply cancelled".color(Color::YELLOW));
@@ -130,7 +213,7 @@ async fn execute_apply_interactive() -> ExitStatus {
         .with_placeholder("./src")
         .prompt();
 
-    let _output_root = match output_dir {
+    let output_root = match output_dir {
         Ok(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
         _ => None,
     };
@@ -138,8 +221,5 @@ async fn execute_apply_interactive() -> ExitStatus {
     println!();
     println!("{}", "Executing manifest apply...".color(Color::CYAN));
 
-    // TODO: Call the actual apply handler when available
-    // For now, just return success
-    println!("{}", "ℹ️  Apply handler integration pending".color(Color::YELLOW));
-    ExitStatus::Success
+    crate::handlers::apply::execute_apply(path, output_root, dry_run).await
 }

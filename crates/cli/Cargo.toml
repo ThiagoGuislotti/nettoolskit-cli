@@ -38,7 +38,6 @@ nettoolskit-otel = { path = "../otel" }
 nettoolskit-translate = { path = "../commands/translate" }
 
 # Async and standard dependencies
-anyhow = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -57,3 +56,8 @@ ctrlc = "3.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+
+[lints]
+workspace = true

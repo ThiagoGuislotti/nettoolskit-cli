@@ -1,0 +1,6 @@
+---
+source: crates/ui/tests/rendering/snapshot_tests.rs
+assertion_line: 63
+expression: result
+---
+check - [90mValidate manifest file[0m

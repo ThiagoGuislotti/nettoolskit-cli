@@ -1,7 +1,7 @@
 //! .NET language strategy implementation
 
-use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};
+use async_trait::async_trait;
 
 /// .NET language strategy
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct DotNetStrategy {
 }
 
 impl DotNetStrategy {
+    /// Create a new .NET strategy with default conventions.
     pub fn new() -> Self {
         Self {
             conventions: LanguageConventions {

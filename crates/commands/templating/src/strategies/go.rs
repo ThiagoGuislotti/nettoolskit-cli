@@ -1,7 +1,7 @@
 //! Go language strategy implementation
 
-use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};
+use async_trait::async_trait;
 
 /// Go language strategy
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct GoStrategy {
 }
 
 impl GoStrategy {
+    /// Create a new Go strategy with default conventions.
     pub fn new() -> Self {
         Self {
             conventions: LanguageConventions {

@@ -5,9 +5,9 @@
 pub mod main_action;
 
 // Re-export with both new and old names for compatibility
-pub use main_action::{MainAction, get_main_action};
+pub use main_action::{get_main_action, MainAction};
 
 // Backward compatibility aliases
-pub use main_action::MainAction as Command;
 pub use main_action::get_main_action as get_command;
+pub use main_action::MainAction as Command;
 pub use nettoolskit_core::ExitStatus;

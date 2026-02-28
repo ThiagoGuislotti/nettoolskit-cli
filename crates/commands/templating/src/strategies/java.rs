@@ -1,7 +1,7 @@
 //! Java language strategy implementation
 
-use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};
+use async_trait::async_trait;
 
 /// Java language strategy
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct JavaStrategy {
 }
 
 impl JavaStrategy {
+    /// Create a new Java strategy with default conventions.
     pub fn new() -> Self {
         Self {
             conventions: LanguageConventions {

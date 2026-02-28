@@ -2,8 +2,8 @@
 //!
 //! Validates `default()` and `detect()` methods produce consistent results.
 
+use super::test_helpers::{clear_feature_env_vars, ENV_LOCK};
 use nettoolskit_core::Features;
-use super::test_helpers::{ENV_LOCK, clear_feature_env_vars};
 
 #[test]
 fn test_features_default_creates_instance() {

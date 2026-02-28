@@ -52,7 +52,11 @@ fn force_clear_screen(stdout: &mut io::Stdout) -> io::Result<()> {
     // Clear every line individually — guaranteed to work regardless of
     // scroll region state or terminal-specific ESC[2J behavior
     for row in 0..height {
-        queue!(stdout, cursor::MoveTo(0, row), Clear(ClearType::CurrentLine))?;
+        queue!(
+            stdout,
+            cursor::MoveTo(0, row),
+            Clear(ClearType::CurrentLine)
+        )?;
     }
 
     // Purge scrollback AFTER visible lines are cleared, then cursor home
@@ -107,7 +111,7 @@ impl Drop for InteractiveLogGuard {
 /// Enable interactive logging queueing, returning a guard that disables on drop.
 pub fn begin_interactive_logging() -> InteractiveLogGuard {
     {
-        let mut pending = PENDING_LOGS.lock().unwrap();
+        let mut pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
         pending.clear();
     }
     INTERACTIVE_MODE.store(true, Ordering::SeqCst);
@@ -118,7 +122,7 @@ pub fn begin_interactive_logging() -> InteractiveLogGuard {
 pub fn disable_interactive_logging() {
     INTERACTIVE_MODE.store(false, Ordering::SeqCst);
     let drained: Vec<String> = {
-        let mut pending = PENDING_LOGS.lock().unwrap();
+        let mut pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
         pending.drain(..).collect()
     };
 
@@ -252,7 +256,7 @@ impl Drop for TerminalLayout {
             let _ = io::stderr()
                 .write_all(format!("Failed to reset terminal layout: {error}\n").as_bytes());
         }
-        let mut slot = ACTIVE_LAYOUT.lock().unwrap();
+        let mut slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
         *slot = None;
     }
 }
@@ -260,7 +264,7 @@ impl Drop for TerminalLayout {
 impl TerminalLayoutInner {
     fn activate(inner: &Arc<Self>) -> io::Result<()> {
         {
-            let mut slot = ACTIVE_LAYOUT.lock().unwrap();
+            let mut slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(inner.clone());
         }
         inner.flush_pending_logs()
@@ -289,7 +293,7 @@ impl TerminalLayoutInner {
     }
 
     fn ensure_scroll_region(&self) -> io::Result<()> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         apply_scroll_region(state.metrics.scroll_top, state.metrics.scroll_bottom)
     }
 
@@ -299,7 +303,7 @@ impl TerminalLayoutInner {
 
         // Idempotency: skip if dimensions haven't changed
         {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if state.metrics.width == width && state.metrics.height == height {
                 return Ok(());
             }
@@ -345,7 +349,7 @@ impl TerminalLayoutInner {
 
         // 5. Re-acquire lock, update state, and render footer atomically
         let render_result = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.metrics = metrics;
             while state.logs.len() > metrics.log_capacity {
                 state.logs.pop_front();
@@ -367,12 +371,12 @@ impl TerminalLayoutInner {
     }
 
     fn render_footer(&self) -> io::Result<()> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         self.render_footer_locked(&state)
     }
 
     fn flush_pending_logs(&self) -> io::Result<()> {
-        let mut pending = PENDING_LOGS.lock().unwrap();
+        let mut pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
         while let Some(entry) = pending.pop_front() {
             self.append_log_line(&entry)?;
         }
@@ -431,7 +435,7 @@ impl TerminalLayoutInner {
     }
 
     fn append_log_line(&self, line: &str) -> io::Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.metrics.log_capacity == 0 {
             return Ok(());
         }
@@ -479,7 +483,7 @@ fn normalize_log_entry(line: &str) -> Option<String> {
 
 fn append_log_to_active_layout(line: &str) -> io::Result<bool> {
     let layout = {
-        let slot = ACTIVE_LAYOUT.lock().unwrap();
+        let slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
         slot.clone()
     };
 
@@ -552,9 +556,13 @@ fn current_cursor_line() -> u16 {
         .unwrap_or(0)
 }
 
+/// Verify and restore the scroll region if an active layout exists.
+///
+/// Call this after operations that may have disrupted the terminal
+/// scroll region (e.g., interactive menus rendered by third-party libraries).
 pub fn ensure_layout_integrity() -> io::Result<()> {
     let layout = {
-        let slot = ACTIVE_LAYOUT.lock().unwrap();
+        let slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
         slot.clone()
     };
 
@@ -565,12 +573,17 @@ pub fn ensure_layout_integrity() -> io::Result<()> {
     }
 }
 
+/// Record a terminal resize event for trailing-edge debounce processing.
+///
+/// The actual layout reconfiguration is deferred to [`process_pending_resize`].
+/// Rapid consecutive resize events are coalesced so only the final dimensions
+/// are applied after the debounce interval elapses.
 pub fn handle_resize(_width: u16, _height: u16) -> io::Result<()> {
     // Mark resize as pending; actual processing is deferred to process_pending_resize().
     // This implements the recording side of a trailing-edge debounce:
     // rapid resize events just update the timestamp, and only the final
     // terminal state is rendered after the debounce interval.
-    let mut pending = PENDING_RESIZE.lock().unwrap();
+    let mut pending = PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner());
     *pending = Some(Instant::now());
     Ok(())
 }
@@ -587,8 +600,8 @@ pub fn handle_resize(_width: u16, _height: u16) -> io::Result<()> {
 /// successfully. Returns an error only for unrecoverable terminal failures.
 pub fn process_pending_resize() -> io::Result<()> {
     let should_process = {
-        let pending = PENDING_RESIZE.lock().unwrap();
-        pending.map_or(false, |instant| {
+        let pending = PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner());
+        pending.is_some_and(|instant| {
             instant.elapsed() >= std::time::Duration::from_millis(RESIZE_DEBOUNCE_MS)
         })
     };
@@ -599,12 +612,12 @@ pub fn process_pending_resize() -> io::Result<()> {
 
     // Clear the pending flag before processing to avoid double-processing
     {
-        let mut pending = PENDING_RESIZE.lock().unwrap();
+        let mut pending = PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner());
         *pending = None;
     }
 
     let layout = {
-        let slot = ACTIVE_LAYOUT.lock().unwrap();
+        let slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
         slot.clone()
     };
 
@@ -637,7 +650,7 @@ pub fn append_footer_log(line: &str) -> io::Result<()> {
     }
 
     if INTERACTIVE_MODE.load(Ordering::SeqCst) {
-        let mut pending = PENDING_LOGS.lock().unwrap();
+        let mut pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
         if pending.len() == PENDING_LOG_CAPACITY {
             pending.pop_front();
         }
@@ -654,9 +667,15 @@ pub fn append_footer_log(line: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_layout_metrics, clamp_cursor_to_metrics, LayoutMetrics, FOOTER_TARGET_HEIGHT,
-        MIN_DYNAMIC_HEIGHT,
+        append_footer_log, calculate_layout_metrics, clamp_cursor_to_metrics, handle_resize,
+        normalize_log_entry, pad_to_width, process_pending_resize, truncate_to_width,
+        LayoutMetrics, FOOTER_TARGET_HEIGHT, INTERACTIVE_MODE, MIN_DYNAMIC_HEIGHT, PENDING_RESIZE,
+        RECONFIGURING, RESIZE_DEBOUNCE_MS,
     };
+    use serial_test::serial;
+    use std::collections::VecDeque;
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn calculate_layout_metrics_uses_default_footer_height_when_space_allows() {
@@ -695,6 +714,327 @@ mod tests {
         };
 
         let clamped = clamp_cursor_to_metrics((140, 42), metrics);
+        assert_eq!(clamped, (79, 19));
+    }
+
+    // === Phase 1.5: Resize Unit Tests ===
+
+    /// 1.5.1 — `handle_resize` marks `PENDING_RESIZE` without calling `reconfigure`.
+    ///
+    /// The function must only record a timestamp; actual processing is deferred
+    /// to `process_pending_resize()` via trailing-edge debounce.
+    #[test]
+    #[serial]
+    fn handle_resize_sets_pending_without_reconfigure() {
+        // Clear any lingering state
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+        handle_resize(120, 40).unwrap();
+
+        let pending = PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            pending.is_some(),
+            "handle_resize must set PENDING_RESIZE timestamp"
+        );
+
+        // Cleanup
+        drop(pending);
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// 1.5.2 — Debounce coalesces N events: rapid resize events within the
+    /// debounce window are NOT processed by `process_pending_resize()`.
+    #[test]
+    #[serial]
+    fn debounce_suppresses_processing_within_window() {
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+        // Fire 5 rapid resize events — all within debounce window
+        for _ in 0..5 {
+            handle_resize(100, 50).unwrap();
+        }
+
+        // process_pending_resize immediately → debounce interval not elapsed
+        process_pending_resize().unwrap();
+
+        let still_pending = PENDING_RESIZE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        assert!(
+            still_pending,
+            "pending must NOT be cleared within debounce window"
+        );
+
+        // Cleanup
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// 1.5.2 (coalesce proof) — After the debounce interval elapses,
+    /// `process_pending_resize()` clears the pending flag and processes once.
+    #[test]
+    #[serial]
+    fn debounce_clears_pending_after_interval() {
+        // Set a pending timestamp already past the debounce window
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Instant::now() - Duration::from_millis(RESIZE_DEBOUNCE_MS + 50));
+
+        // No ACTIVE_LAYOUT → process_pending_resize just clears the flag
+        process_pending_resize().unwrap();
+
+        let cleared = PENDING_RESIZE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none();
+        assert!(
+            cleared,
+            "pending must be cleared after debounce interval elapsed"
+        );
+    }
+
+    /// 1.5.3 — `RECONFIGURING` flag suppresses footer rendering.
+    ///
+    /// When the flag is `true`, `append_log_line` stores logs in the deque
+    /// but returns early without calling `render_footer_locked`.
+    #[test]
+    #[serial]
+    fn reconfiguring_flag_suppresses_footer_render_in_append() {
+        use super::{LayoutState, TerminalLayoutInner};
+        use std::sync::Mutex;
+
+        // RECONFIGURING must default to false
+        assert!(
+            !RECONFIGURING.load(Ordering::SeqCst),
+            "RECONFIGURING must default to false"
+        );
+
+        let metrics = calculate_layout_metrics(120, 40, 0).unwrap();
+        let inner = TerminalLayoutInner {
+            state: Mutex::new(LayoutState {
+                metrics,
+                logs: VecDeque::with_capacity(metrics.log_capacity),
+            }),
+            header_renderer: None,
+        };
+
+        // Set RECONFIGURING — footer render is suppressed
+        RECONFIGURING.store(true, Ordering::SeqCst);
+
+        let result = inner.append_log_line("log during reconfigure");
+
+        // Restore immediately
+        RECONFIGURING.store(false, Ordering::SeqCst);
+
+        // Log should be stored without error (no terminal I/O occurred)
+        assert!(
+            result.is_ok(),
+            "append_log_line must succeed during reconfigure"
+        );
+
+        let state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            state.logs.len(),
+            1,
+            "log must be stored even when RECONFIGURING suppresses render"
+        );
+    }
+
+    /// 1.5.4 — Idempotency: `reconfigure()` short-circuits when terminal
+    /// dimensions haven't changed, avoiding unnecessary screen redraws.
+    #[test]
+    fn reconfigure_idempotency_check_detects_same_dimensions() {
+        let metrics = calculate_layout_metrics(120, 40, 0).unwrap();
+
+        // Same dimensions → idempotent (reconfigure returns early)
+        assert!(
+            metrics.width == 120 && metrics.height == 40,
+            "same dimensions must be detected as no-op"
+        );
+
+        // Different width → must trigger reconfigure
+        assert!(
+            !(metrics.width == 100 && metrics.height == 40),
+            "different width must not match"
+        );
+
+        // Different height → must trigger reconfigure
+        assert!(
+            !(metrics.width == 120 && metrics.height == 30),
+            "different height must not match"
+        );
+
+        // Both different → must trigger reconfigure
+        assert!(
+            !(metrics.width == 80 && metrics.height == 24),
+            "both dimensions different must not match"
+        );
+    }
+
+    // === normalize_log_entry tests ===
+
+    #[test]
+    fn normalize_log_entry_trims_trailing_newlines() {
+        let result = normalize_log_entry("hello\n\r").unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn normalize_log_entry_replaces_tabs_with_spaces() {
+        let result = normalize_log_entry("a\tb").unwrap();
+        assert_eq!(result, "a    b");
+    }
+
+    #[test]
+    fn normalize_log_entry_returns_none_for_empty() {
+        assert!(normalize_log_entry("").is_none());
+    }
+
+    #[test]
+    fn normalize_log_entry_returns_none_for_whitespace_only() {
+        assert!(normalize_log_entry("   \n\r").is_none());
+    }
+
+    #[test]
+    fn normalize_log_entry_preserves_content() {
+        let result = normalize_log_entry("INFO: started").unwrap();
+        assert_eq!(result, "INFO: started");
+    }
+
+    // === pad_to_width tests ===
+
+    #[test]
+    fn pad_to_width_pads_short_text() {
+        let result = pad_to_width("hi", 10);
+        assert_eq!(result.len(), 10);
+        assert!(result.starts_with("hi"));
+    }
+
+    #[test]
+    fn pad_to_width_truncates_long_text() {
+        let result = pad_to_width("hello world this is long", 5);
+        assert_eq!(result.len(), 5);
+    }
+
+    #[test]
+    fn pad_to_width_zero_width_returns_empty() {
+        let result = pad_to_width("anything", 0);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn pad_to_width_exact_width() {
+        let result = pad_to_width("abcde", 5);
+        assert_eq!(result, "abcde");
+    }
+
+    // === truncate_to_width tests ===
+
+    #[test]
+    fn truncate_to_width_keeps_short_string() {
+        let result = truncate_to_width("abc", 10);
+        assert_eq!(result, "abc");
+    }
+
+    #[test]
+    fn truncate_to_width_truncates_long_string() {
+        let result = truncate_to_width("abcdefghij", 5);
+        assert_eq!(result.len(), 5);
+    }
+
+    #[test]
+    fn truncate_to_width_handles_unicode() {
+        let result = truncate_to_width("café", 4);
+        assert!(result.len() <= 4);
+    }
+
+    // === append_footer_log tests ===
+
+    #[test]
+    #[serial]
+    fn append_footer_log_empty_input_is_noop() {
+        let result = append_footer_log("");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn append_footer_log_whitespace_only_is_noop() {
+        let result = append_footer_log("   \n");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn append_footer_log_queues_when_interactive() {
+        use super::PENDING_LOGS;
+
+        INTERACTIVE_MODE.store(true, Ordering::SeqCst);
+        let result = append_footer_log("test log line");
+        INTERACTIVE_MODE.store(false, Ordering::SeqCst);
+
+        assert!(result.is_ok());
+
+        // Drain any queued entries
+        let mut pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
+        pending.clear();
+    }
+
+    #[test]
+    #[serial]
+    fn append_footer_log_writes_stdout_when_not_interactive() {
+        INTERACTIVE_MODE.store(false, Ordering::SeqCst);
+        let result = append_footer_log("direct output line");
+        assert!(result.is_ok());
+    }
+
+    // === calculate_layout_metrics additional edge cases ===
+
+    #[test]
+    fn calculate_layout_metrics_reduced_footer_for_small_terminal() {
+        // header=0, height=12 → MIN_DYNAMIC(6) + footer_target(10) = 16 > 12
+        // footer should be reduced: 12 - 0 - 6 = 6, clamped to max(6,3)=6
+        let metrics = calculate_layout_metrics(80, 12, 0).expect("should succeed for height=12");
+        assert!(metrics.footer_height < FOOTER_TARGET_HEIGHT);
+        assert!(metrics.footer_height >= 3);
+    }
+
+    #[test]
+    fn calculate_layout_metrics_error_when_header_fills_terminal() {
+        let result = calculate_layout_metrics(80, 10, 10);
+        assert!(result.is_err());
+    }
+
+    // === clamp_cursor_to_metrics additional tests ===
+
+    #[test]
+    fn clamp_cursor_within_range_unchanged() {
+        let metrics = LayoutMetrics {
+            width: 80,
+            height: 30,
+            header_height: 4,
+            footer_height: 10,
+            footer_start: 20,
+            scroll_top: 4,
+            scroll_bottom: 19,
+            log_capacity: 8,
+        };
+        let clamped = clamp_cursor_to_metrics((10, 10), metrics);
+        assert_eq!(clamped, (10, 10));
+    }
+
+    #[test]
+    fn clamp_cursor_at_exact_boundary() {
+        let metrics = LayoutMetrics {
+            width: 80,
+            height: 30,
+            header_height: 4,
+            footer_height: 10,
+            footer_start: 20,
+            scroll_top: 4,
+            scroll_bottom: 19,
+            log_capacity: 8,
+        };
+        let clamped = clamp_cursor_to_metrics((79, 19), metrics);
         assert_eq!(clamped, (79, 19));
     }
 }

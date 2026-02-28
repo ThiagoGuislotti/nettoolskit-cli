@@ -1,8 +1,8 @@
 use crate::core::colors::Color;
 use crate::core::formatting::format_menu_item;
 use crate::rendering::components::{
-    BoxConfig, MenuConfig, render_box, render_interactive_menu,
-    render_command, render_menu_instructions,
+    render_box, render_command, render_interactive_menu, render_menu_instructions, BoxConfig,
+    MenuConfig,
 };
 use nettoolskit_core::MenuEntry;
 use owo_colors::OwoColorize;
@@ -163,7 +163,9 @@ impl CommandPalette {
         }
 
         // Skip box rendering for main menu (already shown at startup)
-        let is_main_menu = self.title.as_ref()
+        let is_main_menu = self
+            .title
+            .as_ref()
             .map(|t| t == "NetToolsKit Commands" || t == "Commands")
             .unwrap_or(true);
 
@@ -210,18 +212,13 @@ impl CommandPalette {
 
         // Render interactive menu
         let prompt = self.prompt.as_deref().unwrap_or("Select →");
-        let menu_config = MenuConfig::new(prompt, display_items)
-            .with_cursor_color(Color::PURPLE);
+        let menu_config = MenuConfig::new(prompt, display_items).with_cursor_color(Color::PURPLE);
 
         match render_interactive_menu(menu_config) {
             Ok(selected) => {
                 // Extract label from formatted string "   / help           - description"
                 // The format_menu_item adds padding between label and description
-                let label = selected
-                    .split(" - ")
-                    .next()
-                    .unwrap_or(&selected)
-                    .trim();
+                let label = selected.split(" - ").next().unwrap_or(&selected).trim();
 
                 Some(label.to_string())
             }

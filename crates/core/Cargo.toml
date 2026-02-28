@@ -30,9 +30,13 @@ anyhow = { workspace = true }
 # Tracing
 tracing = { workspace = true }
 
+# Configuration
+toml = { workspace = true }
+dirs = { workspace = true }
+
 # Enum utilities
-strum = { version = "0.26", features = ["derive"] }
-strum_macros = "0.26"
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # Async utilities (from async-utils)
 tokio = { workspace = true }
@@ -42,6 +46,10 @@ futures = { workspace = true }
 walkdir = "2.5"
 ignore = "0.4"
 globset = "0.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

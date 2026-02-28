@@ -1,6 +1,7 @@
+use crate::core::models::ExecutionSummary;
+use crate::{ExecutionConfig, ManifestExecutor};
 /// Handler for /manifest apply command
 use nettoolskit_core::ExitStatus;
-use crate::{ExecutionConfig, ManifestExecutor, ExecutionSummary};
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
 
@@ -19,15 +20,17 @@ pub async fn execute_apply(
     dry_run: bool,
 ) -> ExitStatus {
     // Resolve output root
-    let output_root = output_root.unwrap_or_else(|| {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    });
+    let output_root = output_root
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     // Display execution plan
     println!("Manifest: {}", manifest_path.display());
     println!("Output root: {}", output_root.display());
     if dry_run {
-        println!("{}", "DRY-RUN mode enabled (no files will be modified)".yellow());
+        println!(
+            "{}",
+            "DRY-RUN mode enabled (no files will be modified)".yellow()
+        );
     }
     println!();
 
@@ -56,7 +59,10 @@ pub async fn execute_apply(
             ExitStatus::Success
         }
         Err(e) => {
-            println!("{}", format!("✗ Manifest execution failed: {}", e).red().bold());
+            println!(
+                "{}",
+                format!("✗ Manifest execution failed: {}", e).red().bold()
+            );
             ExitStatus::Error
         }
     }
@@ -78,7 +84,10 @@ fn display_summary(summary: &ExecutionSummary) {
 
     // Display created files
     if !summary.created.is_empty() {
-        println!("{}", format!("Files created: {}", summary.created.len()).green());
+        println!(
+            "{}",
+            format!("Files created: {}", summary.created.len()).green()
+        );
         for path in &summary.created {
             println!("  + {}", path.display());
         }
@@ -87,7 +96,10 @@ fn display_summary(summary: &ExecutionSummary) {
 
     // Display updated files
     if !summary.updated.is_empty() {
-        println!("{}", format!("Files updated: {}", summary.updated.len()).green());
+        println!(
+            "{}",
+            format!("Files updated: {}", summary.updated.len()).green()
+        );
         for path in &summary.updated {
             println!("  ~ {}", path.display());
         }
@@ -106,9 +118,9 @@ fn display_summary(summary: &ExecutionSummary) {
     // Display statistics
     println!("{}", "Statistics".cyan().bold());
     println!("{}", "─".repeat(10).cyan());
-    println!("Total operations: {}",
-        summary.created.len() + summary.updated.len());
+    println!(
+        "Total operations: {}",
+        summary.created.len() + summary.updated.len()
+    );
     println!("Skipped: {}", summary.skipped.len());
 }
-
-

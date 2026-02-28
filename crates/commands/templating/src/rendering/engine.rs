@@ -1,10 +1,11 @@
-/// Async template rendering engine with compiled template caching
+//! Async template rendering engine with compiled template caching
+
 use crate::core::error::{TemplateError, TemplateResult};
 use dashmap::DashMap;
 use handlebars::Handlebars;
 use serde::Serialize;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::fs;
 
 /// Template rendering engine with async operations and caching
@@ -26,7 +27,7 @@ use tokio::fs;
 /// - Template updates automatically use new cache entry
 /// - No manual cache invalidation needed
 pub struct TemplateEngine {
-    handlebars: Arc<Handlebars<'static>>,
+    handlebars: Arc<RwLock<Handlebars<'static>>>,
     template_cache: Arc<DashMap<String, String>>, // Key: template_name, Value: source
     insert_todo: bool,
 }
@@ -41,8 +42,11 @@ impl TemplateEngine {
         let mut handlebars = Handlebars::new();
         handlebars.set_strict_mode(false);
 
+        // Register custom case-conversion helpers
+        crate::core::helpers::register_helpers(&mut handlebars);
+
         Self {
-            handlebars: Arc::new(handlebars),
+            handlebars: Arc::new(RwLock::new(handlebars)),
             template_cache: Arc::new(DashMap::new()),
             insert_todo: false,
         }
@@ -133,24 +137,21 @@ impl TemplateEngine {
         let is_cached = self.template_cache.contains_key(&template_name);
 
         if !is_cached {
-            // Cache miss: register template (need mutable Handlebars, use interior mutability pattern)
-            // Since Handlebars doesn't support concurrent registration, we use spawn_blocking
+            // Cache miss: register template using RwLock write access
             let handlebars_clone = Arc::clone(&self.handlebars);
             let template_source_owned = template_source.to_string();
             let template_name_clone = template_name.clone();
 
             tokio::task::spawn_blocking(move || {
-                // SAFETY: We wrap Handlebars in Arc, but registration needs &mut
-                // This is safe because:
-                // 1. We only register once per template (cached afterwards)
-                // 2. spawn_blocking ensures sequential execution for registration
-                // 3. Render operations (below) are read-only and thread-safe
-                let handlebars_mut = unsafe {
-                    let ptr = Arc::as_ptr(&handlebars_clone) as *mut Handlebars;
-                    &mut *ptr
-                };
+                let mut handlebars =
+                    handlebars_clone
+                        .write()
+                        .map_err(|err| TemplateError::RegistrationError {
+                            template: template_name_clone.clone(),
+                            message: format!("RwLock poisoned: {}", err),
+                        })?;
 
-                handlebars_mut
+                handlebars
                     .register_template_string(&template_name_clone, &template_source_owned)
                     .map_err(|err| TemplateError::RegistrationError {
                         template: template_name_clone.clone(),
@@ -168,14 +169,21 @@ impl TemplateEngine {
                 .insert(template_name.clone(), template_source.to_string());
         }
 
-        // Render template (read-only operation, thread-safe)
+        // Render template (read-only operation, thread-safe via RwLock)
         let data_json = serde_json::to_value(data).map_err(|err| TemplateError::RenderError {
             template: template_name.clone(),
             message: format!("Serialization error: {}", err),
         })?;
 
-        let mut content = self
+        let handlebars = self
             .handlebars
+            .read()
+            .map_err(|err| TemplateError::RenderError {
+                template: template_name.clone(),
+                message: format!("RwLock poisoned: {}", err),
+            })?;
+
+        let mut content = handlebars
             .render(&template_name, &data_json)
             .map_err(|err| TemplateError::RenderError {
                 template: template_name,

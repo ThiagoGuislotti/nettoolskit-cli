@@ -86,7 +86,12 @@ pub fn render_section_title(title: &str, icon: Option<&str>) {
         title.len()
     };
 
-    println!("{}", "─".repeat(underline_len).color(Color::CYAN));
+    println!(
+        "{}",
+        crate::pick_str("─", "-")
+            .repeat(underline_len)
+            .color(Color::CYAN)
+    );
     println!();
 }
 
@@ -105,12 +110,11 @@ pub fn render_section_title(title: &str, icon: Option<&str>) {
 /// ```no_run
 /// use nettoolskit_ui::format_menu_item;
 /// let item = format_menu_item("check", Some("Validate manifest file"));
-/// // Returns: "check - \x1b[90mValidate manifest file\x1b[0m"
 /// ```
 pub fn format_menu_item(label: &str, description: Option<&str>) -> String {
     match description {
         Some(desc) if !desc.is_empty() => {
-            format!("{} - \x1b[90m{}\x1b[0m", label, desc)
+            format!("{} - {}", label, crate::maybe_gray(desc))
         }
         _ => label.to_string(),
     }

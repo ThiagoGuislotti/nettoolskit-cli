@@ -1,5 +1,5 @@
-use std::io::{self, Write};
 use crate::append_footer_log;
+use std::io::{self, Write};
 
 /// A writer that redirects formatted output to the terminal footer.
 ///

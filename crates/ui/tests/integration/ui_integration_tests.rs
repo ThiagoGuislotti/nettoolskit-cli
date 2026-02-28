@@ -153,7 +153,6 @@ fn test_ui_thread_safety() {
     for handle in handles {
         handle.join().unwrap();
     }
-
 }
 
 #[test]

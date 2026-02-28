@@ -18,20 +18,22 @@
 //! - `interaction`: User interaction (palette, prompt, terminal control)
 
 pub mod core;
-pub mod rendering;
 pub mod interaction;
+pub mod rendering;
 
 // Re-export commonly used items
+pub use core::capabilities::{
+    self, capabilities, maybe_gray, pick_char, pick_str, set_color_override, set_unicode_override,
+    ColorLevel, TerminalCaps,
+};
 pub use core::colors::*;
 pub use core::style;
 // Re-export components
-pub use rendering::components::{
-    BoxConfig, render_box,
-    EnumMenuConfig, render_enum_menu,
-    MenuConfig, render_interactive_menu,
-    render_command, render_menu_instructions, render_section_title, format_menu_item,
-};
-pub use rendering::writer::UiWriter;
 pub use interaction::palette::CommandPalette;
 pub use interaction::prompt::*;
 pub use interaction::terminal::*;
+pub use rendering::components::{
+    format_menu_item, render_box, render_command, render_enum_menu, render_interactive_menu,
+    render_menu_instructions, render_section_title, BoxConfig, EnumMenuConfig, MenuConfig,
+};
+pub use rendering::writer::UiWriter;

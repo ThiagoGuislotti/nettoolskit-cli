@@ -5,7 +5,7 @@
 
 use crossterm::terminal;
 use nettoolskit_core::path_utils::directory::get_current_directory;
-use nettoolskit_ui::{render_box, BoxConfig, Color};
+use nettoolskit_ui::{capabilities, render_box, BoxConfig, Color};
 use owo_colors::OwoColorize;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -55,8 +55,9 @@ pub fn print_welcome_box() {
 pub fn print_ascii_logo() {
     let width = terminal_width().unwrap_or(120);
     let logo_color = Color::PURPLE;
+    let has_unicode = capabilities().unicode;
 
-    if width >= FULL_LOGO_MIN_WIDTH {
+    if has_unicode && width >= FULL_LOGO_MIN_WIDTH {
         println!(" {}", "███╗   ██╗███████╗████████╗████████╗ ██████╗  ██████╗ ██╗     ███████╗██╗  ██╗██╗████████╗".color(logo_color));
         println!(" {}", "████╗  ██║██╔════╝╚══██╔══╝╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██╔════╝██║ ██╔╝██║╚══██╔══╝".color(logo_color));
         println!(" {}", "██╔██╗ ██║█████╗     ██║      ██║   ██║   ██║██║   ██║██║     ███████╗█████╔╝ ██║   ██║   ".color(logo_color));

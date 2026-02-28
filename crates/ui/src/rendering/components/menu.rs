@@ -3,7 +3,7 @@
 //! Provides a configurable menu component using the inquire library
 //! with consistent styling and behavior across the application.
 
-use inquire::ui::{RenderConfig, Color as InquireColor, Styled};
+use inquire::ui::{Color as InquireColor, RenderConfig, Styled};
 use inquire::Select;
 use owo_colors::{OwoColorize, Rgb};
 use std::fmt::Display;
@@ -33,7 +33,7 @@ impl<T> MenuConfig<T> {
         Self {
             prompt: prompt.into(),
             items,
-            cursor_color: Rgb(155, 114, 255), // PRIMARY_COLOR
+            cursor_color: Rgb(155, 114, 255), // Color::PURPLE
             help_message: None,
             page_size: 6,
         }
@@ -79,19 +79,22 @@ where
     render_config.prompt_prefix = Styled::new("?").with_fg(InquireColor::Rgb {
         r: config.cursor_color.0,
         g: config.cursor_color.1,
-        b: config.cursor_color.2
+        b: config.cursor_color.2,
     });
     render_config.highlighted_option_prefix = Styled::new("❯").with_fg(InquireColor::Rgb {
         r: config.cursor_color.0,
         g: config.cursor_color.1,
-        b: config.cursor_color.2
+        b: config.cursor_color.2,
     });
     render_config.selected_option = Some(
-        render_config.selected_option.unwrap_or_default().with_fg(InquireColor::Rgb {
-            r: config.cursor_color.0,
-            g: config.cursor_color.1,
-            b: config.cursor_color.2
-        })
+        render_config
+            .selected_option
+            .unwrap_or_default()
+            .with_fg(InquireColor::Rgb {
+                r: config.cursor_color.0,
+                g: config.cursor_color.1,
+                b: config.cursor_color.2,
+            }),
     );
     render_config.help_message = render_config.help_message.with_fg(InquireColor::DarkYellow);
 

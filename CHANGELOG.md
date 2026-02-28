@@ -1,9 +1,37 @@
-# Changelog - NetToolsKit CLI
+# Changelog
 
-All notable changes to the NetToolsKit CLI will be documented in this file.
+All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- ADR baseline in `docs/adr/`:
+  - `ADR-0001` modular workspace and crate boundaries
+  - `ADR-0002` terminal rendering without alternate screen
+  - `ADR-0003` quality gates and lint policy
+
+### Changed
+- Workspace lint policy adjusted to keep CI gate strict on `clippy::all` with `-D warnings`.
+- `CHANGELOG.md` aligned to Keep a Changelog structure with an explicit `Unreleased` section.
+
+### Fixed
+- Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.
+- Interactive terminal behavior now preserves visible shell output/history on `/quit` and `Ctrl+C` (no alternate screen wipe).
+- Cursor visibility/blinking handling improved in interactive prompt flow.
+- Environment-variable race flake fixed in feature-detection tests by synchronizing tests that mutate `NTK_USE_*`.
+
+### Security
+- Dependency hardening and audit cleanups (`cargo audit` baseline cleaned for current lockfile updates).
+
+### Testing
+- Quality validation passes in workspace:
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  - `cargo test --workspace --all-targets`
+  - `cargo doc --workspace --no-deps`
 
 ## [1.0.0] - 2025-01-04
 
@@ -379,11 +407,9 @@ apply:
 
 ---
 
-## Status
-
-- **Current Version**: 0.4.0
-- **Phase 3**: ✅ Complete (Templating Engine - 33/33 tests)
-- **Phase 4**: ✅ Complete (Manifest Feature - 87/87 tests)
-- **Test Coverage**: 120/120 tests passing (100%)
-- **Architecture**: Workspace with 11 crates (commands + 2 sub-features)
-- **Documentation**: Commands dispatcher, templating, and manifest guides complete
+[Unreleased]: https://github.com/ThiagoGuislotti/NetToolsKit/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ThiagoGuislotti/NetToolsKit/releases/tag/v1.0.0
+[0.4.0]: https://github.com/ThiagoGuislotti/NetToolsKit/releases/tag/v0.4.0
+[0.3.0]: https://github.com/ThiagoGuislotti/NetToolsKit/releases/tag/v0.3.0
+[0.2.0]: https://github.com/ThiagoGuislotti/NetToolsKit/releases/tag/v0.2.0
+[0.1.0]: https://github.com/ThiagoGuislotti/NetToolsKit/releases/tag/v0.1.0

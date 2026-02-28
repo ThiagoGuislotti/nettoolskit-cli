@@ -3,12 +3,14 @@
 //! Validates that Cargo feature flags correctly enable/disable
 //! corresponding runtime feature fields in the Features struct.
 
+use super::test_helpers::{clear_feature_env_vars, ENV_LOCK};
 use nettoolskit_core::Features;
 
 #[test]
 fn test_modern_tui_feature_flag() {
     // Arrange
-    // (no setup needed)
+    let _lock = ENV_LOCK.lock().unwrap();
+    clear_feature_env_vars();
 
     // Act
     let features = Features::detect();
@@ -19,15 +21,16 @@ fn test_modern_tui_feature_flag() {
 
     #[cfg(not(feature = "modern-tui"))]
     {
-        use std::env;
-        if env::var("NTK_USE_MODERN_TUI").is_err() {
-            assert!(!features.use_modern_tui);
-        }
+        assert!(!features.use_modern_tui);
     }
 }
 
 #[test]
 fn test_event_driven_feature_flag() {
+    // Arrange
+    let _lock = ENV_LOCK.lock().unwrap();
+    clear_feature_env_vars();
+
     // Act
     let features = Features::detect();
 
@@ -37,15 +40,16 @@ fn test_event_driven_feature_flag() {
 
     #[cfg(not(feature = "event-driven"))]
     {
-        use std::env;
-        if env::var("NTK_USE_EVENT_DRIVEN").is_err() {
-            assert!(!features.use_event_driven);
-        }
+        assert!(!features.use_event_driven);
     }
 }
 
 #[test]
 fn test_frame_scheduler_feature_flag() {
+    // Arrange
+    let _lock = ENV_LOCK.lock().unwrap();
+    clear_feature_env_vars();
+
     // Act
     let features = Features::detect();
 
@@ -55,15 +59,16 @@ fn test_frame_scheduler_feature_flag() {
 
     #[cfg(not(feature = "frame-scheduler"))]
     {
-        use std::env;
-        if env::var("NTK_USE_FRAME_SCHEDULER").is_err() {
-            assert!(!features.use_frame_scheduler);
-        }
+        assert!(!features.use_frame_scheduler);
     }
 }
 
 #[test]
 fn test_persistent_sessions_feature_flag() {
+    // Arrange
+    let _lock = ENV_LOCK.lock().unwrap();
+    clear_feature_env_vars();
+
     // Act
     let features = Features::detect();
 
@@ -73,9 +78,6 @@ fn test_persistent_sessions_feature_flag() {
 
     #[cfg(not(feature = "persistent-sessions"))]
     {
-        use std::env;
-        if env::var("NTK_USE_PERSISTENT_SESSIONS").is_err() {
-            assert!(!features.use_persistent_sessions);
-        }
+        assert!(!features.use_persistent_sessions);
     }
 }

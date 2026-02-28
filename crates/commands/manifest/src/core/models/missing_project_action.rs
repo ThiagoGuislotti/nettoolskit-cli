@@ -6,6 +6,8 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum MissingProjectAction {
+    /// Abort execution with an error.
     Fail,
+    /// Skip the missing project and continue.
     Skip,
 }

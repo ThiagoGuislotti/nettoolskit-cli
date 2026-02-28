@@ -1,7 +1,7 @@
 //! Clojure language strategy implementation
 
-use async_trait::async_trait;
 use super::language_strategy::{LanguageConventions, LanguageStrategy};
+use async_trait::async_trait;
 
 /// Clojure language strategy
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct ClojureStrategy {
 }
 
 impl ClojureStrategy {
+    /// Create a new Clojure strategy with default conventions.
     pub fn new() -> Self {
         Self {
             conventions: LanguageConventions {

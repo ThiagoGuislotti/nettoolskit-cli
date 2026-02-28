@@ -10,6 +10,7 @@
 //! - Edge cases (zero duration, boundary timing)
 //! - Error type validation (`TimeoutError`)
 
+use nettoolskit_core::async_utils::timeout::{with_global_timeout, with_timeout_concurrent};
 use nettoolskit_core::async_utils::{with_timeout, TimeoutError};
 use std::time::Duration;
 use tokio::time::sleep;
@@ -122,4 +123,119 @@ fn test_timeout_error_is_error() {
 
     // Assert
     assert!(std::error::Error::source(&error).is_none());
+}
+
+// with_timeout_concurrent Tests
+
+#[tokio::test]
+async fn test_timeout_concurrent_all_succeed() {
+    let futures = vec![
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            1
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>,
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            2
+        }),
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            3
+        }),
+    ];
+
+    let results = with_timeout_concurrent(Duration::from_millis(200), futures).await;
+
+    assert_eq!(results.len(), 3);
+    assert!(results.iter().all(|r| r.is_ok()));
+    let values: Vec<i32> = results.into_iter().map(|r| r.unwrap()).collect();
+    assert_eq!(values, vec![1, 2, 3]);
+}
+
+#[tokio::test]
+async fn test_timeout_concurrent_some_timeout() {
+    let futures = vec![
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            1
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>,
+        Box::pin(async {
+            sleep(Duration::from_millis(500)).await;
+            2
+        }),
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            3
+        }),
+    ];
+
+    let results = with_timeout_concurrent(Duration::from_millis(100), futures).await;
+
+    assert_eq!(results.len(), 3);
+    assert!(results[0].is_ok());
+    assert!(results[1].is_err()); // This one should timeout
+    assert!(results[2].is_ok());
+}
+
+#[tokio::test]
+async fn test_timeout_concurrent_empty() {
+    let futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>> = vec![];
+
+    let results = with_timeout_concurrent(Duration::from_millis(100), futures).await;
+    assert!(results.is_empty());
+}
+
+// with_global_timeout Tests
+
+#[tokio::test]
+async fn test_global_timeout_all_succeed() {
+    let futures = vec![
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            10
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>,
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            20
+        }),
+        Box::pin(async {
+            sleep(Duration::from_millis(10)).await;
+            30
+        }),
+    ];
+
+    let result = with_global_timeout(Duration::from_millis(200), futures).await;
+
+    assert!(result.is_ok());
+    let values = result.unwrap();
+    assert_eq!(values, vec![10, 20, 30]);
+}
+
+#[tokio::test]
+async fn test_global_timeout_expires() {
+    let futures = vec![
+        Box::pin(async {
+            sleep(Duration::from_millis(500)).await;
+            1
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>,
+        Box::pin(async {
+            sleep(Duration::from_millis(500)).await;
+            2
+        }),
+    ];
+
+    let result = with_global_timeout(Duration::from_millis(50), futures).await;
+
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), TimeoutError));
+}
+
+#[tokio::test]
+async fn test_global_timeout_empty() {
+    let futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = i32> + Send>>> = vec![];
+
+    let result = with_global_timeout(Duration::from_millis(100), futures).await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
 }

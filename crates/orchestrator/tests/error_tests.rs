@@ -16,7 +16,10 @@ fn test_exit_status_success_variant() {
     let is_success = matches!(status, ExitStatus::Success);
 
     // Assert
-    assert!(is_success, "ExitStatus::Success should match Success variant");
+    assert!(
+        is_success,
+        "ExitStatus::Success should match Success variant"
+    );
 }
 
 #[test]

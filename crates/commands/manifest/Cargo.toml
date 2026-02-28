@@ -43,7 +43,7 @@ walkdir = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
-anyhow = "1.0"
+anyhow = { workspace = true }
 
 # Telemetry
 tracing = { workspace = true }
@@ -54,3 +54,6 @@ tempfile = "3.10"
 [lib]
 name = "nettoolskit_manifest"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

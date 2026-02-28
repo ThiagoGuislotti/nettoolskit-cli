@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  BINARY_NAME: ntk
+
+jobs:
+  # ─── Create Release ────────────────────────────────────────────
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Extract changelog section for this version
+          version="${{ steps.get_version.outputs.version }}"
+          if grep -q "## \[${version}\]" CHANGELOG.md 2>/dev/null; then
+            sed -n "/## \[${version}\]/,/## \[/p" CHANGELOG.md | head -n -1 > release_notes.md
+          else
+            echo "Release ${version}" > release_notes.md
+            echo "" >> release_notes.md
+            git log --oneline --no-merges "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" >> release_notes.md
+          fi
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.get_version.outputs.version }}"
+          body_path: release_notes.md
+          draft: true
+          prerelease: false
+
+  # ─── Build Binaries ────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --package nettoolskit-cli
+
+      # ── Generate shell completions ──
+      - name: Generate shell completions
+        shell: bash
+        run: |
+          mkdir -p completions
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            binary="target/${{ matrix.target }}/release/${BINARY_NAME}.exe"
+          else
+            binary="target/${{ matrix.target }}/release/${BINARY_NAME}"
+          fi
+          # Only generate if binary can run on host
+          if [[ "${{ matrix.target }}" != "aarch64-unknown-linux-gnu" ]]; then
+            for shell in bash zsh fish powershell; do
+              "$binary" completions "$shell" > "completions/${BINARY_NAME}.${shell}" 2>/dev/null || true
+            done
+          fi
+
+      # ── Package ──
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          staging="${BINARY_NAME}-${version}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "$staging/"
+          cp README.md LICENSE* CHANGELOG.md "$staging/" 2>/dev/null || true
+          if [ -d completions ] && [ "$(ls -A completions)" ]; then
+            cp -r completions "$staging/"
+          fi
+          tar czf "${staging}.tar.gz" "$staging"
+          echo "ASSET=${staging}.tar.gz" >> "$GITHUB_ENV"
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $version = "${{ needs.create-release.outputs.version }}"
+          $staging = "${env:BINARY_NAME}-${version}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $staging
+          Copy-Item "target/${{ matrix.target }}/release/${env:BINARY_NAME}.exe" $staging
+          Copy-Item README.md, CHANGELOG.md -Destination $staging -ErrorAction SilentlyContinue
+          if (Test-Path completions) {
+            Copy-Item -Recurse completions $staging
+          }
+          Compress-Archive -Path $staging -DestinationPath "${staging}.zip"
+          echo "ASSET=${staging}.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+
+      # ── Checksums ──
+      - name: Generate checksum
+        shell: bash
+        run: |
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            sha256sum "${{ env.ASSET }}" > "${{ env.ASSET }}.sha256"
+          else
+            sha256sum "${{ env.ASSET }}" > "${{ env.ASSET }}.sha256"
+          fi
+      - name: Upload checksum
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}.sha256

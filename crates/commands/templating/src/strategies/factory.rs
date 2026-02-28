@@ -1,4 +1,5 @@
-/// Factory pattern for language strategy instantiation
+//! Factory pattern for language strategy instantiation
+
 use super::clojure::ClojureStrategy;
 use super::dotnet::DotNetStrategy;
 use super::go::GoStrategy;
@@ -6,6 +7,7 @@ use super::java::JavaStrategy;
 use super::language_strategy::LanguageStrategy;
 use super::python::PythonStrategy;
 use super::rust::RustStrategy;
+use super::typescript::TypeScriptStrategy;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,12 +15,20 @@ use std::sync::Arc;
 /// Supported languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
+    /// .NET / C# projects
     DotNet,
+    /// Java projects
     Java,
+    /// Go projects
     Go,
+    /// Python projects
     Python,
+    /// Rust projects
     Rust,
+    /// Clojure projects
     Clojure,
+    /// TypeScript projects
+    TypeScript,
 }
 
 impl FromStr for Language {
@@ -32,6 +42,7 @@ impl FromStr for Language {
             "python" | "py" => Ok(Language::Python),
             "rust" | "rs" => Ok(Language::Rust),
             "clojure" | "clj" => Ok(Language::Clojure),
+            "typescript" | "ts" => Ok(Language::TypeScript),
             _ => Err(format!("Unknown language: {}", s)),
         }
     }
@@ -52,6 +63,7 @@ impl Language {
             Language::Python => "python",
             Language::Rust => "rust",
             Language::Clojure => "clojure",
+            Language::TypeScript => "typescript",
         }
     }
 }
@@ -74,6 +86,7 @@ impl LanguageStrategyFactory {
         strategies.insert(Language::Python, Arc::new(PythonStrategy::new()));
         strategies.insert(Language::Rust, Arc::new(RustStrategy::new()));
         strategies.insert(Language::Clojure, Arc::new(ClojureStrategy::new()));
+        strategies.insert(Language::TypeScript, Arc::new(TypeScriptStrategy::new()));
 
         Self { strategies }
     }

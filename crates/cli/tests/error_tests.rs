@@ -125,14 +125,8 @@ fn test_exit_status_error_vs_interrupted() {
     let interrupted_is_not_error = !matches!(interrupted, ExitStatus::Error);
 
     // Assert
-    assert!(
-        error_is_not_interrupted,
-        "Error should not be Interrupted"
-    );
-    assert!(
-        interrupted_is_not_error,
-        "Interrupted should not be Error"
-    );
+    assert!(error_is_not_interrupted, "Error should not be Interrupted");
+    assert!(interrupted_is_not_error, "Interrupted should not be Error");
 }
 
 #[test]

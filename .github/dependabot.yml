@@ -1,0 +1,48 @@
+version: 2
+
+# Enable automated security updates from Dependabot
+enable-beta-ecosystems: true
+
+updates:
+  # Rust crate dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "deps(cargo)"
+    groups:
+      # Group minor/patch updates for workspace dependencies
+      rust-minor:
+        update-types:
+          - "minor"
+          - "patch"
+      # Keep major updates separate for review
+    reviewers:
+      - "ThiagoGuislotti"
+    # Dependabot will also open security PRs outside of this schedule
+    # when new advisories are published for Rust crates.
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

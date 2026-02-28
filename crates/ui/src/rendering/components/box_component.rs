@@ -9,6 +9,8 @@
 use nettoolskit_core::string_utils::string::truncate_directory_with_middle;
 use owo_colors::{OwoColorize, Rgb};
 
+use crate::core::capabilities::{pick_char, pick_str};
+
 /// Configuration for rendering a bordered box
 #[derive(Debug, Clone)]
 pub struct BoxConfig {
@@ -80,7 +82,12 @@ impl BoxConfig {
     }
 
     /// Add a footer item
-    pub fn add_footer_item(mut self, label: impl Into<String>, value: impl Into<String>, color: Rgb) -> Self {
+    pub fn add_footer_item(
+        mut self,
+        label: impl Into<String>,
+        value: impl Into<String>,
+        color: Rgb,
+    ) -> Self {
         self.footer_items.push((label.into(), value.into(), color));
         self
     }
@@ -113,8 +120,16 @@ pub fn render_box(config: BoxConfig) {
     let border_color = config.border_color;
     let width = config.width;
 
+    // Resolve box-drawing characters with ASCII fallback
+    let corner_tl = pick_char('╭', '+');
+    let corner_tr = pick_char('╮', '+');
+    let corner_bl = pick_char('╰', '+');
+    let corner_br = pick_char('╯', '+');
+    let vert = pick_str("│", "|");
+    let horiz = pick_str("─", "-");
+
     // Top border
-    let top_border = format!("╭{}╮", "─".repeat(width - 2));
+    let top_border = format!("{}{}{}", corner_tl, horiz.repeat(width - 2), corner_tr);
     println!("{}", top_border.color(border_color));
 
     // Title line
@@ -126,10 +141,10 @@ pub fn render_box(config: BoxConfig) {
 
         let line = format!(
             "{} {prefix} {}{}{}",
-            "│".color(border_color),
+            vert.color(border_color),
             config.title.color(config.title_color).bold(),
             padding,
-            "│".color(border_color)
+            vert.color(border_color)
         );
         println!("{}", line.trim_end());
     } else {
@@ -139,10 +154,10 @@ pub fn render_box(config: BoxConfig) {
 
         let line = format!(
             "{} {}{}{}",
-            "│".color(border_color),
+            vert.color(border_color),
             config.title.color(config.title_color).bold(),
             padding,
-            "│".color(border_color)
+            vert.color(border_color)
         );
         println!("{}", line.trim_end());
     }
@@ -154,17 +169,17 @@ pub fn render_box(config: BoxConfig) {
         let padding = " ".repeat(width.saturating_sub(content_len));
         let line = format!(
             "{}{}{}{}",
-            "│".color(border_color),
+            vert.color(border_color),
             format!("    {}", subtitle).color(border_color),
             padding,
-            "│".color(border_color)
+            vert.color(border_color)
         );
         println!("{}", line.trim_end());
     }
 
     // Blank line before footer if we have footer items
     if !config.footer_items.is_empty() {
-        let blank_line = format!("│{}│", " ".repeat(width - 2));
+        let blank_line = format!("{}{}{}", vert, " ".repeat(width - 2), vert);
         println!("{}", blank_line.color(border_color).to_string().trim_end());
     }
 
@@ -188,17 +203,17 @@ pub fn render_box(config: BoxConfig) {
 
         let line = format!(
             "{}{}{}{}{}",
-            "│".color(border_color),
+            vert.color(border_color),
             label_text.color(Rgb(128, 128, 128)), // Gray for labels
             truncated_value.color(*value_color),
             padding,
-            "│".color(border_color)
+            vert.color(border_color)
         );
         println!("{}", line.trim_end());
     }
 
     // Bottom border
-    let bottom_border = format!("╰{}╯", "─".repeat(width - 2));
+    let bottom_border = format!("{}{}{}", corner_bl, horiz.repeat(width - 2), corner_br);
     println!("{}", bottom_border.color(border_color));
 
     if config.add_spacing {

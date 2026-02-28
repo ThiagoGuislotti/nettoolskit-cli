@@ -1,6 +1,6 @@
+use crossterm::style::{Color, SetForegroundColor};
 use nettoolskit_ui::core::style::{rgb_to_crossterm, set_fg};
 use owo_colors::Rgb;
-use crossterm::style::{Color, SetForegroundColor};
 
 #[test]
 fn test_rgb_to_crossterm_conversion() {

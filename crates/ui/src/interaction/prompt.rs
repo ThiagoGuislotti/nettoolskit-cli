@@ -3,6 +3,7 @@
 //! This module provides a consistent interface for displaying the CLI prompt
 //! across all input contexts, ensuring uniform styling and behavior.
 
+use crate::core::capabilities::capabilities;
 use crossterm::{cursor, execute};
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
@@ -21,8 +22,12 @@ const PROMPT_SYMBOL: &str = "> ";
 pub fn render_prompt() -> io::Result<()> {
     force_blinking_cursor()?;
 
-    // Reset terminal attributes first to prevent color bleeding from previous commands
-    print!("\x1b[0m{}", PROMPT_SYMBOL.white());
+    if capabilities().color.has_color() {
+        // Reset terminal attributes first to prevent color bleeding from previous commands
+        print!("\x1b[0m{}", PROMPT_SYMBOL.white());
+    } else {
+        print!("{PROMPT_SYMBOL}");
+    }
     io::stdout().flush()
 }
 
@@ -43,7 +48,11 @@ pub fn render_prompt() -> io::Result<()> {
 /// ```
 pub fn render_prompt_with_command(cmd: &str) -> io::Result<()> {
     force_blinking_cursor()?;
-    print!("\r\x1b[K{} {}", PROMPT_SYMBOL.white(), cmd);
+    if capabilities().color.has_color() {
+        print!("\r\x1b[K{} {}", PROMPT_SYMBOL.white(), cmd);
+    } else {
+        print!("\r\x1b[K{PROMPT_SYMBOL}{cmd}");
+    }
     io::stdout().flush()
 }
 
@@ -59,7 +68,11 @@ pub fn render_prompt_with_command(cmd: &str) -> io::Result<()> {
 /// println!("{}", prompt);
 /// ```
 pub fn get_prompt_string() -> String {
-    format!("{}", PROMPT_SYMBOL.white())
+    if capabilities().color.has_color() {
+        format!("{}", PROMPT_SYMBOL.white())
+    } else {
+        PROMPT_SYMBOL.to_string()
+    }
 }
 
 /// Get the raw prompt symbol without formatting

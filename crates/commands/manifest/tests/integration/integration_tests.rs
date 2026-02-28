@@ -166,7 +166,10 @@ async fn test_integration_full_workflow_with_templates() {
     if let Err(ref e) = result {
         eprintln!("Full workflow test error: {}", e);
     }
-    assert!(result.is_ok(), "Full workflow should succeed with real templates");
+    assert!(
+        result.is_ok(),
+        "Full workflow should succeed with real templates"
+    );
     let summary = result.unwrap();
 
     // Verify execution summary

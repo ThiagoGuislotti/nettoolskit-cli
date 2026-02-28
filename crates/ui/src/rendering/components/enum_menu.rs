@@ -3,7 +3,7 @@
 //! Provides a reusable, type-safe menu system for enums that implement MenuProvider.
 //! This allows consistent menu rendering across all command types.
 
-use crate::{BoxConfig, render_box, MenuConfig, render_interactive_menu, Color};
+use crate::{render_box, render_interactive_menu, BoxConfig, Color, MenuConfig};
 use nettoolskit_core::MenuProvider;
 use std::fmt::Display;
 
@@ -128,7 +128,7 @@ where
     T::all_variants()
         .into_iter()
         .find(|variant| variant.label() == selected_label)
-        .ok_or_else(|| inquire::InquireError::Custom(
-            format!("Invalid selection: {}", selected_label).into()
-        ))
+        .ok_or_else(|| {
+            inquire::InquireError::Custom(format!("Invalid selection: {}", selected_label).into())
+        })
 }

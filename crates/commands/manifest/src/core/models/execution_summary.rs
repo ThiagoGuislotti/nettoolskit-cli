@@ -6,9 +6,13 @@ use std::path::PathBuf;
 /// Summary of manifest execution
 #[derive(Default, Debug)]
 pub struct ExecutionSummary {
+    /// Files created during execution.
     pub created: Vec<PathBuf>,
+    /// Files updated during execution.
     pub updated: Vec<PathBuf>,
+    /// Files skipped with reason.
     pub skipped: Vec<(PathBuf, String)>,
+    /// Additional informational notes.
     pub notes: Vec<String>,
 }
 

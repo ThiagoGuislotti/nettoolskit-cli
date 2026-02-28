@@ -91,13 +91,14 @@ fn test_factory_supported_languages() {
     let languages = factory.supported_languages();
 
     // Assert
-    assert_eq!(languages.len(), 6);
+    assert_eq!(languages.len(), 7);
     assert!(languages.contains(&Language::DotNet));
     assert!(languages.contains(&Language::Java));
     assert!(languages.contains(&Language::Go));
     assert!(languages.contains(&Language::Python));
     assert!(languages.contains(&Language::Rust));
     assert!(languages.contains(&Language::Clojure));
+    assert!(languages.contains(&Language::TypeScript));
 }
 
 #[test]

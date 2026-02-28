@@ -1,0 +1,6 @@
+---
+source: crates/ui/tests/rendering/snapshot_tests.rs
+assertion_line: 40
+expression: result
+---
+   / manifest apply --force  - [90mForce apply manifest[0m

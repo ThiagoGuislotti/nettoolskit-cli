@@ -3,10 +3,10 @@
 //! Validates append_domain_tasks() generates correct RenderTasks for
 //! value objects, entities, domain events, repositories, and enums.
 
-use nettoolskit_manifest::models::{ArtifactKind, ManifestContext, RenderTask};
 use super::test_helpers::{
     build_template_index, create_test_context_with_all_artifacts, create_test_conventions,
 };
+use nettoolskit_manifest::models::{ArtifactKind, ManifestContext, RenderTask};
 
 #[test]
 fn test_append_domain_tasks_generates_all_artifact_types() {

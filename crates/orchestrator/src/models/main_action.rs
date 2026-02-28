@@ -23,6 +23,10 @@ pub enum MainAction {
     #[strum(serialize = "translate")]
     Translate,
 
+    /// View and edit user configuration
+    #[strum(serialize = "config")]
+    Config,
+
     /// Exit NetToolsKit CLI
     #[strum(serialize = "quit")]
     Quit,
@@ -38,6 +42,7 @@ impl MainAction {
             MainAction::Help => "Display help information and available commands",
             MainAction::Manifest => "Manage and apply manifests (submenu)",
             MainAction::Translate => "Translate code between languages (deferred)",
+            MainAction::Config => "View and edit user configuration",
             MainAction::Quit => "Exit NetToolsKit CLI",
         }
     }
@@ -49,6 +54,7 @@ impl MenuEntry for MainAction {
             MainAction::Help => "/help",
             MainAction::Manifest => "/manifest",
             MainAction::Translate => "/translate",
+            MainAction::Config => "/config",
             MainAction::Quit => "/quit",
         }
     }
@@ -78,7 +84,8 @@ impl MenuProvider for MainAction {
 pub fn get_main_action(slash: &str) -> Option<MainAction> {
     use std::str::FromStr;
     // Extract only the first part (the command) and ignore subcommands
-    let name = slash.trim()
+    let name = slash
+        .trim()
         .trim_start_matches('/')
         .split_whitespace()
         .next()
@@ -86,5 +93,3 @@ pub fn get_main_action(slash: &str) -> Option<MainAction> {
         .trim();
     MainAction::from_str(name).ok()
 }
-
-

@@ -35,11 +35,11 @@ pub fn rgb_to_crossterm(rgb: Rgb) -> Color {
 ///
 /// ```
 /// use nettoolskit_ui::style::set_fg;
-/// use nettoolskit_ui::PRIMARY_COLOR;
+/// use nettoolskit_ui::Color;
 /// use crossterm::queue;
 /// use std::io::stdout;
 ///
-/// queue!(stdout(), set_fg(PRIMARY_COLOR)).unwrap();
+/// queue!(stdout(), set_fg(Color::PURPLE)).unwrap();
 /// ```
 #[inline]
 pub fn set_fg(rgb: Rgb) -> SetForegroundColor {

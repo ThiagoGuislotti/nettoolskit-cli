@@ -59,7 +59,10 @@ pub async fn discover_manifests(root: Option<PathBuf>) -> Vec<ManifestInfo> {
 pub fn display_manifests(manifests: &[ManifestInfo]) {
     use nettoolskit_ui::Color;
     if manifests.is_empty() {
-        println!("{}", "No manifest files found in workspace.".color(Color::YELLOW));
+        println!(
+            "{}",
+            "No manifest files found in workspace.".color(Color::YELLOW)
+        );
         return;
     }
 
@@ -74,7 +77,10 @@ pub fn display_manifests(manifests: &[ManifestInfo]) {
             manifest.language.color(Color::YELLOW)
         );
         println!("   📁 Path: {}", manifest.path.display());
-        println!("   🔢 Contexts: {}", manifest.context_count.to_string().color(Color::GREEN));
+        println!(
+            "   🔢 Contexts: {}",
+            manifest.context_count.to_string().color(Color::GREEN)
+        );
 
         if i < manifests.len() - 1 {
             println!();
@@ -82,7 +88,11 @@ pub fn display_manifests(manifests: &[ManifestInfo]) {
     }
 
     println!();
-    println!("{} {}", "Total:".bold(), manifests.len().to_string().color(Color::GREEN).bold());
+    println!(
+        "{} {}",
+        "Total:".bold(),
+        manifests.len().to_string().color(Color::GREEN).bold()
+    );
 }
 
 /// Find manifest files in directory tree
@@ -125,5 +135,3 @@ async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     })
     .await?
 }
-
-
