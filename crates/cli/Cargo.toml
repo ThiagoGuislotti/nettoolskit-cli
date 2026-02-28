@@ -52,7 +52,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # Additional dependencies
-ctrlc = "3.4"
+ctrlc = "3.5"
 
 [dev-dependencies]
 tokio-test = "0.4"
