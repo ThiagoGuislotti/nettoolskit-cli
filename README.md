@@ -3,7 +3,7 @@
 > Interactive command-line interface for .NET development with templates, manifests, and automation tools
 
 ![Rust](https://img.shields.io/badge/Rust-2021_Edition-orange?logo=rust)
-![MSRV](https://img.shields.io/badge/MSRV-1.75.0-blue)
+![MSRV](https://img.shields.io/badge/MSRV-1.85.0-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Build](https://img.shields.io/badge/Build-Passing-brightgreen)
 
@@ -45,6 +45,7 @@ Objectives:
 - [Contents](#contents)
   - [Architecture](#architecture)
   - [Crates](#crates)
+  - [Operations](#operations)
 - [Build and Tests](#build-and-tests)
 - [Contributing](#contributing)
 - [Dependencies](#dependencies)
@@ -112,6 +113,14 @@ This workspace is organized as a multi-crate Rust project. Each crate has its ow
 | `manifest` | Manifest parsing, validation, and execution | [crates/commands/manifest/README.md](crates/commands/manifest/README.md) |
 | `templating` | Template rendering and resolution via Handlebars | [crates/commands/templating/README.md](crates/commands/templating/README.md) |
 | `translate` | Template translation handler and types | [crates/commands/translate/README.md](crates/commands/translate/README.md) |
+
+---
+
+### Operations
+
+Operational runbook and incident procedures:
+
+- [Incident Response and Troubleshooting Playbook](docs/operations/incident-response-playbook.md)
 
 ---
 
@@ -199,6 +208,7 @@ We follow semantic versioning and conventional commits. Please ensure your contr
   - [crates/orchestrator/README.md](crates/orchestrator/README.md)
   - [crates/otel/README.md](crates/otel/README.md)
   - [crates/ui/README.md](crates/ui/README.md)
+  - [docs/operations/incident-response-playbook.md](docs/operations/incident-response-playbook.md)
 
 ### External References
 

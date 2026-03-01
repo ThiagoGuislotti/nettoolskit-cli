@@ -3,10 +3,9 @@
 //! Uses `assert_cmd` to exercise the compiled binary as a subprocess,
 //! verifying exit codes, stdout/stderr output, and overall behavior.
 //!
-//! NOTE: `ntk manifest` sub-subcommands (check, apply, render, list) are
-//! currently interactive-only (via `inquire` menus). Non-interactive E2E
-//! tests for those commands require refactoring `Commands::Manifest` to
-//! accept clap sub-subcommands. See Phase 4.2.3–4.2.5 in the tracker.
+//! Manifest subcommands are supported non-interactively via clap
+//! (`list`, `check`, `render`, `apply`) while preserving interactive mode
+//! when no manifest subcommand is provided.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
@@ -90,4 +89,33 @@ fn unknown_subcommand_fails() {
 fn verbose_flag_is_accepted() {
     // --verbose with --help should succeed (verbose is a global flag)
     ntk().args(["--verbose", "--help"]).assert().success();
+}
+
+// ─── 4.2.3 / 4.2.4 / 4.2.5 — manifest sub-subcommands ─────────────────
+
+#[test]
+fn manifest_list_subcommand_returns_zero() {
+    ntk()
+        .args(["manifest", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Manifest").or(predicate::str::contains("manifest")));
+}
+
+#[test]
+fn manifest_check_subcommand_returns_zero() {
+    ntk()
+        .args(["manifest", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Manifest").or(predicate::str::contains("manifest")));
+}
+
+#[test]
+fn manifest_render_dry_run_subcommand_returns_zero() {
+    ntk()
+        .args(["manifest", "render", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Render").or(predicate::str::contains("render")));
 }

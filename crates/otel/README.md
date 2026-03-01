@@ -6,37 +6,37 @@
 
 ## Introduction
 
-`nettoolskit-otel` provides lightweight, in-process observability utilities for the CLI, including structured logging via `tracing` and a custom metrics/timer system.
+`nettoolskit-otel` provides observability utilities for the CLI, including structured logging via `tracing`, optional OTLP trace/metric export via OpenTelemetry, and a custom metrics/timer system.
 It is designed to be easy to integrate and safe to use in both interactive and non-interactive modes.
 
-> **Note:** Despite the crate name, this module does **not** use the OpenTelemetry SDK.
-> It provides a purpose-built, zero-dependency metrics layer optimized for short-lived CLI
-> processes. See [Design Decision](#design-decision) below.
+> **Note:** Metrics remain purpose-built and in-process for CLI performance and simplicity.
+> When configured, the same metrics are also mirrored to OTLP for centralized observability.
 
 ---
 
 ## Features
 
 -   ✅ Tracing initialization helpers for common environments (`init_tracing`, `init_development_tracing`)
+-   ✅ Optional OpenTelemetry OTLP trace and metric export (`OTEL_EXPORTER_OTLP_*` / `NTK_OTLP_*`)
 -   ✅ Metrics collector (`Metrics`) with counters, gauges, and timings (custom, in-process)
 -   ✅ Timing helper (`Timer`) with RAII auto-record and macros (`time_operation!`, `log_operation!`)
+-   ✅ Correlation ID helper (`next_correlation_id`) for session/command log correlation
 -   ✅ Interactive-mode tracing support via `nettoolskit-ui::UiWriter`
 
 ---
 
 ## Design Decision
 
-This crate intentionally uses a custom metrics implementation rather than the full OpenTelemetry SDK:
+This crate uses a hybrid approach:
 
-| Aspect | Custom (current) | Full OTEL SDK |
-|--------|-----------------|---------------|
-| Dependencies | `tracing` only | `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp` |
-| Runtime overhead | Zero when not queried | Batch exporter thread, network I/O |
-| External collector | Not needed | Required (Jaeger, Grafana, etc.) |
-| CLI suitability | Excellent (short-lived) | Designed for long-lived services |
+| Aspect | Metrics (`Metrics`/`Timer`) | Traces (`tracing-opentelemetry`) |
+|--------|------------------------------|----------------------------------|
+| Runtime model | In-process API + optional OTLP mirror | Optional OTLP export |
+| Network dependency | None unless OTLP metrics endpoint is set | None unless OTLP traces endpoint is set |
+| Primary use | CLI counters/gauges/timings and runtime KPIs | Distributed trace correlation |
+| Backends | Local memory and/or OTEL Collector-compatible backends | Jaeger, Grafana Tempo, OTEL Collector |
 
-If future requirements demand distributed tracing or OTLP export, the `tracing-opentelemetry`
-bridge can be added as a subscriber layer without changing the existing `Metrics`/`Timer` API.
+This keeps local CLI runs lightweight while enabling enterprise telemetry pipelines when needed.
 
 ---
 
@@ -53,6 +53,8 @@ bridge can be added as a subscriber layer without changing the existing `Metrics
 - [API Reference](#api-reference)
   - [Tracing Setup](#tracing-setup)
   - [Telemetry](#telemetry)
+  - [Correlation IDs](#correlation-ids)
+  - [Runtime Metrics Catalog](#runtime-metrics-catalog)
 - [References](#references)
 - [License](#license)
 
@@ -89,6 +91,42 @@ fn main() -> Result<()> {
 	Ok(())
 }
 ```
+
+## OTLP Export Configuration
+
+Trace export is enabled automatically when an OTLP traces endpoint is present:
+
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (preferred)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `NTK_OTLP_TRACES_ENDPOINT` (project-specific override)
+- `NTK_OTLP_ENDPOINT` (project-specific fallback)
+
+Optional protocol and timeout:
+
+- `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` or `NTK_OTLP_TRACES_PROTOCOL`
+- fallback: `OTEL_EXPORTER_OTLP_PROTOCOL` or `NTK_OTLP_PROTOCOL`
+- values: `grpc` (default) or `http/protobuf`
+- `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` or `NTK_OTLP_TRACES_TIMEOUT_MS`
+- fallback: `OTEL_EXPORTER_OTLP_TIMEOUT` or `NTK_OTLP_TIMEOUT_MS`
+- timeout unit: milliseconds (default: `10000`)
+
+Metrics export is enabled automatically when a metrics endpoint is present:
+
+- `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (preferred)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `NTK_OTLP_METRICS_ENDPOINT` (project-specific override)
+- `NTK_OTLP_ENDPOINT` (project-specific fallback)
+
+Optional protocol and timeout:
+
+- `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` or `NTK_OTLP_METRICS_PROTOCOL`
+- fallback: `OTEL_EXPORTER_OTLP_PROTOCOL` or `NTK_OTLP_PROTOCOL`
+- values: `grpc` (default) or `http/protobuf`
+- `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` or `NTK_OTLP_METRICS_TIMEOUT_MS`
+- fallback: `OTEL_EXPORTER_OTLP_TIMEOUT` or `NTK_OTLP_TIMEOUT_MS`
+- timeout unit: milliseconds (default: `10000`)
+
+For short-lived executions, call `shutdown_tracing()` before process exit to flush pending OTLP data.
 
 ---
 
@@ -175,6 +213,34 @@ impl Timer {
 	pub fn stop(self) -> std::time::Duration;
 }
 ```
+
+### Correlation IDs
+
+```rust
+pub fn next_correlation_id(prefix: &str) -> String;
+```
+
+### Runtime Metrics Catalog
+
+The orchestrator emits a stable runtime/business metrics taxonomy:
+
+- Counters:
+  - `runtime_commands_total`
+  - `runtime_commands_success_total`
+  - `runtime_commands_error_total`
+  - `runtime_commands_interrupted_total`
+  - `runtime_command_<key>_total`
+  - `runtime_command_<key>_{success|error|interrupted}_total`
+- Timings:
+  - `runtime_command_latency_all`
+  - `runtime_command_latency_<key>`
+- Gauges:
+  - `runtime_command_success_rate_pct`
+  - `runtime_command_error_rate_pct`
+  - `runtime_command_cancellation_rate_pct`
+  - `runtime_last_command_duration_ms`
+  - `runtime_command_avg_latency_ms`
+  - `runtime_command_<key>_avg_latency_ms`
 
 ---
 

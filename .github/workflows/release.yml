@@ -49,6 +49,36 @@ jobs:
           draft: true
           prerelease: false
 
+  # ─── SBOM Generation (CycloneDX + SPDX) ───────────────────────
+  sbom:
+    name: SBOM (CycloneDX + SPDX)
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-sbom
+      - name: Install cargo-sbom
+        run: cargo install cargo-sbom --locked
+      - name: Generate SBOM files
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          base="${BINARY_NAME}-${version}-sbom"
+
+          cargo sbom --project-directory . --output-format cyclone_dx_json_1_6 > "${base}.cyclonedx.json"
+          cargo sbom --project-directory . --output-format spdx_json_2_3 > "${base}.spdx.json"
+
+          ls -lh "${base}.cyclonedx.json" "${base}.spdx.json"
+      - name: Upload SBOM release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.cyclonedx.json
+            *.spdx.json
+
   # ─── Build Binaries ────────────────────────────────────────────
   build:
     name: Build (${{ matrix.target }})

@@ -1,31 +1,37 @@
 //! Telemetry, metrics, and structured logging for NetToolsKit CLI
 //!
-//! This crate provides lightweight, in-process observability utilities:
+//! This crate provides observability utilities for the CLI:
 //!
 //! - **Structured logging** via `tracing` + `tracing-subscriber` (env-filter, compact/pretty)
-//! - **Metrics** — thread-safe counters, gauges, and timing histograms (custom, in-process)
+//! - **OpenTelemetry traces** via `tracing-opentelemetry` + OTLP exporter (optional, env-driven)
+//! - **Metrics** — thread-safe counters, gauges, and timing histograms (custom, in-process),
+//!   with optional OTLP metric mirror when exporter env vars are configured
 //! - **Timer** — RAII-based operation timing with auto-record on drop
+//! - **Correlation IDs** — lightweight execution/command identifiers for log correlation
 //!
 //! # Design Decision
 //!
-//! This crate intentionally uses a custom, zero-dependency metrics implementation
-//! rather than the full OpenTelemetry SDK. For a CLI tool, the overhead of an OTLP
-//! exporter, batched spans, and an external collector is unnecessary. The custom
-//! `Metrics`/`Timer` approach provides:
+//! The crate now supports OpenTelemetry trace export when configured through
+//! `OTEL_EXPORTER_OTLP_*` (or `NTK_OTLP_*`) environment variables.
+//! Metrics continue to be recorded in-process via the custom `Metrics`/`Timer`
+//! implementation and can also be mirrored to OTLP when metrics endpoints are configured.
 //!
-//! - Zero runtime overhead when metrics are not queried
-//! - No external collector or network dependency
-//! - Simple, predictable behavior for short-lived CLI processes
+//! This hybrid model provides:
 //!
-//! If future requirements demand distributed tracing or OTLP export, the
-//! `tracing-opentelemetry` bridge can be added as a layer without changing
-//! the existing `Metrics`/`Timer` API.
+//! - Optional distributed tracing export for collector-backed environments
+//! - Optional distributed metrics export for collector-backed environments
+//! - Zero network dependency when OTLP endpoint variables are not configured
+//! - Simple, predictable local metrics API for short-lived CLI processes
 
+/// Correlation id helpers for tracing context.
+pub mod correlation;
 /// In-process metrics and timers.
 pub mod telemetry;
 /// Tracing subscriber configuration and initialization.
 pub mod tracing_setup;
 
+/// Re-exported correlation id generator.
+pub use correlation::next_correlation_id;
 /// Re-exported metrics and timer types.
 pub use telemetry::{Metrics, Timer};
 /// Re-exported tracing initialization functions and configuration.

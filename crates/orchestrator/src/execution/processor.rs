@@ -2,11 +2,133 @@
 
 use crate::models::{ExitStatus, MainAction};
 use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
-use nettoolskit_otel::{Metrics, Timer};
+use nettoolskit_otel::{next_correlation_id, Metrics, Timer};
 use owo_colors::OwoColorize;
 use std::path::Path;
+use std::sync::OnceLock;
+use std::time::Duration;
 use strum::IntoEnumIterator;
-use tracing::info;
+use tracing::{info, info_span};
+
+static RUNTIME_METRICS: OnceLock<Metrics> = OnceLock::new();
+
+fn runtime_metrics() -> &'static Metrics {
+    RUNTIME_METRICS.get_or_init(Metrics::new)
+}
+
+fn sanitize_metric_component(input: &str) -> String {
+    let mut normalized = String::with_capacity(input.len());
+    let mut previous_was_separator = false;
+
+    for ch in input.trim().to_ascii_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            normalized.push(ch);
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            normalized.push('_');
+            previous_was_separator = true;
+        }
+    }
+
+    let trimmed = normalized.trim_matches('_');
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn command_metric_key(parsed: Option<MainAction>, subcommand: Option<&str>, cmd: &str) -> String {
+    match parsed {
+        Some(MainAction::Manifest) => {
+            if let Some(sub) = subcommand {
+                format!("manifest_{}", sanitize_metric_component(sub))
+            } else {
+                "manifest_menu".to_string()
+            }
+        }
+        Some(action) => sanitize_metric_component(action.slash_static().trim_start_matches('/')),
+        None => {
+            let token = cmd
+                .trim()
+                .trim_start_matches('/')
+                .split_whitespace()
+                .next()
+                .unwrap_or("unknown");
+            format!("unknown_{}", sanitize_metric_component(token))
+        }
+    }
+}
+
+fn record_command_outcome_metrics(
+    metrics: &Metrics,
+    command_key: &str,
+    status: ExitStatus,
+) -> &'static str {
+    let status_label = match status {
+        ExitStatus::Success => "success",
+        ExitStatus::Error => "error",
+        ExitStatus::Interrupted => "interrupted",
+    };
+
+    metrics.increment_counter(format!("runtime_commands_{status_label}_total"));
+    metrics.increment_counter(format!(
+        "runtime_command_{command_key}_{status_label}_total"
+    ));
+    status_label
+}
+
+fn update_runtime_rate_gauges(metrics: &Metrics) {
+    let total = metrics.get_counter("runtime_commands_total");
+    if total == 0 {
+        return;
+    }
+
+    let total_f64 = total as f64;
+    let successes = metrics.get_counter("runtime_commands_success_total") as f64;
+    let errors = metrics.get_counter("runtime_commands_error_total") as f64;
+    let interrupted = metrics.get_counter("runtime_commands_interrupted_total") as f64;
+
+    metrics.set_gauge(
+        "runtime_command_success_rate_pct",
+        (successes / total_f64) * 100.0,
+    );
+    metrics.set_gauge(
+        "runtime_command_error_rate_pct",
+        (errors / total_f64) * 100.0,
+    );
+    metrics.set_gauge(
+        "runtime_command_cancellation_rate_pct",
+        (interrupted / total_f64) * 100.0,
+    );
+}
+
+fn update_runtime_latency_gauges(
+    metrics: &Metrics,
+    command_key: &str,
+    command_timing_name: &str,
+    duration: Duration,
+) {
+    metrics.record_timing("runtime_command_latency_all", duration);
+    metrics.set_gauge(
+        "runtime_last_command_duration_ms",
+        duration.as_secs_f64() * 1000.0,
+    );
+
+    if let Some(avg_all) = metrics.get_average_timing("runtime_command_latency_all") {
+        metrics.set_gauge(
+            "runtime_command_avg_latency_ms",
+            avg_all.as_secs_f64() * 1000.0,
+        );
+    }
+
+    if let Some(avg_cmd) = metrics.get_average_timing(command_timing_name) {
+        metrics.set_gauge(
+            format!("runtime_command_{command_key}_avg_latency_ms"),
+            avg_cmd.as_secs_f64() * 1000.0,
+        );
+    }
+}
 
 /// Process slash commands from CLI and return appropriate status
 ///
@@ -22,11 +144,16 @@ use tracing::info;
 ///
 /// Returns `ExitStatus` indicating the result of command execution
 pub async fn process_command(cmd: &str) -> ExitStatus {
-    let metrics = Metrics::new();
-    let timer = Timer::start("command_execution", metrics.clone());
+    let correlation_id = next_correlation_id("cmd");
+    let execution_span =
+        info_span!("orchestrator.command", correlation_id = %correlation_id, command = %cmd);
+    let _execution_scope = execution_span.enter();
+
+    let metrics = runtime_metrics().clone();
 
     // Log command usage with structured data
     info!(
+        correlation_id = %correlation_id,
         command = %cmd,
         command_type = %cmd.trim_start_matches('/'),
         "Processing CLI command"
@@ -47,6 +174,12 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
 
     // Parse command using full original string
     let parsed = crate::models::get_main_action(cmd);
+    let command_key = command_metric_key(parsed, subcommand, cmd);
+    let command_timing_name = format!("runtime_command_latency_{command_key}");
+    let timer = Timer::start(command_timing_name.clone(), metrics.clone());
+
+    metrics.increment_counter("runtime_commands_total");
+    metrics.increment_counter(format!("runtime_command_{command_key}_total"));
 
     let result = match parsed {
         Some(MainAction::Help) => {
@@ -214,16 +347,21 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
 
     // Stop timer and log result with structured data
     let duration = timer.stop();
+    update_runtime_latency_gauges(&metrics, &command_key, &command_timing_name, duration);
 
     // Log and convert result to CLI status
-    let (status_str, counter_name) = match result {
-        ExitStatus::Success => ("success", "successful_commands"),
-        ExitStatus::Error => ("error", "failed_commands"),
-        ExitStatus::Interrupted => ("interrupted", "interrupted_commands"),
+    let counter_name = match result {
+        ExitStatus::Success => "successful_commands",
+        ExitStatus::Error => "failed_commands",
+        ExitStatus::Interrupted => "interrupted_commands",
     };
+    let status_str = record_command_outcome_metrics(&metrics, &command_key, result);
+    update_runtime_rate_gauges(&metrics);
 
     info!(
+        correlation_id = %correlation_id,
         command = %cmd,
+        command_key = %command_key,
         duration_ms = duration.as_millis(),
         status = status_str,
         "Command execution completed"
@@ -581,14 +719,19 @@ fn parse_unicode_mode(value: &str) -> Result<UnicodeMode, String> {
 /// * `ExitStatus::Success` for empty/whitespace-only input (silently ignored)
 /// * `ExitStatus::Success` for non-empty text (hint displayed)
 pub async fn process_text(text: &str) -> ExitStatus {
+    let metrics = runtime_metrics().clone();
+    metrics.increment_counter("runtime_text_inputs_total");
+
     let trimmed = text.trim();
 
     // Silently ignore empty or whitespace-only input
     if trimmed.is_empty() {
+        metrics.increment_counter("runtime_text_inputs_ignored_total");
         tracing::trace!("Empty text input ignored");
         return ExitStatus::Success;
     }
 
+    metrics.increment_counter("runtime_text_inputs_unrecognized_total");
     tracing::debug!(input = %trimmed, "Unrecognized text input");
 
     use nettoolskit_ui::Color;
@@ -612,6 +755,72 @@ pub async fn process_text(text: &str) -> ExitStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_metric_component_normalizes_symbols() {
+        assert_eq!(
+            sanitize_metric_component(" Manifest Apply "),
+            "manifest_apply"
+        );
+        assert_eq!(sanitize_metric_component("/x-y.z"), "x_y_z");
+        assert_eq!(sanitize_metric_component("___"), "unknown");
+    }
+
+    #[test]
+    fn command_metric_key_resolves_manifest_subcommands() {
+        let key = command_metric_key(
+            Some(MainAction::Manifest),
+            Some("apply"),
+            "/manifest apply a.yaml",
+        );
+        assert_eq!(key, "manifest_apply");
+
+        let menu_key = command_metric_key(Some(MainAction::Manifest), None, "/manifest");
+        assert_eq!(menu_key, "manifest_menu");
+    }
+
+    #[test]
+    fn command_metric_key_resolves_unknown_commands() {
+        let key = command_metric_key(None, None, "/custom-op --x");
+        assert_eq!(key, "unknown_custom_op");
+    }
+
+    #[test]
+    fn update_runtime_rate_gauges_computes_percentages() {
+        let metrics = Metrics::new();
+        metrics.increment_counter("runtime_commands_total");
+        metrics.increment_counter("runtime_commands_total");
+        metrics.increment_counter("runtime_commands_total");
+        metrics.increment_counter("runtime_commands_total");
+        metrics.increment_counter("runtime_commands_success_total");
+        metrics.increment_counter("runtime_commands_success_total");
+        metrics.increment_counter("runtime_commands_error_total");
+        metrics.increment_counter("runtime_commands_interrupted_total");
+
+        update_runtime_rate_gauges(&metrics);
+
+        assert_eq!(
+            metrics.get_gauge("runtime_command_success_rate_pct"),
+            Some(50.0)
+        );
+        assert_eq!(
+            metrics.get_gauge("runtime_command_error_rate_pct"),
+            Some(25.0)
+        );
+        assert_eq!(
+            metrics.get_gauge("runtime_command_cancellation_rate_pct"),
+            Some(25.0)
+        );
+    }
+
+    #[test]
+    fn record_command_outcome_metrics_updates_counters() {
+        let metrics = Metrics::new();
+        let label = record_command_outcome_metrics(&metrics, "help", ExitStatus::Error);
+        assert_eq!(label, "error");
+        assert_eq!(metrics.get_counter("runtime_commands_error_total"), 1);
+        assert_eq!(metrics.get_counter("runtime_command_help_error_total"), 1);
+    }
 
     #[test]
     fn set_config_value_updates_known_keys() {

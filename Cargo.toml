@@ -52,6 +52,10 @@ futures-util = "0.3"
 # Tracing/observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.32"
+opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "0.31", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
 
 # Configuration
 toml = "0.8"

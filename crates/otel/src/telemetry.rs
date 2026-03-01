@@ -1,5 +1,6 @@
 //! Telemetry utilities for NetToolsKit CLI
 
+use crate::tracing_setup::{record_otlp_counter, record_otlp_gauge, record_otlp_timing};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -36,6 +37,7 @@ impl Metrics {
         let mut counters = self.counters.lock().unwrap();
         let new_value = *counters.entry(name.clone()).or_insert(0) + 1;
         counters.insert(name.clone(), new_value);
+        record_otlp_counter(&name, 1);
 
         debug!(
             counter = %name,
@@ -49,6 +51,7 @@ impl Metrics {
         let name = name.into();
         let mut gauges = self.gauges.lock().unwrap();
         gauges.insert(name.clone(), value);
+        record_otlp_gauge(&name, value);
 
         debug!(
             gauge = %name,
@@ -62,6 +65,7 @@ impl Metrics {
         let name = name.into();
         let mut timings = self.timings.lock().unwrap();
         timings.entry(name.clone()).or_default().push(duration);
+        record_otlp_timing(&name, duration);
 
         debug!(
             timing = %name,

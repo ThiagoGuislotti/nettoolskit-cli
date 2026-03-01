@@ -8,20 +8,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- ADR baseline in `docs/adr/`:
-  - `ADR-0001` modular workspace and crate boundaries
-  - `ADR-0002` terminal rendering without alternate screen
-  - `ADR-0003` quality gates and lint policy
+- Decision log centralized in `CHANGELOG.md` as the single source of truth for architecture/engineering decisions.
+
+### Decisions
+- **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
+  - Keep a modular Cargo workspace with clear crate responsibilities:
+    - `core` (shared models/utilities)
+    - `ui` (terminal rendering/interaction)
+    - `otel` (telemetry/tracing setup)
+    - `orchestrator` (execution flow)
+    - `commands/*` (domain command implementations)
+    - `cli` (binary entrypoint + interactive loop)
+  - Enforce dependency direction from higher-level crates to lower-level crates only.
+- **DEC-0002 (Accepted, 2026-02-28): Terminal rendering without alternate screen**
+  - Keep rendering in the main terminal buffer (no alternate screen).
+  - Preserve output/history on `/quit` and `Ctrl+C`.
+  - Use resize debounce and explicit clear/reflow ordering for stability.
+  - Keep cursor explicitly visible/blinking in prompt states.
+- **DEC-0003 (Accepted, 2026-02-28): Quality gates and lint policy**
+  - Hard gates:
+    - `cargo fmt --all -- --check`
+    - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+    - `cargo test --workspace --all-targets`
+    - dependency security audit (`cargo audit` / `cargo-deny` in CI)
+  - Lint policy:
+    - `clippy::all` as blocking baseline
+    - `pedantic`, `nursery`, and `cargo` as advisory by default
+- **DEC-0004 (Accepted, 2026-03-01): Hybrid observability model with optional OTLP traces**
+  - Keep custom in-process metrics API for fast/local CLI usage.
+  - Add optional OpenTelemetry trace export via OTLP, enabled only when endpoint env vars are set.
+  - Support OTLP gRPC and HTTP/protobuf protocols with configurable timeout.
+- **DEC-0005 (Accepted, 2026-03-01): Correlation ID at session and command boundaries**
+  - Add lightweight correlation IDs for interactive session, non-interactive execution, and command dispatch spans.
+  - Keep format process-local and dependency-light (`prefix + timestamp + sequence`) for CLI performance.
+- **DEC-0006 (Accepted, 2026-03-01): Runtime metrics taxonomy for command operations**
+  - Standardize counters, gauges, and timing names for command-level observability.
+  - Track command latency, success/error/cancellation rates, and non-command text input volume.
+- **DEC-0007 (Accepted, 2026-03-01): Incident response playbook as operational baseline**
+  - Establish a single operational runbook for severity classification, triage, mitigation, and post-incident review.
+  - Include scenario-specific troubleshooting for terminal resize/layout, command error/cancellation spikes, and OTLP export failures.
+- **DEC-0008 (Accepted, 2026-03-01): OTLP metrics export and explicit telemetry shutdown**
+  - Mirror in-process runtime metrics to OTLP when metrics endpoint env vars are configured.
+  - Keep in-process metrics as the source API while enabling centralized metric pipelines.
+  - Trigger explicit telemetry shutdown before process exit to flush traces/metrics in short-lived CLI runs.
+- **DEC-0009 (Accepted, 2026-03-01): Pin Rust toolchain to MSRV 1.85.0**
+  - Adopt `rust-toolchain.toml` with `1.85.0` to stabilize local and CI behavior.
+  - Align MSRV policy with current dependency graph requirements (lockfile v4 and edition2024 dependencies).
+- **DEC-0010 (Accepted, 2026-03-01): Release must publish dual-format SBOM assets**
+  - Generate SBOM for every tagged release in both CycloneDX and SPDX JSON formats.
+  - Publish SBOM files as release assets for supply-chain transparency and auditability.
+- Historical ADR files from `docs/adr/` were retired and consolidated into this section.
 
 ### Changed
 - Workspace lint policy adjusted to keep CI gate strict on `clippy::all` with `-D warnings`.
 - `CHANGELOG.md` aligned to Keep a Changelog structure with an explicit `Unreleased` section.
+- `crates/otel` migrated to a hybrid model: optional OTLP trace export plus existing in-process metrics.
+- OTLP dependencies were added to workspace/crate manifests (`tracing-opentelemetry`, `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`).
+- Correlation IDs were introduced and attached to tracing spans at session/execution/command boundaries.
+- Runtime/business metrics were defined in orchestrator with stable names for latency, error rate, and cancellation rate.
+- Incident response and troubleshooting playbook was added under `docs/operations/` and linked from project README.
+- OpenTelemetry support now includes optional OTLP metrics export (`OTEL_EXPORTER_OTLP_METRICS_*` / `NTK_OTLP_METRICS_*`) in addition to trace export.
+- OTLP env resolution now supports signal-specific overrides for traces and metrics with shared fallbacks.
+- Rust toolchain is now pinned via `rust-toolchain.toml` and CI MSRV check moved to `1.85.0`.
+- Release pipeline now generates and publishes SBOM assets in CycloneDX and SPDX formats.
 
 ### Fixed
 - Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.
 - Interactive terminal behavior now preserves visible shell output/history on `/quit` and `Ctrl+C` (no alternate screen wipe).
 - Cursor visibility/blinking handling improved in interactive prompt flow.
 - Environment-variable race flake fixed in feature-detection tests by synchronizing tests that mutate `NTK_USE_*`.
+- OpenTelemetry subscriber layering/type mismatch fixed in `otel` tracing setup (paths with/without OTLP now compile and initialize correctly).
+- Non-interactive CLI now calls telemetry shutdown before `process::exit`, preventing loss of buffered OTLP data.
 
 ### Security
 - Dependency hardening and audit cleanups (`cargo audit` baseline cleaned for current lockfile updates).
@@ -32,6 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
   - `cargo test --workspace --all-targets`
   - `cargo doc --workspace --no-deps`
+- Additional validation for OTLP migration:
+  - `cargo clippy -p nettoolskit-otel --all-targets --all-features -- -D warnings`
+  - `cargo test -p nettoolskit-otel --all-targets`
 
 ## [1.0.0] - 2025-01-04
 

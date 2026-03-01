@@ -20,7 +20,9 @@
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use nettoolskit_core::CommandEntry;
 use owo_colors::OwoColorize;
+use std::future::Future;
 use std::io;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -32,15 +34,22 @@ use display::print_logo;
 use input::{read_line, InputResult};
 use nettoolskit_core::async_utils::with_timeout;
 use nettoolskit_orchestrator::{process_command, process_text, Command, ExitStatus};
-use nettoolskit_otel::{init_tracing_with_config, Metrics, Timer, TracingConfig};
+use nettoolskit_otel::{
+    init_tracing_with_config, next_correlation_id, Metrics, Timer, TracingConfig,
+};
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
     render_prompt, Color, CommandPalette, TerminalLayout,
 };
-use tracing::{error, info, warn};
+use tracing::{error, info, info_span, warn};
 
 struct RawModeGuard {
     active: bool,
+}
+
+trait RawModeControl {
+    fn enable(&mut self) -> io::Result<()>;
+    fn disable(&mut self) -> io::Result<()>;
 }
 
 impl RawModeGuard {
@@ -75,8 +84,29 @@ impl Drop for RawModeGuard {
     }
 }
 
+impl RawModeControl for RawModeGuard {
+    fn enable(&mut self) -> io::Result<()> {
+        Self::enable(self)
+    }
+
+    fn disable(&mut self) -> io::Result<()> {
+        Self::disable(self)
+    }
+}
+
+type ReadLineFuture<'a> = Pin<Box<dyn Future<Output = io::Result<InputResult>> + 'a>>;
+
 /// Launch the interactive CLI mode
 pub async fn interactive_mode(verbose: bool) -> ExitStatus {
+    interactive_mode_with_runner(verbose, run_interactive_loop).await
+}
+
+async fn interactive_mode_with_runner<F, Fut>(verbose: bool, run_loop: F) -> ExitStatus
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = io::Result<ExitStatus>>,
+{
+    let session_correlation_id = next_correlation_id("session");
     let mut log_guard = begin_interactive_logging();
 
     let (layout_failure_notice, _terminal_layout) =
@@ -112,6 +142,12 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
         warn!("{failure_message}");
     }
 
+    let session_span = info_span!(
+        "cli.interactive_session",
+        correlation_id = %session_correlation_id
+    );
+    let _session_scope = session_span.enter();
+
     let metrics = Metrics::new();
     metrics.increment_counter("cli_sessions_started");
 
@@ -129,10 +165,13 @@ pub async fn interactive_mode(verbose: bool) -> ExitStatus {
         info!("Initialization timeout completed (expected)");
     }
 
-    info!("Starting NetToolsKit CLI interactive mode");
+    info!(
+        correlation_id = %session_correlation_id,
+        "Starting NetToolsKit CLI interactive mode"
+    );
     info!("Displaying application logo and UI");
 
-    let result = match run_interactive_loop().await {
+    let result = match run_loop().await {
         Ok(status) => {
             metrics.increment_counter("cli_sessions_completed");
             info!(
@@ -179,15 +218,40 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
     })
     .map_err(io::Error::other)?;
 
+    run_input_loop_with(
+        input_buffer,
+        &mut raw_mode,
+        interrupted,
+        |buffer, interrupted| Box::pin(read_line(buffer, interrupted)),
+        show_main_menu,
+        render_prompt,
+    )
+    .await
+}
+
+async fn run_input_loop_with<R, F, M, P>(
+    input_buffer: &mut String,
+    raw_mode: &mut R,
+    interrupted: Arc<AtomicBool>,
+    mut read_line_fn: F,
+    mut show_menu_fn: M,
+    mut render_prompt_fn: P,
+) -> io::Result<ExitStatus>
+where
+    R: RawModeControl,
+    F: for<'a> FnMut(&'a mut String, &'a Arc<AtomicBool>) -> ReadLineFuture<'a>,
+    M: FnMut() -> Option<Command>,
+    P: FnMut() -> io::Result<()>,
+{
     loop {
         raw_mode.enable()?;
-        render_prompt()?;
+        render_prompt_fn()?;
         input_buffer.clear();
 
-        match read_line(input_buffer, &interrupted).await? {
+        match read_line_fn(input_buffer, &interrupted).await? {
             InputResult::ShowMenu => {
                 // User typed "/" - show menu immediately
-                if let Some(selected_cmd) = show_main_menu() {
+                if let Some(selected_cmd) = show_menu_fn() {
                     raw_mode.disable()?;
 
                     // Check if user selected quit command
@@ -288,12 +352,52 @@ fn ensure_layout_guard() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
 
     /// Try to create a `RawModeGuard`. Returns `None` if a terminal is not
     /// available (e.g., headless CI), allowing tests to be silently skipped
     /// rather than failing.
     fn try_guard() -> Option<RawModeGuard> {
         RawModeGuard::new().ok()
+    }
+
+    #[derive(Default)]
+    struct FakeRawMode {
+        active: bool,
+        enable_calls: usize,
+        disable_calls: usize,
+    }
+
+    impl RawModeControl for FakeRawMode {
+        fn enable(&mut self) -> io::Result<()> {
+            self.enable_calls += 1;
+            self.active = true;
+            Ok(())
+        }
+
+        fn disable(&mut self) -> io::Result<()> {
+            self.disable_calls += 1;
+            self.active = false;
+            Ok(())
+        }
+    }
+
+    fn scripted_reader(
+        script: Vec<InputResult>,
+    ) -> impl for<'a> FnMut(&'a mut String, &'a Arc<AtomicBool>) -> ReadLineFuture<'a> {
+        let queue = Arc::new(Mutex::new(VecDeque::from(script)));
+        move |_buffer, _interrupted| {
+            let queue = Arc::clone(&queue);
+            Box::pin(async move {
+                let next = queue
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .pop_front()
+                    .unwrap_or(InputResult::Exit);
+                Ok(next)
+            })
+        }
     }
 
     #[test]
@@ -347,5 +451,111 @@ mod tests {
             let _ = guard.disable();
             drop(guard);
         }
+    }
+
+    #[tokio::test]
+    async fn interactive_mode_with_runner_success_maps_to_success() {
+        let status =
+            interactive_mode_with_runner(false, || async { Ok(ExitStatus::Success) }).await;
+        assert_eq!(status, ExitStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn interactive_mode_with_runner_error_maps_to_error() {
+        let status = interactive_mode_with_runner(false, || async {
+            Err(io::Error::other("synthetic interactive loop failure"))
+        })
+        .await;
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn run_input_loop_with_exit_result_returns_success() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let mut raw_mode = FakeRawMode::default();
+
+        let status = run_input_loop_with(
+            &mut buffer,
+            &mut raw_mode,
+            interrupted,
+            scripted_reader(vec![InputResult::Exit]),
+            || None,
+            || Ok(()),
+        )
+        .await
+        .expect("loop should complete");
+
+        assert_eq!(status, ExitStatus::Success);
+        assert!(raw_mode.enable_calls >= 1);
+        assert!(raw_mode.disable_calls >= 1);
+    }
+
+    #[tokio::test]
+    async fn run_input_loop_with_quit_command_returns_success() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let mut raw_mode = FakeRawMode::default();
+
+        let status = run_input_loop_with(
+            &mut buffer,
+            &mut raw_mode,
+            interrupted,
+            scripted_reader(vec![InputResult::Command("/quit".to_string())]),
+            || None,
+            || Ok(()),
+        )
+        .await
+        .expect("loop should complete");
+
+        assert_eq!(status, ExitStatus::Success);
+        assert!(raw_mode.disable_calls >= 1);
+    }
+
+    #[tokio::test]
+    async fn run_input_loop_with_menu_quit_returns_success() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let mut raw_mode = FakeRawMode::default();
+
+        let status = run_input_loop_with(
+            &mut buffer,
+            &mut raw_mode,
+            interrupted,
+            scripted_reader(vec![InputResult::ShowMenu]),
+            || Some(Command::Quit),
+            || Ok(()),
+        )
+        .await
+        .expect("loop should complete");
+
+        assert_eq!(status, ExitStatus::Success);
+        assert!(raw_mode.disable_calls >= 1);
+    }
+
+    #[tokio::test]
+    async fn run_input_loop_with_menu_none_continues_until_exit() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let mut raw_mode = FakeRawMode::default();
+        let mut menu_calls = 0usize;
+
+        let status = run_input_loop_with(
+            &mut buffer,
+            &mut raw_mode,
+            interrupted,
+            scripted_reader(vec![InputResult::ShowMenu, InputResult::Exit]),
+            || {
+                menu_calls += 1;
+                None
+            },
+            || Ok(()),
+        )
+        .await
+        .expect("loop should complete");
+
+        assert_eq!(status, ExitStatus::Success);
+        assert_eq!(menu_calls, 1);
+        assert!(raw_mode.enable_calls >= 2);
     }
 }

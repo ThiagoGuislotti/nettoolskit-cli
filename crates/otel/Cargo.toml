@@ -13,6 +13,10 @@ categories = ["development-tools"]
 [dependencies]
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 nettoolskit-core = { path = "../core" }
