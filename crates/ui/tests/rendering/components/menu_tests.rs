@@ -46,7 +46,7 @@ fn test_enum_menu_config_defaults() {
     assert_eq!(config.subtitle, "Subtitle");
     assert_eq!(config.current_dir, "/dir");
     assert_eq!(config.theme_color, Color::PURPLE);
-    assert_eq!(config.width, 89);
+    assert!((10..=89).contains(&config.width));
     assert!(config.footer_items.is_empty());
 }
 

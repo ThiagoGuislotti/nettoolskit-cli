@@ -25,8 +25,7 @@ pub async fn show_menu() -> ExitStatus {
             "Interactive menu for manifest operations",
             current_dir.clone(),
         )
-        .with_theme_color(Color::PURPLE)
-        .with_width(89);
+        .with_theme_color(Color::PURPLE);
 
         match render_enum_menu::<ManifestAction>(menu_config) {
             Ok(action) => {
@@ -39,7 +38,7 @@ pub async fn show_menu() -> ExitStatus {
                         execute_render().await;
                     }
                     ManifestAction::Apply => {
-                        execute_apply_interactive().await;
+                        show_apply_menu().await;
                     }
                     ManifestAction::Back => {
                         return ExitStatus::Success;
@@ -174,7 +173,7 @@ async fn execute_render() -> ExitStatus {
 }
 
 /// Execute manifest apply command interactively
-async fn execute_apply_interactive() -> ExitStatus {
+pub async fn show_apply_menu() -> ExitStatus {
     render_section_title("Applying Manifest...", Some("⚡"));
 
     // Prompt for manifest path

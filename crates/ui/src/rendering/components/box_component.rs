@@ -10,6 +10,12 @@ use nettoolskit_core::string_utils::string::truncate_directory_with_middle;
 use owo_colors::{OwoColorize, Rgb};
 
 use crate::core::capabilities::{pick_char, pick_str};
+use crossterm::terminal;
+
+const DEFAULT_BOX_WIDTH: usize = 89;
+const MIN_SAFE_BOX_WIDTH: usize = 10;
+const TERMINAL_HORIZONTAL_MARGIN: usize = 2;
+const MIN_RENDER_WIDTH: usize = 2;
 
 /// Configuration for rendering a bordered box
 #[derive(Debug, Clone)]
@@ -48,7 +54,7 @@ impl Default for BoxConfig {
             title_prefix: None,
             footer_items: Vec::new(),
             border_color: Rgb(155, 114, 255),
-            width: 89,
+            width: responsive_box_width_from_terminal(current_terminal_width()),
             add_spacing: true,
         }
     }
@@ -100,7 +106,7 @@ impl BoxConfig {
 
     /// Set the width
     pub fn with_width(mut self, width: usize) -> Self {
-        self.width = width.max(10);
+        self.width = width.max(MIN_SAFE_BOX_WIDTH);
         self
     }
 
@@ -118,7 +124,7 @@ pub fn render_box(config: BoxConfig) {
     }
 
     let border_color = config.border_color;
-    let width = config.width;
+    let width = clamp_render_width_to_terminal(config.width, current_terminal_width());
 
     // Resolve box-drawing characters with ASCII fallback
     let corner_tl = pick_char('╭', '+');
@@ -188,7 +194,7 @@ pub fn render_box(config: BoxConfig) {
         let label_text = format!("    {}: ", label);
 
         // Truncate value if it's a directory path
-        let available_width = width - label_text.len() - 1 - 4 - 4;
+        let available_width = width.saturating_sub(label_text.len() + 9);
         let truncated_value = if label.to_lowercase().contains("directory") {
             truncate_directory_with_middle(value, available_width)
         } else if value.len() > available_width {
@@ -218,5 +224,83 @@ pub fn render_box(config: BoxConfig) {
 
     if config.add_spacing {
         println!();
+    }
+}
+
+fn current_terminal_width() -> Option<usize> {
+    terminal::size().ok().map(|(width, _)| width as usize)
+}
+
+pub(crate) fn responsive_box_width_from_terminal(width: Option<usize>) -> usize {
+    let terminal_based = width
+        .map(|value| value.saturating_sub(TERMINAL_HORIZONTAL_MARGIN))
+        .unwrap_or(DEFAULT_BOX_WIDTH);
+    terminal_based.clamp(MIN_SAFE_BOX_WIDTH, DEFAULT_BOX_WIDTH)
+}
+
+fn clamp_render_width_to_terminal(config_width: usize, terminal_width: Option<usize>) -> usize {
+    let requested = config_width.max(MIN_SAFE_BOX_WIDTH);
+    let Some(terminal_width) = terminal_width else {
+        return requested;
+    };
+
+    let available = terminal_width.saturating_sub(TERMINAL_HORIZONTAL_MARGIN);
+    available.clamp(MIN_RENDER_WIDTH, requested)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        clamp_render_width_to_terminal, responsive_box_width_from_terminal, DEFAULT_BOX_WIDTH,
+        MIN_RENDER_WIDTH, MIN_SAFE_BOX_WIDTH,
+    };
+
+    #[test]
+    fn responsive_box_width_uses_default_when_terminal_is_unknown() {
+        assert_eq!(responsive_box_width_from_terminal(None), DEFAULT_BOX_WIDTH);
+    }
+
+    #[test]
+    fn responsive_box_width_caps_on_wide_terminal() {
+        assert_eq!(
+            responsive_box_width_from_terminal(Some(300)),
+            DEFAULT_BOX_WIDTH
+        );
+    }
+
+    #[test]
+    fn responsive_box_width_shrinks_for_narrow_terminal() {
+        assert_eq!(responsive_box_width_from_terminal(Some(40)), 38);
+    }
+
+    #[test]
+    fn responsive_box_width_respects_minimum_guard() {
+        assert_eq!(
+            responsive_box_width_from_terminal(Some(4)),
+            MIN_SAFE_BOX_WIDTH
+        );
+    }
+
+    #[test]
+    fn clamp_render_width_keeps_requested_when_terminal_unknown() {
+        assert_eq!(clamp_render_width_to_terminal(64, None), 64);
+    }
+
+    #[test]
+    fn clamp_render_width_caps_to_terminal_capacity() {
+        assert_eq!(clamp_render_width_to_terminal(89, Some(70)), 68);
+    }
+
+    #[test]
+    fn clamp_render_width_honors_requested_when_terminal_is_wide() {
+        assert_eq!(clamp_render_width_to_terminal(40, Some(120)), 40);
+    }
+
+    #[test]
+    fn clamp_render_width_never_returns_less_than_render_minimum() {
+        assert_eq!(
+            clamp_render_width_to_terminal(10, Some(1)),
+            MIN_RENDER_WIDTH
+        );
     }
 }

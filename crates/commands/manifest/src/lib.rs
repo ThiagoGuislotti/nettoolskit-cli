@@ -63,4 +63,4 @@ pub use execution::{ExecutionConfig, ManifestExecutor};
 pub use handlers::execute_apply;
 pub use models::ManifestAction;
 pub use parsing::ManifestParser;
-pub use ui::show_menu;
+pub use ui::{show_apply_menu, show_menu};

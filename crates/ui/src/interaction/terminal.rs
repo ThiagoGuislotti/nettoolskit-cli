@@ -792,6 +792,73 @@ mod tests {
         );
     }
 
+    /// Resize burst simulation (shrink/grow): each new event must refresh the
+    /// pending timestamp and keep the debounce coalescing state active.
+    #[test]
+    #[serial]
+    fn resize_burst_shrink_grow_refreshes_pending_timestamp() {
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+        handle_resize(140, 40).unwrap();
+        let first = PENDING_RESIZE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expect("first pending timestamp must exist");
+
+        std::thread::sleep(Duration::from_millis(2));
+        handle_resize(80, 24).unwrap();
+        let second = PENDING_RESIZE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expect("second pending timestamp must exist");
+
+        std::thread::sleep(Duration::from_millis(2));
+        handle_resize(150, 45).unwrap();
+        let third = PENDING_RESIZE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expect("third pending timestamp must exist");
+
+        assert!(
+            second >= first,
+            "pending timestamp must not go backwards on burst event #2"
+        );
+        assert!(
+            third >= second,
+            "pending timestamp must not go backwards on burst event #3"
+        );
+
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Repeated debounce cycles must clear pending state deterministically even
+    /// when resize events alternate between smaller and larger dimensions.
+    #[test]
+    #[serial]
+    fn resize_cycles_clear_pending_each_round() {
+        *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+        let sequence = [(120, 40), (80, 24), (140, 42), (70, 20), (130, 38)];
+        for (w, h) in sequence {
+            handle_resize(w, h).unwrap();
+
+            // Force elapsed debounce window without sleeping in tests.
+            *PENDING_RESIZE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(Instant::now() - Duration::from_millis(RESIZE_DEBOUNCE_MS + 10));
+
+            process_pending_resize().unwrap();
+
+            let pending_is_none = PENDING_RESIZE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_none();
+            assert!(
+                pending_is_none,
+                "pending resize flag must be cleared after processing each cycle"
+            );
+        }
+    }
+
     /// 1.5.3 — `RECONFIGURING` flag suppresses footer rendering.
     ///
     /// When the flag is `true`, `append_log_line` stores logs in the deque
@@ -868,6 +935,55 @@ mod tests {
             !(metrics.width == 80 && metrics.height == 24),
             "both dimensions different must not match"
         );
+    }
+
+    /// Repeated shrink/grow metric calculations must preserve layout invariants
+    /// (scroll region ordering, footer boundaries, and positive capacity).
+    #[test]
+    fn resize_sequence_shrink_grow_keeps_layout_invariants() {
+        let header_height = 4;
+        let sequence = [
+            (160, 45),
+            (120, 35),
+            (100, 28),
+            (90, 20),
+            (110, 30),
+            (150, 42),
+        ];
+
+        for (width, height) in sequence {
+            let metrics = calculate_layout_metrics(width, height, header_height)
+                .expect("sequence entry should be valid");
+
+            assert_eq!(metrics.header_height, header_height);
+            assert!(metrics.footer_height >= 3);
+            assert!(metrics.footer_height <= FOOTER_TARGET_HEIGHT);
+            assert!(metrics.scroll_top <= metrics.scroll_bottom);
+            assert!(metrics.scroll_bottom < metrics.footer_start);
+            assert!(metrics.footer_start < metrics.height);
+            assert!(metrics.log_capacity >= 1);
+        }
+    }
+
+    /// Shrink below minimum should fail fast, and grow back should recover to a
+    /// valid layout in the next calculation.
+    #[test]
+    fn resize_sequence_too_small_then_recover() {
+        let header_height = 8;
+
+        let too_small = calculate_layout_metrics(80, 12, header_height);
+        assert!(
+            too_small.is_err(),
+            "layout must fail when viewport is temporarily too small"
+        );
+
+        let recovered =
+            calculate_layout_metrics(120, 40, header_height).expect("layout should recover");
+
+        assert_eq!(recovered.header_height, header_height);
+        assert!(recovered.scroll_top <= recovered.scroll_bottom);
+        assert!(recovered.footer_start < recovered.height);
+        assert!(recovered.log_capacity >= 1);
     }
 
     // === normalize_log_entry tests ===

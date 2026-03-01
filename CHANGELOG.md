@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Decision log centralized in `CHANGELOG.md` as the single source of truth for architecture/engineering decisions.
+- Added `COMPATIBILITY.md` as the official compatibility matrix and support policy for release artifacts.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
@@ -71,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OTLP env resolution now supports signal-specific overrides for traces and metrics with shared fallbacks.
 - Rust toolchain is now pinned via `rust-toolchain.toml` and CI MSRV check moved to `1.85.0`.
 - Release pipeline now generates and publishes SBOM assets in CycloneDX and SPDX formats.
+- Release pipeline now validates compatibility/support documentation and ships `COMPATIBILITY.md` inside packaged artifacts.
 
 ### Fixed
 - Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.

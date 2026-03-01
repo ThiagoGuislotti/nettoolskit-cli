@@ -10,10 +10,70 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::fs;
+use std::path::{Path, PathBuf};
+use tempfile::TempDir;
 
 /// Helper to build a `Command` pointing at the `ntk` binary.
 fn ntk() -> Command {
     cargo_bin_cmd!("ntk")
+}
+
+fn valid_manifest_yaml() -> &'static str {
+    r#"apiVersion: ntk/v1
+kind: solution
+meta:
+  name: test-manifest
+solution:
+  root: ./
+  slnFile: TestSolution.sln
+conventions:
+  namespaceRoot: Acme.Test
+  targetFramework: net9.0
+  policy:
+    collision: fail
+    insertTodoWhenMissing: true
+    strict: false
+apply:
+  mode: artifact
+  artifact:
+    kind: value-object
+contexts:
+  - name: Sales
+    aggregates: []
+    useCases: []
+templates:
+  mapping:
+    - artifact: value-object
+      template: value-object.hbs
+      dst: "{context}/ValueObjects/{name}.cs"
+render:
+  rules:
+    - expand: "{{Context}}"
+      as: ctx
+guards:
+  requireExistingProjects: false
+"#
+}
+
+fn write_fixture(dir: &Path, relative: &str, content: &str) -> PathBuf {
+    let path = dir.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create fixture directories");
+    }
+    fs::write(&path, content).expect("failed to write fixture file");
+    path
+}
+
+fn create_manifest_fixture() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().expect("failed to create temp dir");
+    let manifest_path = write_fixture(dir.path(), "demo.manifest.yaml", valid_manifest_yaml());
+    write_fixture(
+        dir.path(),
+        "templates/value-object.hbs",
+        "namespace {{namespaceRoot}};\npublic class {{Name}} {}\n",
+    );
+    (dir, manifest_path)
 }
 
 // ─── 4.2.2 — ntk --help ─────────────────────────────────────────────────
@@ -95,27 +155,53 @@ fn verbose_flag_is_accepted() {
 
 #[test]
 fn manifest_list_subcommand_returns_zero() {
+    let (dir, _manifest_path) = create_manifest_fixture();
     ntk()
+        .current_dir(dir.path())
         .args(["manifest", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Manifest").or(predicate::str::contains("manifest")));
+        .stdout(predicate::str::contains("Found 1 manifest file(s)"));
 }
 
 #[test]
 fn manifest_check_subcommand_returns_zero() {
+    let (dir, manifest_path) = create_manifest_fixture();
+    let manifest = manifest_path.to_string_lossy().to_string();
     ntk()
-        .args(["manifest", "check"])
+        .current_dir(dir.path())
+        .args(["manifest", "check", &manifest])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Manifest").or(predicate::str::contains("manifest")));
+        .stdout(predicate::str::contains("is valid"));
+}
+
+#[test]
+fn manifest_check_invalid_file_returns_error() {
+    let dir = TempDir::new().expect("failed to create temp dir");
+    let invalid_manifest = write_fixture(
+        dir.path(),
+        "invalid.manifest.yaml",
+        "apiVersion: ntk/v1\nkind: solution\nmeta:\n name: bad\nbad: [\n",
+    );
+    let manifest = invalid_manifest.to_string_lossy().to_string();
+
+    ntk()
+        .current_dir(dir.path())
+        .args(["manifest", "check", &manifest])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("validation errors"));
 }
 
 #[test]
 fn manifest_render_dry_run_subcommand_returns_zero() {
+    let (dir, manifest_path) = create_manifest_fixture();
+    let manifest = manifest_path.to_string_lossy().to_string();
     ntk()
-        .args(["manifest", "render", "--dry-run"])
+        .current_dir(dir.path())
+        .args(["manifest", "render", &manifest, "--dry-run"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Render").or(predicate::str::contains("render")));
+        .stdout(predicate::str::contains("Render preview completed"));
 }

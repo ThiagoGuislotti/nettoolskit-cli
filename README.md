@@ -5,7 +5,9 @@
 ![Rust](https://img.shields.io/badge/Rust-2021_Edition-orange?logo=rust)
 ![MSRV](https://img.shields.io/badge/MSRV-1.85.0-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Build](https://img.shields.io/badge/Build-Passing-brightgreen)
+[![Build](https://img.shields.io/github/actions/workflow/status/ThiagoGuislotti/nettoolskit-cli/ci.yml?branch=main&label=build)](https://github.com/ThiagoGuislotti/nettoolskit-cli/actions/workflows/ci.yml)
+[![Test](https://img.shields.io/github/actions/workflow/status/ThiagoGuislotti/nettoolskit-cli/ci.yml?branch=main&label=test)](https://github.com/ThiagoGuislotti/nettoolskit-cli/actions/workflows/ci.yml)
+[![Security](https://img.shields.io/github/actions/workflow/status/ThiagoGuislotti/nettoolskit-cli/ci.yml?branch=main&label=security)](https://github.com/ThiagoGuislotti/nettoolskit-cli/actions/workflows/ci.yml)
 
 ---
 
@@ -45,6 +47,7 @@ Objectives:
 - [Contents](#contents)
   - [Architecture](#architecture)
   - [Crates](#crates)
+  - [Compatibility and Support](#compatibility-and-support)
   - [Operations](#operations)
 - [Build and Tests](#build-and-tests)
 - [Contributing](#contributing)
@@ -121,6 +124,15 @@ This workspace is organized as a multi-crate Rust project. Each crate has its ow
 Operational runbook and incident procedures:
 
 - [Incident Response and Troubleshooting Playbook](docs/operations/incident-response-playbook.md)
+- [TUI UX Guidelines](docs/ui/tui-ux-guidelines.md)
+
+---
+
+### Compatibility and Support
+
+Official platform compatibility tiers and support commitments are defined in:
+
+- [Compatibility Matrix and Support Policy](COMPATIBILITY.md)
 
 ---
 
@@ -208,7 +220,9 @@ We follow semantic versioning and conventional commits. Please ensure your contr
   - [crates/orchestrator/README.md](crates/orchestrator/README.md)
   - [crates/otel/README.md](crates/otel/README.md)
   - [crates/ui/README.md](crates/ui/README.md)
+  - [COMPATIBILITY.md](COMPATIBILITY.md)
   - [docs/operations/incident-response-playbook.md](docs/operations/incident-response-playbook.md)
+  - [docs/ui/tui-ux-guidelines.md](docs/ui/tui-ux-guidelines.md)
 
 ### External References
 
