@@ -16,7 +16,7 @@ fn test_box_config_builder() {
 #[test]
 fn test_box_config_default() {
     let config = BoxConfig::default();
-    assert_eq!(config.width, 89);
+    assert!((10..=89).contains(&config.width));
     assert!(config.add_spacing);
 }
 
@@ -190,6 +190,6 @@ fn test_box_config_default_fields() {
     assert!(config.subtitle.is_none());
     assert!(config.title_prefix.is_none());
     assert!(config.footer_items.is_empty());
-    assert_eq!(config.width, 89);
+    assert!((10..=89).contains(&config.width));
     assert!(config.add_spacing);
 }

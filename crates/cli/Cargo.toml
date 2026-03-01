@@ -58,6 +58,7 @@ ctrlc = "3.4"
 tokio-test = "0.4"
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

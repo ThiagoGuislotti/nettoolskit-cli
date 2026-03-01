@@ -4,8 +4,15 @@ use crate::rendering::components::{
     render_box, render_command, render_interactive_menu, render_menu_instructions, BoxConfig,
     MenuConfig,
 };
+use crossterm::terminal;
 use nettoolskit_core::MenuEntry;
 use owo_colors::OwoColorize;
+
+const NARROW_TERMINAL_WIDTH: usize = 80;
+const COMPACT_TERMINAL_WIDTH: usize = 60;
+const DEFAULT_ALIGN_COLUMN: usize = 20;
+const NARROW_ALIGN_COLUMN: usize = 14;
+const COMPACT_ALIGN_COLUMN: usize = 10;
 
 /// Entry type used internally by CommandPalette
 struct PaletteEntry {
@@ -151,6 +158,8 @@ impl CommandPalette {
     pub fn show(&self) -> Option<String> {
         // Don't clear screen - keep terminal layout and logs visible
         println!();
+        let terminal_width = current_terminal_width();
+        let compact_mode = is_narrow_terminal(terminal_width);
 
         // Render command header if title looks like a command
         if let Some(title) = &self.title {
@@ -173,21 +182,27 @@ impl CommandPalette {
             // Render box with title for submenus
             if let Some(title) = &self.title {
                 let title_width = title.len() + 4;
-                let current_dir = std::env::current_dir()
+                let detected_dir = std::env::current_dir()
                     .ok()
                     .and_then(|p| p.to_str().map(String::from));
+                let current_dir = self.directory.clone().or(detected_dir);
 
                 let mut box_config = BoxConfig::new(title)
                     .with_title_color(Color::WHITE)
                     .with_border_color(Color::PURPLE)
                     .with_width(title_width);
 
-                if let Some(subtitle) = &self.subtitle {
-                    box_config = box_config.with_subtitle(subtitle);
+                if !compact_mode {
+                    if let Some(subtitle) = &self.subtitle {
+                        box_config = box_config.with_subtitle(subtitle);
+                    }
                 }
 
-                if let Some(directory) = current_dir {
-                    box_config = box_config.add_footer_item("directory", directory, Color::WHITE);
+                if !compact_mode {
+                    if let Some(directory) = current_dir {
+                        box_config =
+                            box_config.add_footer_item("directory", directory, Color::WHITE);
+                    }
                 }
 
                 render_box(box_config);
@@ -202,7 +217,13 @@ impl CommandPalette {
         let display_items: Vec<String> = self
             .all_entries
             .iter()
-            .map(|entry| format_menu_item(entry.label(), entry.description(), 20))
+            .map(|entry| {
+                format_menu_item(
+                    entry.label(),
+                    entry.description(),
+                    align_column_for_width(terminal_width),
+                )
+            })
             .collect();
 
         if display_items.is_empty() {
@@ -211,7 +232,10 @@ impl CommandPalette {
         }
 
         // Render interactive menu
-        let prompt = self.prompt.as_deref().unwrap_or("Select →");
+        let prompt = self.prompt.as_deref().unwrap_or(default_prompt_for_width(
+            terminal_width,
+            crate::capabilities().unicode,
+        ));
         let menu_config = MenuConfig::new(prompt, display_items).with_cursor_color(Color::PURPLE);
 
         match render_interactive_menu(menu_config) {
@@ -224,5 +248,62 @@ impl CommandPalette {
             }
             Err(_) => None, // User cancelled
         }
+    }
+}
+
+fn current_terminal_width() -> Option<usize> {
+    terminal::size().ok().map(|(width, _)| width as usize)
+}
+
+fn is_narrow_terminal(width: Option<usize>) -> bool {
+    width.is_some_and(|value| value < NARROW_TERMINAL_WIDTH)
+}
+
+fn align_column_for_width(width: Option<usize>) -> usize {
+    let terminal_width = width.unwrap_or(NARROW_TERMINAL_WIDTH);
+    if terminal_width < COMPACT_TERMINAL_WIDTH {
+        COMPACT_ALIGN_COLUMN
+    } else if terminal_width < NARROW_TERMINAL_WIDTH {
+        NARROW_ALIGN_COLUMN
+    } else {
+        DEFAULT_ALIGN_COLUMN
+    }
+}
+
+fn default_prompt_for_width(width: Option<usize>, unicode: bool) -> &'static str {
+    let terminal_width = width.unwrap_or(NARROW_TERMINAL_WIDTH);
+    if terminal_width < COMPACT_TERMINAL_WIDTH {
+        "> "
+    } else if terminal_width < NARROW_TERMINAL_WIDTH || !unicode {
+        "Select >"
+    } else {
+        "Select →"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{align_column_for_width, default_prompt_for_width, is_narrow_terminal};
+
+    #[test]
+    fn narrow_terminal_detection_works() {
+        assert!(is_narrow_terminal(Some(70)));
+        assert!(!is_narrow_terminal(Some(80)));
+        assert!(!is_narrow_terminal(None));
+    }
+
+    #[test]
+    fn align_column_uses_compact_threshold() {
+        assert_eq!(align_column_for_width(Some(50)), 10);
+        assert_eq!(align_column_for_width(Some(70)), 14);
+        assert_eq!(align_column_for_width(Some(120)), 20);
+    }
+
+    #[test]
+    fn prompt_fallback_respects_width_and_unicode() {
+        assert_eq!(default_prompt_for_width(Some(50), true), "> ");
+        assert_eq!(default_prompt_for_width(Some(70), true), "Select >");
+        assert_eq!(default_prompt_for_width(Some(120), false), "Select >");
+        assert_eq!(default_prompt_for_width(Some(120), true), "Select →");
     }
 }

@@ -22,6 +22,7 @@ nettoolskit-otel = { path = "../otel" }
 
 # Command implementations
 nettoolskit-manifest = { path = "../commands/manifest" }
+nettoolskit-translate = { path = "../commands/translate" }
 nettoolskit-help = { path = "../commands/help" }
 
 # Async runtime
@@ -37,6 +38,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

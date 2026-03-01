@@ -4,7 +4,11 @@
 //! the application, promoting consistency and reducing code duplication.
 
 use crate::core::colors::Color;
+use crossterm::terminal;
 use owo_colors::OwoColorize;
+
+const NARROW_TERMINAL_WIDTH: usize = 80;
+const COMPACT_TERMINAL_WIDTH: usize = 60;
 
 /// Render a command header with consistent formatting
 ///
@@ -40,10 +44,11 @@ pub fn render_command(command: &str) {
 /// // Output: "   Use ↑↓ to navigate, Enter to select, /quit to exit"
 /// ```
 pub fn render_menu_instructions() {
-    println!(
-        "{}",
-        "   Use ↑↓ to navigate, Enter to select, /quit to exit".color(Color::GRAY)
+    let message = menu_instructions_for_layout(
+        terminal::size().ok().map(|(width, _)| width as usize),
+        crate::capabilities().unicode,
     );
+    println!("{}", message.color(Color::GRAY));
 }
 
 /// Render a section title with optional icon and underline
@@ -117,5 +122,68 @@ pub fn format_menu_item(label: &str, description: Option<&str>) -> String {
             format!("{} - {}", label, crate::maybe_gray(desc))
         }
         _ => label.to_string(),
+    }
+}
+
+fn menu_instructions_for_layout(width: Option<usize>, unicode: bool) -> &'static str {
+    let terminal_width = width.unwrap_or(NARROW_TERMINAL_WIDTH);
+
+    if terminal_width < COMPACT_TERMINAL_WIDTH {
+        "   Enter to select, /quit to exit"
+    } else if terminal_width < NARROW_TERMINAL_WIDTH {
+        if unicode {
+            "   ↑↓ + Enter, /quit"
+        } else {
+            "   Up/Down + Enter, /quit"
+        }
+    } else if unicode {
+        "   Use ↑↓ to navigate, Enter to select, /quit to exit"
+    } else {
+        "   Use Up/Down to navigate, Enter to select, /quit to exit"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::menu_instructions_for_layout;
+
+    #[test]
+    fn menu_instructions_wide_unicode() {
+        assert_eq!(
+            menu_instructions_for_layout(Some(120), true),
+            "   Use ↑↓ to navigate, Enter to select, /quit to exit"
+        );
+    }
+
+    #[test]
+    fn menu_instructions_wide_ascii() {
+        assert_eq!(
+            menu_instructions_for_layout(Some(120), false),
+            "   Use Up/Down to navigate, Enter to select, /quit to exit"
+        );
+    }
+
+    #[test]
+    fn menu_instructions_narrow_unicode() {
+        assert_eq!(
+            menu_instructions_for_layout(Some(70), true),
+            "   ↑↓ + Enter, /quit"
+        );
+    }
+
+    #[test]
+    fn menu_instructions_narrow_ascii() {
+        assert_eq!(
+            menu_instructions_for_layout(Some(70), false),
+            "   Up/Down + Enter, /quit"
+        );
+    }
+
+    #[test]
+    fn menu_instructions_compact() {
+        assert_eq!(
+            menu_instructions_for_layout(Some(50), true),
+            "   Enter to select, /quit to exit"
+        );
     }
 }

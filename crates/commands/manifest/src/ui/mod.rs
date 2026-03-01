@@ -5,4 +5,4 @@
 
 pub mod menu;
 
-pub use menu::show_menu;
+pub use menu::{show_apply_menu, show_menu};

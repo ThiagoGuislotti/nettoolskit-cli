@@ -69,6 +69,25 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  # ─── Parallel Stress (templating) ─────────────────────────────
+  templating-parallel-stress:
+    name: Templating Parallel Stress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: templating-parallel-stress
+      - name: Stress templating concurrency tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..10}; do
+            echo "[parallel-stress] iteration ${i}/10"
+            cargo test -p nettoolskit-templating --all-targets -- --test-threads=16
+          done
+
   # ─── Code Coverage ─────────────────────────────────────────────
   coverage:
     name: Coverage

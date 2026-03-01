@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,20 +26,81 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
       - name: Get version from tag
         id: get_version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$tag' is invalid. Expected format: vMAJOR.MINOR.PATCH[-PRERELEASE]"
+            exit 1
+          fi
+
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      - name: Validate tag version matches crate version
+        shell: bash
+        run: |
+          expected_version="${{ steps.get_version.outputs.version }}"
+          pkgid="$(cargo pkgid -p nettoolskit-cli)"
+          crate_version="${pkgid##*@}"
+
+          if [[ "$crate_version" != "$expected_version" ]]; then
+            echo "::error::Tag version '$expected_version' does not match nettoolskit-cli version '$crate_version'."
+            exit 1
+          fi
+      - name: Detect prerelease channel
+        id: channel
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate compatibility policy document
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f COMPATIBILITY.md ]]; then
+            echo "::error::COMPATIBILITY.md not found."
+            exit 1
+          fi
+
+          grep -q "^## Compatibility Matrix" COMPATIBILITY.md || {
+            echo "::error::COMPATIBILITY.md is missing 'Compatibility Matrix' section."
+            exit 1
+          }
+          grep -q "^## Support Policy" COMPATIBILITY.md || {
+            echo "::error::COMPATIBILITY.md is missing 'Support Policy' section."
+            exit 1
+          }
       - name: Generate changelog
         id: changelog
+        shell: bash
         run: |
-          # Extract changelog section for this version
           version="${{ steps.get_version.outputs.version }}"
-          if grep -q "## \[${version}\]" CHANGELOG.md 2>/dev/null; then
-            sed -n "/## \[${version}\]/,/## \[/p" CHANGELOG.md | head -n -1 > release_notes.md
-          else
-            echo "Release ${version}" > release_notes.md
-            echo "" >> release_notes.md
-            git log --oneline --no-merges "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" >> release_notes.md
+          if [[ ! -f CHANGELOG.md ]]; then
+            echo "::error::CHANGELOG.md not found."
+            exit 1
+          fi
+
+          awk -v version="$version" '
+            /^## \[/ {
+              if (capture) { exit }
+              if ($0 == "## [" version "]" || index($0, "## [" version "] -") == 1) {
+                capture = 1
+              }
+            }
+            capture { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [[ ! -s release_notes.md ]]; then
+            echo "::error::Missing changelog section for version [$version]."
+            echo "Expected heading like: ## [$version] - YYYY-MM-DD"
+            exit 1
           fi
       - name: Create GitHub Release
         id: create_release
@@ -47,7 +109,7 @@ jobs:
           name: "v${{ steps.get_version.outputs.version }}"
           body_path: release_notes.md
           draft: true
-          prerelease: false
+          prerelease: ${{ steps.channel.outputs.prerelease }}
 
   # ─── SBOM Generation (CycloneDX + SPDX) ───────────────────────
   sbom:
@@ -152,7 +214,7 @@ jobs:
           staging="${BINARY_NAME}-${version}-${{ matrix.target }}"
           mkdir -p "$staging"
           cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "$staging/"
-          cp README.md LICENSE* CHANGELOG.md "$staging/" 2>/dev/null || true
+          cp README.md COMPATIBILITY.md LICENSE* CHANGELOG.md "$staging/" 2>/dev/null || true
           if [ -d completions ] && [ "$(ls -A completions)" ]; then
             cp -r completions "$staging/"
           fi
@@ -166,7 +228,7 @@ jobs:
           $staging = "${env:BINARY_NAME}-${version}-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path $staging
           Copy-Item "target/${{ matrix.target }}/release/${env:BINARY_NAME}.exe" $staging
-          Copy-Item README.md, CHANGELOG.md -Destination $staging -ErrorAction SilentlyContinue
+          Copy-Item README.md, CHANGELOG.md, COMPATIBILITY.md -Destination $staging -ErrorAction SilentlyContinue
           if (Test-Path completions) {
             Copy-Item -Recurse completions $staging
           }
@@ -191,3 +253,170 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.ASSET }}.sha256
+
+  # ─── Sign Release Assets (Keyless Cosign) ─────────────────────
+  sign-release-assets:
+    name: Sign Release Assets
+    needs:
+      - create-release
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install GitHub CLI (linux fallback)
+        shell: bash
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Download release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${{ needs.create-release.outputs.version }}"
+
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "${BINARY_NAME}-${version}-*" --clobber
+      - name: Sign assets with cosign keyless
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          signed_count=0
+          for file in *; do
+            if [[ ! -f "$file" ]]; then
+              continue
+            fi
+            if [[ "$file" == *.sig || "$file" == *.pem ]]; then
+              continue
+            fi
+
+            cosign sign-blob --yes \
+              --output-signature "${file}.sig" \
+              --output-certificate "${file}.pem" \
+              "$file"
+            signed_count=$((signed_count + 1))
+          done
+
+          if [[ "$signed_count" -eq 0 ]]; then
+            echo "No release assets found to sign."
+            exit 1
+          fi
+      - name: Upload signature assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.sig
+            *.pem
+
+  # ─── Post-Release Smoke Test ───────────────────────────────────
+  smoke-test-release-assets:
+    name: Smoke Test Release Assets (${{ matrix.target }})
+    needs:
+      - create-release
+      - build
+      - sign-release-assets
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+    steps:
+      - name: Install GitHub CLI (linux fallback)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+
+      - name: Download and smoke test release assets (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          version="${{ needs.create-release.outputs.version }}"
+          base="${BINARY_NAME}-${version}-${{ matrix.target }}"
+          archive="${base}.${{ matrix.archive }}"
+          checksum="${archive}.sha256"
+
+          for attempt in {1..5}; do
+            if gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$archive" --pattern "$checksum" --clobber; then
+              break
+            fi
+            if [[ "$attempt" -eq 5 ]]; then
+              echo "Failed to download release assets after retries"
+              exit 1
+            fi
+            sleep 10
+          done
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "$checksum"
+          else
+            shasum -a 256 -c "$checksum"
+          fi
+
+          tar xzf "$archive"
+
+          "./$base/${BINARY_NAME}" --version
+          "./$base/${BINARY_NAME}" --help >/dev/null
+          "./$base/${BINARY_NAME}" manifest --help >/dev/null
+
+      - name: Download and smoke test release assets (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tag = "${env:GITHUB_REF_NAME}"
+          $version = "${{ needs.create-release.outputs.version }}"
+          $base = "${env:BINARY_NAME}-${version}-${{ matrix.target }}"
+          $archive = "$base.${{ matrix.archive }}"
+          $checksum = "$archive.sha256"
+
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $archive --pattern $checksum --clobber
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+            if ($attempt -eq 5) {
+              throw "Failed to download release assets after retries."
+            }
+            Start-Sleep -Seconds 10
+          }
+
+          $checksumLine = (Get-Content $checksum | Select-Object -First 1).Trim()
+          $expectedHash = ($checksumLine -split '\s+')[0].ToLowerInvariant()
+          $actualHash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expectedHash -ne $actualHash) {
+            throw "Checksum mismatch for $archive"
+          }
+
+          Expand-Archive -Path $archive -DestinationPath .
+
+          $binaryPath = Join-Path $base "${env:BINARY_NAME}.exe"
+          & $binaryPath --version
+          & $binaryPath --help | Out-Null
+          & $binaryPath manifest --help | Out-Null

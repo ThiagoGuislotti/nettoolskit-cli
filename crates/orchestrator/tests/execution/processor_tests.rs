@@ -3,6 +3,8 @@
 //! Tests for command processor and text processor functionality.
 
 use nettoolskit_orchestrator::{process_command, process_text, ExitStatus};
+use std::fs;
+use tempfile::tempdir;
 
 // Command Processing Tests
 
@@ -69,6 +71,43 @@ async fn test_process_invalid_command() {
     );
 }
 
+#[tokio::test]
+async fn test_process_translate_missing_arguments() {
+    let result = process_command("/translate").await;
+    assert_eq!(
+        result,
+        ExitStatus::Error,
+        "Translate without required args should fail"
+    );
+}
+
+#[tokio::test]
+async fn test_process_translate_with_valid_args_executes_handler() {
+    let dir = tempdir().expect("failed to create temporary directory");
+    let input_path = dir.path().join("sample.cs.hbs");
+    fs::write(&input_path, "public class {{class_name}} {}")
+        .expect("failed to write input template");
+
+    let command = format!(
+        "/translate --from dotnet --to rust {}",
+        input_path.display()
+    );
+    let result = process_command(&command).await;
+
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Translate with valid args should succeed"
+    );
+
+    let output_path = dir.path().join("sample.rs");
+    assert!(
+        output_path.exists(),
+        "Expected translated output file at {}",
+        output_path.display()
+    );
+}
+
 // ─── Text Processing Tests ────────────────────────────────────────────────
 
 #[tokio::test]
@@ -108,6 +147,40 @@ async fn test_process_text_regular_input() {
         result,
         ExitStatus::Success,
         "Regular text should succeed with hint"
+    );
+}
+
+#[tokio::test]
+async fn test_process_text_routes_help_alias() {
+    let result = process_text("ajuda").await;
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Help alias should route to /help command"
+    );
+}
+
+#[tokio::test]
+async fn test_process_text_routes_translate_without_slash() {
+    let dir = tempdir().expect("failed to create temporary directory");
+    let input_path = dir.path().join("text-mode.cs.hbs");
+    fs::write(&input_path, "public class {{class_name}} {}")
+        .expect("failed to write input template");
+
+    let command = format!("translate --from dotnet --to rust {}", input_path.display());
+    let result = process_text(&command).await;
+
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Free-text translate should route and succeed"
+    );
+
+    let output_path = dir.path().join("text-mode.rs");
+    assert!(
+        output_path.exists(),
+        "Expected translated output file at {}",
+        output_path.display()
     );
 }
 

@@ -19,7 +19,7 @@ pub enum MainAction {
     #[strum(serialize = "manifest")]
     Manifest,
 
-    /// Translate code between languages (deferred)
+    /// Translate templates between programming languages
     #[strum(serialize = "translate")]
     Translate,
 
@@ -41,7 +41,7 @@ impl MainAction {
         match self {
             MainAction::Help => "Display help information and available commands",
             MainAction::Manifest => "Manage and apply manifests (submenu)",
-            MainAction::Translate => "Translate code between languages (deferred)",
+            MainAction::Translate => "Translate templates between programming languages",
             MainAction::Config => "View and edit user configuration",
             MainAction::Quit => "Exit NetToolsKit CLI",
         }

@@ -63,12 +63,23 @@ pub enum ManifestCommand {
     /// Discover available manifests in the workspace.
     List,
     /// Validate manifest structure and dependencies.
-    Check,
+    Check {
+        /// Path to manifest file (required for deterministic validation).
+        path: String,
+        /// Validate as template file instead of manifest YAML.
+        #[clap(long)]
+        template: bool,
+    },
     /// Preview generated files without applying changes.
     Render {
+        /// Path to manifest file.
+        path: String,
         /// Keep operation in dry-run mode (preview only).
         #[clap(long)]
         dry_run: bool,
+        /// Optional output root directory for rendering preview.
+        #[clap(long)]
+        output: Option<String>,
     },
     /// Apply a manifest file to generate/update project files.
     Apply {
@@ -92,14 +103,29 @@ impl Commands {
             Commands::Manifest { command } => match command {
                 None => process_command(&MainAction::Manifest.slash_static()).await,
                 Some(ManifestCommand::List) => process_command("/manifest list").await,
-                Some(ManifestCommand::Check) => process_command("/manifest check").await,
-                Some(ManifestCommand::Render { dry_run }) => {
+                Some(ManifestCommand::Check { path, template }) => {
+                    let mut command_line = format!("/manifest check {path}");
+                    if template {
+                        command_line.push_str(" --template");
+                    }
+                    process_command(&command_line).await
+                }
+                Some(ManifestCommand::Render {
+                    path,
+                    dry_run,
+                    output,
+                }) => {
                     let cmd = if dry_run {
-                        "/manifest render --dry-run"
+                        format!("/manifest render {path} --dry-run")
                     } else {
-                        "/manifest render"
+                        format!("/manifest render {path}")
                     };
-                    process_command(cmd).await
+                    let mut command_line = cmd;
+                    if let Some(output_dir) = output {
+                        command_line.push_str(" --output ");
+                        command_line.push_str(&output_dir);
+                    }
+                    process_command(&command_line).await
                 }
                 Some(ManifestCommand::Apply {
                     path,

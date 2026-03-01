@@ -51,7 +51,7 @@ fn test_enum_menu_config_creation() {
     assert_eq!(config.subtitle, "Select an option");
     assert_eq!(config.current_dir, "/test/dir");
     assert_eq!(config.theme_color, Color::PURPLE);
-    assert_eq!(config.width, 89);
+    assert!((10..=89).contains(&config.width));
 }
 
 #[test]

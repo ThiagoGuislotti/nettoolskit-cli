@@ -209,6 +209,7 @@ impl TerminalLayout {
 
 ## References
 
+- ../../docs/ui/tui-ux-guidelines.md
 - https://docs.rs/crossterm/
 - https://docs.rs/inquire/
 - https://github.com/ThiagoGuislotti/NetToolsKit/issues
