@@ -2,10 +2,12 @@
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use nettoolskit_cli::interactive_mode;
+use nettoolskit_cli::{interactive_mode, InteractiveOptions};
 use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
 use nettoolskit_orchestrator::ExitStatus;
-use nettoolskit_otel::{init_tracing, next_correlation_id, shutdown_tracing};
+use nettoolskit_otel::{
+    init_tracing_with_config, next_correlation_id, shutdown_tracing, TracingConfig,
+};
 use nettoolskit_ui::{set_color_override, set_unicode_override, ColorLevel};
 use tracing::{info, info_span};
 
@@ -13,8 +15,8 @@ use tracing::{info, info_span};
 #[derive(Debug, Clone, Parser)]
 pub struct GlobalArgs {
     /// Set logging level (off, error, warn, info, debug, trace)
-    #[clap(long, global = true, default_value = "info")]
-    pub log_level: String,
+    #[clap(long, global = true)]
+    pub log_level: Option<String>,
 
     /// Path to configuration file
     #[clap(long, global = true)]
@@ -195,7 +197,16 @@ async fn main() {
         None => AppConfig::load(),
     };
 
-    let verbose = cli.global.verbose || config.general.verbose;
+    let configured_log_level = cli
+        .global
+        .log_level
+        .clone()
+        .unwrap_or_else(|| config.general.log_level.clone());
+    let requested_verbose_level = matches!(
+        configured_log_level.to_ascii_lowercase().as_str(),
+        "debug" | "trace"
+    );
+    let verbose = cli.global.verbose || config.general.verbose || requested_verbose_level;
 
     // Wire user config into the terminal capabilities system
     match config.display.color {
@@ -212,7 +223,12 @@ async fn main() {
     let run_interactive = cli.subcommand.is_none();
 
     if !run_interactive {
-        if let Err(e) = init_tracing(verbose) {
+        let tracing_config = TracingConfig {
+            verbose,
+            log_level: configured_log_level.clone(),
+            ..Default::default()
+        };
+        if let Err(e) = init_tracing_with_config(tracing_config) {
             eprintln!("Warning: Failed to initialize tracing: {}", e);
         }
     }
@@ -238,7 +254,14 @@ async fn main() {
             );
             status
         }
-        None => interactive_mode(verbose).await,
+        None => {
+            let options = InteractiveOptions {
+                verbose,
+                log_level: configured_log_level,
+                footer_output: config.general.footer_output,
+            };
+            interactive_mode(options).await
+        }
     };
 
     shutdown_tracing();

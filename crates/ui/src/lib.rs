@@ -29,8 +29,11 @@ pub use core::capabilities::{
 pub use core::colors::*;
 pub use core::style;
 // Re-export components
+pub use interaction::file_picker::FilePicker;
+pub use interaction::history_viewer::HistoryViewer;
 pub use interaction::palette::CommandPalette;
 pub use interaction::prompt::*;
+pub use interaction::status_bar::{StatusBar, StatusBarMode, StatusNotificationLevel};
 pub use interaction::terminal::*;
 pub use rendering::components::{
     format_menu_item, render_box, render_command, render_enum_menu, render_interactive_menu,

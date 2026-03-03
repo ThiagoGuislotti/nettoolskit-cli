@@ -27,6 +27,10 @@ pub enum MainAction {
     #[strum(serialize = "config")]
     Config,
 
+    /// Clear and redraw the interactive terminal layout
+    #[strum(serialize = "clear")]
+    Clear,
+
     /// Exit NetToolsKit CLI
     #[strum(serialize = "quit")]
     Quit,
@@ -43,6 +47,7 @@ impl MainAction {
             MainAction::Manifest => "Manage and apply manifests (submenu)",
             MainAction::Translate => "Translate templates between programming languages",
             MainAction::Config => "View and edit user configuration",
+            MainAction::Clear => "Clear and redraw the interactive terminal layout",
             MainAction::Quit => "Exit NetToolsKit CLI",
         }
     }
@@ -55,6 +60,7 @@ impl MenuEntry for MainAction {
             MainAction::Manifest => "/manifest",
             MainAction::Translate => "/translate",
             MainAction::Config => "/config",
+            MainAction::Clear => "/clear",
             MainAction::Quit => "/quit",
         }
     }

@@ -77,6 +77,155 @@ jobs:
             echo "::error::COMPATIBILITY.md is missing 'Support Policy' section."
             exit 1
           }
+          grep -q "^## Support Lifecycle and EOL" COMPATIBILITY.md || {
+            echo "::error::COMPATIBILITY.md is missing 'Support Lifecycle and EOL' section."
+            exit 1
+          }
+          grep -q "^| Minor | GA date | Active support until | Maintenance support until | EOL date | Status |" COMPATIBILITY.md || {
+            echo "::error::COMPATIBILITY.md is missing the EOL table header."
+            exit 1
+          }
+      - name: Validate compatibility lifecycle semantics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $compatibilityFile = "COMPATIBILITY.md"
+          if (-not (Test-Path -LiteralPath $compatibilityFile -PathType Leaf)) {
+            throw "COMPATIBILITY.md not found."
+          }
+
+          $sharedRepoPath = ".temp/copilot-instructions"
+          if (-not (Test-Path -LiteralPath $sharedRepoPath)) {
+            git clone --depth 1 https://github.com/ThiagoGuislotti/copilot-instructions.git $sharedRepoPath
+          }
+          $sharedValidator = Join-Path $sharedRepoPath "scripts/validation/validate-compatibility-lifecycle-policy.ps1"
+          if (Test-Path -LiteralPath $sharedValidator -PathType Leaf) {
+            Write-Host "Using shared compatibility lifecycle validator from copilot-instructions repository."
+            & $sharedValidator -RepoRoot $PWD -CompatibilityFile $compatibilityFile
+            if ($LASTEXITCODE -ne 0) {
+              throw "Shared compatibility lifecycle validator failed."
+            }
+            exit 0
+          }
+
+          Write-Host "Shared compatibility lifecycle validator not found. Falling back to inline PowerShell validation."
+
+          $content = Get-Content -Path $compatibilityFile -Raw -Encoding UTF8
+          $lines = @($content -split "`r?`n")
+          $culture = [System.Globalization.CultureInfo]::InvariantCulture
+          $errors = [System.Collections.Generic.List[string]]::new()
+
+          function Parse-DateOrNull {
+            param([string]$Value, [string]$Field, [string]$Minor)
+            if ($Value -eq "N/A") { return $null }
+            $parsed = [datetime]::MinValue
+            if (-not [datetime]::TryParseExact($Value, "MMMM d, yyyy", $culture, [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) {
+              $errors.Add("Invalid date '$Value' in field '$Field' for row '$Minor'. Expected format 'Month Day, Year'.")
+              return $null
+            }
+            return $parsed.Date
+          }
+
+          $referenceMatch = [regex]::Match($content, "Reference date for status labels in this table:\s+\*\*(?<date>[^*]+)\*\*")
+          if (-not $referenceMatch.Success) {
+            $errors.Add("Missing reference date line in 'Support Lifecycle and EOL' section.")
+          }
+
+          $referenceDate = $null
+          if ($referenceMatch.Success) {
+            $referenceDate = Parse-DateOrNull -Value $referenceMatch.Groups["date"].Value.Trim() -Field "Reference date" -Minor "reference"
+          }
+
+          $header = "| Minor | GA date | Active support until | Maintenance support until | EOL date | Status |"
+          $headerIndex = -1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].Trim() -eq $header) {
+              $headerIndex = $i
+              break
+            }
+          }
+          if ($headerIndex -lt 0) {
+            $errors.Add("EOL table header not found.")
+          }
+
+          $rows = @()
+          if ($headerIndex -ge 0) {
+            for ($i = $headerIndex + 1; $i -lt $lines.Count; $i++) {
+              $line = $lines[$i].Trim()
+              if (-not $line.StartsWith("|")) { break }
+              if ($line -match "^\|\s*-+\s*\|\s*-+\s*\|\s*-+\s*\|\s*-+\s*\|\s*-+\s*\|\s*-+\s*\|?$") { continue }
+
+              $cells = @($line.Trim("|").Split("|") | ForEach-Object { $_.Trim() })
+              if ($cells.Count -ne 6) {
+                $errors.Add("Invalid EOL row shape: '$line'. Expected 6 columns.")
+                continue
+              }
+
+              $rows += [pscustomobject]@{
+                Minor            = $cells[0].Trim("`")
+                GaDate           = $cells[1]
+                ActiveUntil      = $cells[2]
+                MaintenanceUntil = $cells[3]
+                EolDate          = $cells[4]
+                Status           = $cells[5]
+              }
+            }
+          }
+
+          if ($rows.Count -eq 0) {
+            $errors.Add("EOL table has no data rows.")
+          }
+
+          $allowedStatuses = @("Active", "Maintenance", "Unsupported")
+          foreach ($row in $rows) {
+            if ($allowedStatuses -notcontains $row.Status) {
+              $errors.Add("Invalid status '$($row.Status)' for row '$($row.Minor)'. Allowed values: Active, Maintenance, Unsupported.")
+            }
+
+            $gaDate = Parse-DateOrNull -Value $row.GaDate -Field "GA date" -Minor $row.Minor
+            $activeUntil = Parse-DateOrNull -Value $row.ActiveUntil -Field "Active support until" -Minor $row.Minor
+            $maintenanceUntil = Parse-DateOrNull -Value $row.MaintenanceUntil -Field "Maintenance support until" -Minor $row.Minor
+            $eolDate = Parse-DateOrNull -Value $row.EolDate -Field "EOL date" -Minor $row.Minor
+
+            $hasFullLifecycle = $null -ne $gaDate -and $null -ne $activeUntil -and $null -ne $maintenanceUntil -and $null -ne $eolDate
+            if ($hasFullLifecycle) {
+              if ($activeUntil -lt $gaDate) {
+                $errors.Add("Row '$($row.Minor)' has Active support end before GA date.")
+              }
+              if ($maintenanceUntil -lt $activeUntil) {
+                $errors.Add("Row '$($row.Minor)' has Maintenance support end before Active support end.")
+              }
+
+              $expectedEol = $maintenanceUntil.AddDays(1)
+              if ($eolDate -ne $expectedEol) {
+                $errors.Add("Row '$($row.Minor)' violates policy: EOL date must be Maintenance support until + 1 day ($($expectedEol.ToString('MMMM dd, yyyy', $culture))).")
+              }
+
+              if ($null -ne $referenceDate) {
+                $expectedStatus = if ($referenceDate -le $activeUntil) { "Active" } elseif ($referenceDate -le $maintenanceUntil) { "Maintenance" } else { "Unsupported" }
+                if ($row.Status -ne $expectedStatus) {
+                  $errors.Add("Row '$($row.Minor)' status '$($row.Status)' is inconsistent with reference date $($referenceDate.ToString('MMMM dd, yyyy', $culture)). Expected '$expectedStatus'.")
+                }
+              }
+            }
+
+            $naCount = @($row.GaDate, $row.ActiveUntil, $row.MaintenanceUntil) | Where-Object { $_ -eq "N/A" } | Measure-Object | Select-Object -ExpandProperty Count
+            if ($naCount -gt 0 -and $naCount -lt 3) {
+              $errors.Add("Row '$($row.Minor)' mixes 'N/A' and dated lifecycle fields. Use all dates or all N/A.")
+            }
+            if ($naCount -gt 0 -and $row.Status -ne "Unsupported") {
+              $errors.Add("Row '$($row.Minor)' uses 'N/A' lifecycle fields and must be 'Unsupported'.")
+            }
+          }
+
+          if ($errors.Count -gt 0) {
+            foreach ($validationError in $errors) {
+              Write-Host "::error::$validationError"
+            }
+            throw "Compatibility lifecycle semantic validation failed."
+          }
+
+          Write-Host "Compatibility lifecycle policy validation passed."
       - name: Generate changelog
         id: changelog
         shell: bash

@@ -71,6 +71,7 @@ static ACTIVE_LAYOUT: Lazy<Mutex<Option<Arc<TerminalLayoutInner>>>> =
     Lazy::new(|| Mutex::new(None));
 static PENDING_LOGS: Lazy<Mutex<VecDeque<String>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static INTERACTIVE_MODE: AtomicBool = AtomicBool::new(false);
+static FOOTER_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(true);
 
 const PENDING_LOG_CAPACITY: usize = 256;
 
@@ -126,7 +127,7 @@ pub fn disable_interactive_logging() {
         pending.drain(..).collect()
     };
 
-    if drained.is_empty() {
+    if drained.is_empty() || !FOOTER_OUTPUT_ENABLED.load(Ordering::SeqCst) {
         return;
     }
 
@@ -135,6 +136,17 @@ pub fn disable_interactive_logging() {
         let _ = writeln!(stdout, "{entry}");
     }
     let _ = stdout.flush();
+}
+
+/// Enable or disable footer output rendering at runtime.
+pub fn set_footer_output_enabled(enabled: bool) {
+    FOOTER_OUTPUT_ENABLED.store(enabled, Ordering::SeqCst);
+}
+
+/// Returns whether footer output rendering is enabled.
+#[must_use]
+pub fn footer_output_enabled() -> bool {
+    FOOTER_OUTPUT_ENABLED.load(Ordering::SeqCst)
 }
 
 /// Manage the interactive terminal layout with fixed header and footer.
@@ -460,6 +472,41 @@ impl TerminalLayoutInner {
 
         self.render_footer_locked(&state)
     }
+
+    fn prepare_prompt_line(&self) -> io::Result<()> {
+        let metrics = {
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.metrics
+        };
+
+        apply_scroll_region(metrics.scroll_top, metrics.scroll_bottom)?;
+
+        let (x, y) = cursor::position().unwrap_or((0, metrics.scroll_top));
+        let mut stdout = io::stdout();
+        let clamped_y = y.clamp(metrics.scroll_top, metrics.scroll_bottom);
+
+        if x > 0 {
+            if clamped_y >= metrics.scroll_bottom {
+                queue!(
+                    stdout,
+                    cursor::MoveTo(0, metrics.scroll_bottom),
+                    Print("\n")
+                )?;
+            } else {
+                queue!(stdout, cursor::MoveTo(0, clamped_y.saturating_add(1)))?;
+            }
+        } else {
+            queue!(stdout, cursor::MoveTo(0, clamped_y))?;
+        }
+
+        queue!(
+            stdout,
+            Clear(ClearType::CurrentLine),
+            cursor::MoveToColumn(0)
+        )?;
+        stdout.flush()?;
+        ensure_cursor_visible_blinking()
+    }
 }
 
 fn clamp_cursor_to_metrics((x, y): (u16, u16), metrics: LayoutMetrics) -> (u16, u16) {
@@ -573,6 +620,62 @@ pub fn ensure_layout_integrity() -> io::Result<()> {
     }
 }
 
+/// Position the cursor on a clean prompt line in the dynamic area.
+///
+/// When the interactive layout is active, this function clamps and normalizes
+/// cursor placement to keep the prompt below the latest output and inside the
+/// scrollable region. Without an active layout, it normalizes to column zero
+/// and advances one line if needed.
+pub fn prepare_prompt_line() -> io::Result<()> {
+    let layout = {
+        let slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
+        slot.clone()
+    };
+
+    if let Some(active) = layout {
+        return active.prepare_prompt_line();
+    }
+
+    let mut stdout = io::stdout();
+    let (x, _) = cursor::position().unwrap_or((0, 0));
+    if x > 0 {
+        queue!(stdout, Print("\n"))?;
+    }
+    queue!(stdout, cursor::MoveToColumn(0))?;
+    stdout.flush()?;
+    ensure_cursor_visible_blinking()
+}
+
+/// Reset the interactive layout and redraw the header/footer regions.
+///
+/// If an active interactive layout exists, this triggers an immediate reconfigure
+/// using the current terminal dimensions. If no layout is active, this falls back
+/// to a plain terminal clear.
+pub fn reset_layout() -> io::Result<()> {
+    let layout = {
+        let slot = ACTIVE_LAYOUT.lock().unwrap_or_else(|e| e.into_inner());
+        slot.clone()
+    };
+
+    if let Some(active) = layout {
+        if let Err(error) = active.reconfigure() {
+            if error
+                .to_string()
+                .contains("Terminal height insufficient for layout")
+            {
+                reset_scroll_region_full()?;
+                ensure_cursor_visible_blinking()?;
+                return Ok(());
+            }
+            return Err(error);
+        }
+        Ok(())
+    } else {
+        clear_terminal()?;
+        ensure_cursor_visible_blinking()
+    }
+}
+
 /// Record a terminal resize event for trailing-edge debounce processing.
 ///
 /// The actual layout reconfiguration is deferred to [`process_pending_resize`].
@@ -641,6 +744,10 @@ pub fn process_pending_resize() -> io::Result<()> {
 
 /// Append a formatted log line to the footer; fallback to stdout if layout is inactive.
 pub fn append_footer_log(line: &str) -> io::Result<()> {
+    if !FOOTER_OUTPUT_ENABLED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
     let Some(entry) = normalize_log_entry(line) else {
         return Ok(());
     };
@@ -667,10 +774,11 @@ pub fn append_footer_log(line: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_footer_log, calculate_layout_metrics, clamp_cursor_to_metrics, handle_resize,
-        normalize_log_entry, pad_to_width, process_pending_resize, truncate_to_width,
-        LayoutMetrics, FOOTER_TARGET_HEIGHT, INTERACTIVE_MODE, MIN_DYNAMIC_HEIGHT, PENDING_RESIZE,
-        RECONFIGURING, RESIZE_DEBOUNCE_MS,
+        append_footer_log, calculate_layout_metrics, clamp_cursor_to_metrics,
+        footer_output_enabled, handle_resize, normalize_log_entry, pad_to_width,
+        prepare_prompt_line, process_pending_resize, reset_layout, set_footer_output_enabled,
+        truncate_to_width, LayoutMetrics, FOOTER_TARGET_HEIGHT, INTERACTIVE_MODE,
+        MIN_DYNAMIC_HEIGHT, PENDING_RESIZE, RECONFIGURING, RESIZE_DEBOUNCE_MS,
     };
     use serial_test::serial;
     use std::collections::VecDeque;
@@ -1100,6 +1208,40 @@ mod tests {
     fn append_footer_log_writes_stdout_when_not_interactive() {
         INTERACTIVE_MODE.store(false, Ordering::SeqCst);
         let result = append_footer_log("direct output line");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn append_footer_log_is_suppressed_when_footer_output_disabled() {
+        use super::PENDING_LOGS;
+
+        let previous_state = footer_output_enabled();
+        set_footer_output_enabled(false);
+        INTERACTIVE_MODE.store(true, Ordering::SeqCst);
+
+        let result = append_footer_log("suppressed line");
+
+        INTERACTIVE_MODE.store(false, Ordering::SeqCst);
+        set_footer_output_enabled(previous_state);
+
+        assert!(result.is_ok());
+
+        let pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn reset_layout_without_active_layout_succeeds() {
+        let result = reset_layout();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn prepare_prompt_line_without_active_layout_succeeds() {
+        let result = prepare_prompt_line();
         assert!(result.is_ok());
     }
 

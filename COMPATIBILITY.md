@@ -36,11 +36,12 @@ This document defines platform compatibility and support commitments for `ntk`.
 - Stable releases: tags matching `vMAJOR.MINOR.PATCH`.
 - Prereleases: tags matching `vMAJOR.MINOR.PATCH-<label>`.
 
-### Maintenance window
+### Support window policy
 
-- Active support: latest stable minor release.
-- Maintenance support: previous stable minor release (security and critical fixes only).
-- Older releases: unsupported unless explicitly announced.
+- Active support window: `12` months from GA (`General Availability`) date.
+- Maintenance support window: `6` months after active support ends.
+- EOL (`End of Life`) starts on the day after maintenance support ends.
+- When a new stable minor is released, the previous stable minor transitions to maintenance support.
 
 ### Security response
 
@@ -56,3 +57,18 @@ This document defines platform compatibility and support commitments for `ntk`.
 
 - Support commitments apply to official GitHub release artifacts only.
 - Locally compiled binaries and custom environments are best effort.
+
+## Support Lifecycle and EOL
+
+Reference date for status labels in this table: **March 1, 2026**.
+
+| Minor | GA date | Active support until | Maintenance support until | EOL date | Status |
+|---|---|---|---|---|---|
+| `1.0` | January 4, 2025 | January 4, 2026 | July 4, 2026 | July 5, 2026 | Maintenance |
+| `<1.0` legacy line | N/A | N/A | N/A | March 1, 2026 | Unsupported |
+
+### Lifecycle update cadence
+
+- The EOL table is updated on every stable minor release.
+- Dates are maintained in ISO-aware human format (`Month Day, Year`) for operational clarity.
+- Release pipeline validates EOL table semantics (date ordering, `EOL = maintenance + 1 day`, and status coherence).

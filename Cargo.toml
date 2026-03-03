@@ -44,10 +44,17 @@ supports-color = "2.1"
 
 # Interactive prompts
 inquire = "0.9"
+rustyline = "13.0"
 
 # Async utilities
 futures = "0.3"
 futures-util = "0.3"
+regex = "1.12"
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+tree-sitter-c-sharp = "0.21"
+tree-sitter-javascript = "0.21"
+tree-sitter-typescript = "0.21"
 
 # Tracing/observability
 tracing = "0.1"

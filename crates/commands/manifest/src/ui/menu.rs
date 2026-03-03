@@ -8,7 +8,7 @@ use inquire::Text;
 use nettoolskit_core::{path_utils::directory::get_current_directory, ExitStatus};
 use nettoolskit_ui::{
     render_enum_menu, render_interactive_menu, render_section_title, Color, EnumMenuConfig,
-    MenuConfig,
+    FilePicker, MenuConfig,
 };
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
@@ -56,17 +56,17 @@ pub async fn show_menu() -> ExitStatus {
 async fn execute_check() -> ExitStatus {
     render_section_title("Validating Manifest...", Some("✅"));
 
-    // Prompt for manifest path
-    let manifest_path = Text::new("Manifest file path:")
-        .with_help_message("Enter the path to the manifest file")
-        .with_placeholder("manifest.yaml")
-        .prompt();
-
-    match manifest_path {
-        Ok(path) if !path.is_empty() => {
-            let file_path = PathBuf::from(&path);
+    match prompt_manifest_path(
+        "Check",
+        "Enter the path to the manifest file",
+        "ntk-manifest.yml",
+    ) {
+        Some(file_path) => {
             println!();
-            println!("Validating: {}", path.color(Color::GREEN));
+            println!(
+                "Validating: {}",
+                file_path.display().to_string().color(Color::GREEN)
+            );
 
             match crate::handlers::check::check_file(&file_path, false).await {
                 Ok(validation) => {
@@ -77,7 +77,7 @@ async fn execute_check() -> ExitStatus {
                 }
             }
         }
-        _ => {
+        None => {
             println!("{}", "Validation cancelled".color(Color::YELLOW));
         }
     }
@@ -89,13 +89,12 @@ async fn execute_check() -> ExitStatus {
 async fn execute_render() -> ExitStatus {
     render_section_title("Rendering Preview...", Some("🎨"));
 
-    let manifest_path = Text::new("Manifest file path:")
-        .with_help_message("Enter the path to preview rendering")
-        .with_placeholder("manifest.yaml")
-        .prompt();
-
-    let path = match manifest_path {
-        Ok(p) if !p.is_empty() => PathBuf::from(p),
+    let path = match prompt_manifest_path(
+        "Render",
+        "Enter the path to preview rendering",
+        "ntk-manifest.yml",
+    ) {
+        Some(path) => path,
         _ => {
             println!("{}", "Render preview cancelled".color(Color::YELLOW));
             return ExitStatus::Success;
@@ -176,14 +175,12 @@ async fn execute_render() -> ExitStatus {
 pub async fn show_apply_menu() -> ExitStatus {
     render_section_title("Applying Manifest...", Some("⚡"));
 
-    // Prompt for manifest path
-    let manifest_path = Text::new("Manifest file path:")
-        .with_help_message("Enter the path to the manifest file")
-        .with_placeholder("feature.manifest.yaml")
-        .prompt();
-
-    let path = match manifest_path {
-        Ok(p) if !p.is_empty() => PathBuf::from(p),
+    let path = match prompt_manifest_path(
+        "Apply",
+        "Enter the path to the manifest file",
+        "feature.manifest.yaml",
+    ) {
+        Some(path) => path,
         _ => {
             println!("{}", "Apply cancelled".color(Color::YELLOW));
             return ExitStatus::Success;
@@ -221,4 +218,73 @@ pub async fn show_apply_menu() -> ExitStatus {
     println!("{}", "Executing manifest apply...".color(Color::CYAN));
 
     crate::handlers::apply::execute_apply(path, output_root, dry_run).await
+}
+
+fn prompt_manifest_path(
+    action_name: &str,
+    manual_help: &str,
+    placeholder: &str,
+) -> Option<PathBuf> {
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let picker = FilePicker::for_manifests(current_dir)
+        .with_title(format!("{action_name} Manifest"))
+        .with_subtitle("Select a manifest file or press Esc to type the path manually")
+        .with_prompt("Select manifest file:")
+        .with_help_message(
+            "Type to fuzzy-filter. Use re:<regex> for regex or lit:<text> for literal matching.",
+        )
+        .with_page_size(10);
+
+    if let Some(path) = picker.show() {
+        return Some(path);
+    }
+
+    println!();
+    println!(
+        "{}",
+        "No file selected in picker. Type a path manually or press Enter to cancel."
+            .color(Color::YELLOW)
+    );
+
+    prompt_manifest_path_text(manual_help, placeholder)
+}
+
+fn prompt_manifest_path_text(help_message: &str, placeholder: &str) -> Option<PathBuf> {
+    match Text::new("Manifest file path:")
+        .with_help_message(help_message)
+        .with_placeholder(placeholder)
+        .prompt()
+    {
+        Ok(path) => parse_manifest_input(&path),
+        Err(_) => None,
+    }
+}
+
+fn parse_manifest_input(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_manifest_input;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_manifest_input_rejects_blank_values() {
+        assert_eq!(parse_manifest_input(""), None);
+        assert_eq!(parse_manifest_input("   "), None);
+    }
+
+    #[test]
+    fn parse_manifest_input_trims_and_builds_path() {
+        assert_eq!(
+            parse_manifest_input("  ./ntk-manifest.yml  "),
+            Some(PathBuf::from("./ntk-manifest.yml"))
+        );
+    }
 }

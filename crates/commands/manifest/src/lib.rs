@@ -51,12 +51,6 @@ pub mod parsing;
 pub mod tasks;
 pub mod ui;
 
-// Backward compatibility aliases
-/// Backward-compatible re-export of the parsing module.
-pub mod parser {
-    pub use crate::parsing::*;
-}
-
 // Public API — externally consumed types
 pub use core::{ManifestError, ManifestResult};
 pub use execution::{ExecutionConfig, ManifestExecutor};

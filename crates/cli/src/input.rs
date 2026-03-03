@@ -1,10 +1,31 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent as CrosstermKeyEvent, KeyEventKind, KeyModifiers,
+};
 use nettoolskit_core::async_utils::with_timeout;
-use nettoolskit_ui::{append_footer_log, handle_resize, process_pending_resize};
+use nettoolskit_core::AppConfig;
+use nettoolskit_ui::{
+    append_footer_log, handle_resize, prepare_prompt_line, process_pending_resize,
+};
 use owo_colors::OwoColorize;
+use rustyline::completion::{Completer, Pair};
+use rustyline::error::ReadlineError;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::history::DefaultHistory;
+use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::{
+    Cmd, CompletionType, ConditionalEventHandler, Config as RustylineConfig, Context, Editor,
+    Event as RustylineEvent, EventContext, EventHandler, Helper, KeyEvent as RustylineKeyEvent,
+};
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::fs;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use supports_color::Stream;
+use tree_sitter::{Node, Parser};
 
 /// Result of an interactive input read operation.
 #[derive(Debug)]
@@ -17,6 +38,847 @@ pub enum InputResult {
     Exit,
     /// User pressed `F1` or `?` to open the interactive menu.
     ShowMenu,
+}
+
+const COMPLETION_COMMANDS: &[&str] = &[
+    "/help",
+    "/manifest",
+    "/manifest list",
+    "/manifest check",
+    "/manifest render",
+    "/manifest apply",
+    "/translate",
+    "/history",
+    "/config",
+    "/clear",
+    "/quit",
+];
+const PRIMARY_PROMPT: &str = "> ";
+const MULTILINE_CONTINUATION_MARKER: char = '\\';
+const MAX_HIGHLIGHT_LINE_BYTES: usize = 2048;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyntaxLanguage {
+    Plain,
+    Command,
+    Rust,
+    CSharp,
+    JavaScript,
+    TypeScript,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SyntaxTheme {
+    command: &'static str,
+    flag: &'static str,
+    keyword: &'static str,
+    string: &'static str,
+    comment: &'static str,
+    reset: &'static str,
+}
+
+impl Default for SyntaxTheme {
+    fn default() -> Self {
+        Self {
+            command: "\u{1b}[1;32m",
+            flag: "\u{1b}[36m",
+            keyword: "\u{1b}[94m",
+            string: "\u{1b}[33m",
+            comment: "\u{1b}[90m",
+            reset: "\u{1b}[0m",
+        }
+    }
+}
+
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "fn", "for", "if",
+    "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self",
+    "Self", "static", "struct", "trait", "type", "unsafe", "use", "where", "while",
+];
+
+const CSHARP_KEYWORDS: &[&str] = &[
+    "abstract",
+    "async",
+    "await",
+    "bool",
+    "class",
+    "enum",
+    "false",
+    "interface",
+    "namespace",
+    "new",
+    "null",
+    "private",
+    "protected",
+    "public",
+    "record",
+    "return",
+    "sealed",
+    "static",
+    "string",
+    "struct",
+    "this",
+    "true",
+    "using",
+    "var",
+    "void",
+];
+
+const JAVASCRIPT_KEYWORDS: &[&str] = &[
+    "async",
+    "await",
+    "class",
+    "const",
+    "constructor",
+    "default",
+    "export",
+    "extends",
+    "false",
+    "for",
+    "function",
+    "if",
+    "import",
+    "let",
+    "new",
+    "null",
+    "return",
+    "static",
+    "this",
+    "true",
+    "var",
+    "while",
+];
+
+const TYPESCRIPT_KEYWORDS: &[&str] = &[
+    "as",
+    "async",
+    "await",
+    "class",
+    "const",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "function",
+    "implements",
+    "import",
+    "interface",
+    "let",
+    "module",
+    "namespace",
+    "new",
+    "null",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "return",
+    "static",
+    "this",
+    "true",
+    "type",
+    "var",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenClass {
+    Keyword,
+    String,
+    Comment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HighlightSpan {
+    start: usize,
+    end: usize,
+    class: TokenClass,
+}
+
+struct TreeSitterRuntime {
+    rust: Option<Parser>,
+    csharp: Option<Parser>,
+    javascript: Option<Parser>,
+    typescript: Option<Parser>,
+}
+
+impl TreeSitterRuntime {
+    fn new() -> Self {
+        Self {
+            rust: build_parser(tree_sitter_rust::language()),
+            csharp: build_parser(tree_sitter_c_sharp::language()),
+            javascript: build_parser(tree_sitter_javascript::language()),
+            typescript: build_parser(tree_sitter_typescript::language_typescript()),
+        }
+    }
+
+    fn parser_for(&mut self, language: SyntaxLanguage) -> Option<&mut Parser> {
+        match language {
+            SyntaxLanguage::Rust => self.rust.as_mut(),
+            SyntaxLanguage::CSharp => self.csharp.as_mut(),
+            SyntaxLanguage::JavaScript => self.javascript.as_mut(),
+            SyntaxLanguage::TypeScript => self.typescript.as_mut(),
+            SyntaxLanguage::Plain | SyntaxLanguage::Command => None,
+        }
+    }
+}
+
+impl Default for TreeSitterRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Default)]
+struct SyntaxHighlightCache {
+    line: String,
+    language: Option<SyntaxLanguage>,
+    theme: Option<SyntaxTheme>,
+    highlighted: Option<String>,
+}
+
+thread_local! {
+    static TREE_SITTER_RUNTIME: RefCell<TreeSitterRuntime> = RefCell::new(TreeSitterRuntime::new());
+    static SYNTAX_HIGHLIGHT_CACHE: RefCell<SyntaxHighlightCache> = RefCell::new(SyntaxHighlightCache::default());
+}
+
+fn build_parser(language: tree_sitter::Language) -> Option<Parser> {
+    let mut parser = Parser::new();
+    parser.set_language(&language).ok()?;
+    Some(parser)
+}
+
+fn trailing_backslash_count(input: &str) -> usize {
+    input
+        .chars()
+        .rev()
+        .take_while(|ch| *ch == MULTILINE_CONTINUATION_MARKER)
+        .count()
+}
+
+fn has_multiline_continuation_marker(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    !trimmed.is_empty() && trailing_backslash_count(trimmed) % 2 == 1
+}
+
+fn strip_multiline_continuation_marker(line: &str) -> String {
+    if !has_multiline_continuation_marker(line) {
+        return line.to_string();
+    }
+
+    let trimmed = line.trim_end();
+    let marker_index = trimmed.len().saturating_sub(1);
+    trimmed[..marker_index].to_string()
+}
+
+fn normalize_multiline_submission(input: &str) -> String {
+    let mut normalized = String::new();
+    let mut parts = input.split('\n').peekable();
+
+    while let Some(part) = parts.next() {
+        normalized.push_str(&strip_multiline_continuation_marker(part));
+        if parts.peek().is_some() {
+            normalized.push('\n');
+        }
+    }
+
+    normalized
+}
+
+#[derive(Debug, Clone)]
+struct CliCompleter {
+    colors_enabled: bool,
+    theme: SyntaxTheme,
+    show_menu_requested: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone)]
+struct SlashCommandPaletteHandler {
+    show_menu_requested: Arc<AtomicBool>,
+}
+
+impl ConditionalEventHandler for SlashCommandPaletteHandler {
+    fn handle(
+        &self,
+        _evt: &RustylineEvent,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        if ctx.line().is_empty() && ctx.pos() == 0 {
+            self.show_menu_requested.store(true, Ordering::SeqCst);
+            return Some(Cmd::Interrupt);
+        }
+
+        None
+    }
+}
+
+impl CliCompleter {
+    fn new() -> Self {
+        Self {
+            colors_enabled: supports_color::on(Stream::Stdout).is_some(),
+            theme: SyntaxTheme::default(),
+            show_menu_requested: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn slash_menu_handler(&self) -> SlashCommandPaletteHandler {
+        SlashCommandPaletteHandler {
+            show_menu_requested: Arc::clone(&self.show_menu_requested),
+        }
+    }
+
+    fn take_show_menu_requested(&self) -> bool {
+        self.show_menu_requested.swap(false, Ordering::SeqCst)
+    }
+}
+
+impl Default for CliCompleter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Helper for CliCompleter {}
+impl Hinter for CliCompleter {
+    type Hint = String;
+}
+impl Highlighter for CliCompleter {
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        if !self.colors_enabled {
+            return Cow::Borrowed(line);
+        }
+
+        let language = detect_syntax_language(line);
+        if language == SyntaxLanguage::Plain {
+            return Cow::Borrowed(line);
+        }
+
+        match highlight_line_for_language(line, language, self.theme) {
+            Some(highlighted) => Cow::Owned(highlighted),
+            None => Cow::Borrowed(line),
+        }
+    }
+}
+impl Validator for CliCompleter {
+    fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
+        if has_multiline_continuation_marker(ctx.input()) {
+            Ok(ValidationResult::Incomplete)
+        } else {
+            Ok(ValidationResult::Valid(None))
+        }
+    }
+}
+
+fn detect_syntax_language(line: &str) -> SyntaxLanguage {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        return SyntaxLanguage::Plain;
+    }
+
+    if trimmed.starts_with('/') {
+        return SyntaxLanguage::Command;
+    }
+
+    if trimmed.contains("namespace ")
+        || trimmed.contains("using ")
+        || trimmed.contains("public class")
+    {
+        return SyntaxLanguage::CSharp;
+    }
+
+    if trimmed.contains("interface ")
+        || trimmed.contains("type ")
+        || trimmed.contains(": string")
+        || trimmed.contains(": number")
+    {
+        return SyntaxLanguage::TypeScript;
+    }
+
+    if trimmed.contains("function ")
+        || trimmed.contains("const ")
+        || trimmed.contains("let ")
+        || trimmed.contains("=>")
+    {
+        return SyntaxLanguage::JavaScript;
+    }
+
+    if trimmed.contains("fn ")
+        || trimmed.contains("let ")
+        || trimmed.contains("impl ")
+        || trimmed.contains("match ")
+        || trimmed.contains("pub ")
+    {
+        return SyntaxLanguage::Rust;
+    }
+
+    SyntaxLanguage::Plain
+}
+
+fn comment_prefix(language: SyntaxLanguage) -> Option<&'static str> {
+    match language {
+        SyntaxLanguage::Rust
+        | SyntaxLanguage::CSharp
+        | SyntaxLanguage::JavaScript
+        | SyntaxLanguage::TypeScript => Some("//"),
+        SyntaxLanguage::Command => Some("#"),
+        SyntaxLanguage::Plain => None,
+    }
+}
+
+fn sanitize_keyword_token(token: &str) -> &str {
+    token.trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '_')
+}
+
+fn is_language_keyword(token: &str, language: SyntaxLanguage) -> bool {
+    let token = sanitize_keyword_token(token);
+    match language {
+        SyntaxLanguage::Rust => RUST_KEYWORDS.contains(&token),
+        SyntaxLanguage::CSharp => CSHARP_KEYWORDS.contains(&token),
+        SyntaxLanguage::JavaScript => JAVASCRIPT_KEYWORDS.contains(&token),
+        SyntaxLanguage::TypeScript => TYPESCRIPT_KEYWORDS.contains(&token),
+        SyntaxLanguage::Plain | SyntaxLanguage::Command => false,
+    }
+}
+
+fn keyword_color_for_token(
+    token: &str,
+    token_index: usize,
+    language: SyntaxLanguage,
+    theme: SyntaxTheme,
+) -> Option<&'static str> {
+    match language {
+        SyntaxLanguage::Command => {
+            if token_index == 0 && token.starts_with('/') {
+                Some(theme.command)
+            } else if token.starts_with("--") || token.starts_with('-') {
+                Some(theme.flag)
+            } else {
+                None
+            }
+        }
+        SyntaxLanguage::Rust
+        | SyntaxLanguage::CSharp
+        | SyntaxLanguage::JavaScript
+        | SyntaxLanguage::TypeScript => {
+            is_language_keyword(token, language).then_some(theme.keyword)
+        }
+        SyntaxLanguage::Plain => None,
+    }
+}
+
+fn highlight_line_for_language(
+    line: &str,
+    language: SyntaxLanguage,
+    theme: SyntaxTheme,
+) -> Option<String> {
+    if line.is_empty() {
+        return None;
+    }
+
+    if line.len() > MAX_HIGHLIGHT_LINE_BYTES {
+        return highlight_line_lexical(line, language, theme);
+    }
+
+    SYNTAX_HIGHLIGHT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.language == Some(language) && cache.theme == Some(theme) && cache.line == line {
+            return cache.highlighted.clone();
+        }
+
+        let highlighted = highlight_line_with_backends(line, language, theme);
+        cache.line.clear();
+        cache.line.push_str(line);
+        cache.language = Some(language);
+        cache.theme = Some(theme);
+        cache.highlighted = highlighted.clone();
+        highlighted
+    })
+}
+
+fn highlight_line_with_backends(
+    line: &str,
+    language: SyntaxLanguage,
+    theme: SyntaxTheme,
+) -> Option<String> {
+    if matches!(language, SyntaxLanguage::Plain | SyntaxLanguage::Command) {
+        return highlight_line_lexical(line, language, theme);
+    }
+
+    tree_sitter_highlight_line(line, language, theme)
+        .or_else(|| highlight_line_lexical(line, language, theme))
+}
+
+fn highlight_line_lexical(
+    line: &str,
+    language: SyntaxLanguage,
+    theme: SyntaxTheme,
+) -> Option<String> {
+    if line.is_empty() {
+        return None;
+    }
+
+    let comment = comment_prefix(language);
+    let mut output = String::with_capacity(line.len() + 32);
+    let mut cursor = 0usize;
+    let mut token_index = 0usize;
+
+    while cursor < line.len() {
+        let Some(ch) = line[cursor..].chars().next() else {
+            break;
+        };
+
+        if ch.is_whitespace() {
+            output.push(ch);
+            cursor += ch.len_utf8();
+            continue;
+        }
+
+        if let Some(prefix) = comment {
+            if line[cursor..].starts_with(prefix) {
+                output.push_str(theme.comment);
+                output.push_str(&line[cursor..]);
+                output.push_str(theme.reset);
+                return Some(output);
+            }
+        }
+
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            let start = cursor;
+            cursor += ch.len_utf8();
+
+            while cursor < line.len() {
+                let Some(current) = line[cursor..].chars().next() else {
+                    break;
+                };
+
+                cursor += current.len_utf8();
+
+                if current == quote {
+                    break;
+                }
+
+                if current == '\\' && cursor < line.len() {
+                    if let Some(escaped) = line[cursor..].chars().next() {
+                        cursor += escaped.len_utf8();
+                    }
+                }
+            }
+
+            output.push_str(theme.string);
+            output.push_str(&line[start..cursor]);
+            output.push_str(theme.reset);
+            token_index += 1;
+            continue;
+        }
+
+        let start = cursor;
+        while cursor < line.len() {
+            let Some(current) = line[cursor..].chars().next() else {
+                break;
+            };
+            if current.is_whitespace() || current == '"' || current == '\'' {
+                break;
+            }
+
+            if let Some(prefix) = comment {
+                if line[cursor..].starts_with(prefix) {
+                    break;
+                }
+            }
+
+            cursor += current.len_utf8();
+        }
+
+        let token = &line[start..cursor];
+        if let Some(color) = keyword_color_for_token(token, token_index, language, theme) {
+            output.push_str(color);
+            output.push_str(token);
+            output.push_str(theme.reset);
+        } else {
+            output.push_str(token);
+        }
+        token_index += 1;
+    }
+
+    (output != line).then_some(output)
+}
+
+fn tree_sitter_highlight_line(
+    line: &str,
+    language: SyntaxLanguage,
+    theme: SyntaxTheme,
+) -> Option<String> {
+    if matches!(language, SyntaxLanguage::Plain | SyntaxLanguage::Command) {
+        return None;
+    }
+
+    let spans = TREE_SITTER_RUNTIME.with(|runtime| {
+        let mut runtime = runtime.borrow_mut();
+        let Some(parser) = runtime.parser_for(language) else {
+            return Vec::new();
+        };
+
+        let Some(tree) = parser.parse(line, None) else {
+            return Vec::new();
+        };
+
+        collect_tree_sitter_spans(tree.root_node(), line, language)
+    });
+
+    if spans.is_empty() {
+        return None;
+    }
+
+    let mut output = String::with_capacity(line.len() + 32);
+    let mut cursor = 0usize;
+
+    for span in spans {
+        if span.start < cursor || span.end > line.len() || span.start >= span.end {
+            continue;
+        }
+        output.push_str(&line[cursor..span.start]);
+        output.push_str(color_for_class(span.class, theme));
+        output.push_str(&line[span.start..span.end]);
+        output.push_str(theme.reset);
+        cursor = span.end;
+    }
+
+    output.push_str(&line[cursor..]);
+
+    if line_contains_comment_prefix(line, language) && !output.contains(theme.comment) {
+        return highlight_line_lexical(line, language, theme);
+    }
+
+    (output != line).then_some(output)
+}
+
+fn line_contains_comment_prefix(line: &str, language: SyntaxLanguage) -> bool {
+    comment_prefix(language).is_some_and(|prefix| line.contains(prefix))
+}
+
+fn collect_tree_sitter_spans(
+    root: Node<'_>,
+    source: &str,
+    language: SyntaxLanguage,
+) -> Vec<HighlightSpan> {
+    let mut spans = Vec::new();
+    collect_spans_from_node(root, source.as_bytes(), language, &mut spans);
+
+    spans.sort_by(|left, right| {
+        left.start
+            .cmp(&right.start)
+            .then_with(|| token_priority(right.class).cmp(&token_priority(left.class)))
+            .then_with(|| left.end.cmp(&right.end))
+    });
+
+    let mut deduplicated = Vec::with_capacity(spans.len());
+    for span in spans {
+        if deduplicated
+            .last()
+            .is_some_and(|last: &HighlightSpan| span.start < last.end)
+        {
+            continue;
+        }
+        deduplicated.push(span);
+    }
+
+    deduplicated
+}
+
+fn collect_spans_from_node(
+    node: Node<'_>,
+    source: &[u8],
+    language: SyntaxLanguage,
+    spans: &mut Vec<HighlightSpan>,
+) {
+    if node.child_count() == 0 {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        if start >= end || end > source.len() {
+            return;
+        }
+
+        let Ok(token) = std::str::from_utf8(&source[start..end]) else {
+            return;
+        };
+
+        if let Some(class) = token_class_from_node(node.kind(), token, language) {
+            spans.push(HighlightSpan { start, end, class });
+        }
+        return;
+    }
+
+    for index in 0..node.child_count() {
+        if let Some(child) = node.child(index) {
+            collect_spans_from_node(child, source, language, spans);
+        }
+    }
+}
+
+fn token_class_from_node(kind: &str, token: &str, language: SyntaxLanguage) -> Option<TokenClass> {
+    let lowered = kind.to_ascii_lowercase();
+    if lowered.contains("comment") {
+        return Some(TokenClass::Comment);
+    }
+
+    if lowered.contains("string")
+        || lowered.contains("char")
+        || lowered.contains("template")
+        || lowered.contains("raw")
+    {
+        return Some(TokenClass::String);
+    }
+
+    is_language_keyword(token, language).then_some(TokenClass::Keyword)
+}
+
+const fn token_priority(class: TokenClass) -> u8 {
+    match class {
+        TokenClass::Comment => 3,
+        TokenClass::String => 2,
+        TokenClass::Keyword => 1,
+    }
+}
+
+const fn color_for_class(class: TokenClass, theme: SyntaxTheme) -> &'static str {
+    match class {
+        TokenClass::Keyword => theme.keyword,
+        TokenClass::String => theme.string,
+        TokenClass::Comment => theme.comment,
+    }
+}
+
+impl Completer for CliCompleter {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let prefix = line.get(..pos).unwrap_or(line);
+        let candidates = completion_candidates(prefix)
+            .into_iter()
+            .map(|cmd| Pair {
+                display: cmd.to_string(),
+                replacement: cmd.to_string(),
+            })
+            .collect();
+        Ok((0, candidates))
+    }
+}
+
+fn completion_candidates(prefix: &str) -> Vec<&'static str> {
+    COMPLETION_COMMANDS
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.starts_with(prefix))
+        .collect()
+}
+
+fn default_history_path() -> Option<PathBuf> {
+    AppConfig::default_data_dir().map(|dir| dir.join("history").join("ntk.history"))
+}
+
+/// Rustyline-based interactive reader with persistent history and command completion.
+pub struct RustylineInput {
+    editor: Editor<CliCompleter, DefaultHistory>,
+    history_path: Option<PathBuf>,
+}
+
+impl RustylineInput {
+    /// Create a new Rustyline input reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when terminal editor initialization fails.
+    pub fn new() -> io::Result<Self> {
+        let config = RustylineConfig::builder()
+            .completion_type(CompletionType::List)
+            .history_ignore_dups(true)
+            .map_err(io::Error::other)?
+            .auto_add_history(false)
+            .build();
+
+        let mut editor = Editor::<CliCompleter, DefaultHistory>::with_config(config)
+            .map_err(io::Error::other)?;
+        let helper = CliCompleter::new();
+        editor.bind_sequence(
+            RustylineEvent::from(RustylineKeyEvent::from('/')),
+            EventHandler::Conditional(Box::new(helper.slash_menu_handler())),
+        );
+        editor.set_helper(Some(helper));
+
+        let history_path = default_history_path();
+        if let Some(path) = &history_path {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let _ = editor.load_history(path);
+        }
+
+        Ok(Self {
+            editor,
+            history_path,
+        })
+    }
+
+    /// Read one line using Rustyline, returning normalized CLI input results.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading from terminal fails.
+    pub fn read_line(&mut self, interrupted: &Arc<AtomicBool>) -> io::Result<InputResult> {
+        if interrupted.load(Ordering::SeqCst) {
+            return Ok(InputResult::Exit);
+        }
+
+        prepare_prompt_line()?;
+
+        match self.editor.readline(PRIMARY_PROMPT) {
+            Ok(raw_line) => {
+                let line = normalize_multiline_submission(&raw_line);
+                if line.trim() == "/" {
+                    return Ok(InputResult::ShowMenu);
+                }
+
+                if !line.trim().is_empty() {
+                    let _ = self.editor.add_history_entry(line.as_str());
+                    self.persist_history();
+                }
+
+                if line.starts_with('/') {
+                    Ok(InputResult::Command(line))
+                } else {
+                    Ok(InputResult::Text(line))
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                if self.take_show_menu_requested() {
+                    return Ok(InputResult::ShowMenu);
+                }
+                interrupted.store(true, Ordering::SeqCst);
+                Ok(InputResult::Exit)
+            }
+            Err(ReadlineError::Eof) => Ok(InputResult::Exit),
+            Err(err) => Err(io::Error::other(format!("Rustyline input failed: {err}"))),
+        }
+    }
+
+    fn persist_history(&mut self) {
+        if let Some(path) = &self.history_path {
+            let _ = self.editor.save_history(path);
+        }
+    }
+
+    fn take_show_menu_requested(&self) -> bool {
+        self.editor
+            .helper()
+            .is_some_and(CliCompleter::take_show_menu_requested)
+    }
 }
 
 /// Read a single line of interactive user input, handling keyboard events.
@@ -71,7 +933,7 @@ pub async fn read_line(
 }
 
 fn handle_key_event(
-    key: KeyEvent,
+    key: CrosstermKeyEvent,
     buffer: &mut String,
     interrupted: &Arc<AtomicBool>,
 ) -> io::Result<Option<InputResult>> {
@@ -328,5 +1190,174 @@ mod tests {
         }
 
         assert_eq!(buffer, "hello");
+    }
+
+    #[test]
+    fn completion_candidates_match_known_commands() {
+        let candidates = completion_candidates("/man");
+        assert!(candidates.contains(&"/manifest"));
+        assert!(candidates.contains(&"/manifest list"));
+    }
+
+    #[test]
+    fn completion_candidates_empty_for_unknown_prefix() {
+        let candidates = completion_candidates("/does-not-exist");
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn multiline_continuation_marker_detects_single_trailing_backslash() {
+        assert!(has_multiline_continuation_marker("render \\"));
+        assert!(has_multiline_continuation_marker("render\\"));
+    }
+
+    #[test]
+    fn multiline_continuation_marker_ignores_even_trailing_backslashes() {
+        assert!(!has_multiline_continuation_marker("C:\\\\"));
+        assert!(!has_multiline_continuation_marker("literal \\\\"));
+    }
+
+    #[test]
+    fn strip_multiline_continuation_marker_removes_only_marker() {
+        assert_eq!(
+            strip_multiline_continuation_marker("line with marker \\"),
+            "line with marker "
+        );
+        assert_eq!(
+            strip_multiline_continuation_marker("line without marker"),
+            "line without marker"
+        );
+    }
+
+    #[test]
+    fn normalize_multiline_submission_removes_markers_line_by_line() {
+        let input = "/manifest apply \\\n--output out \\\nmanifest.yaml";
+        let normalized = normalize_multiline_submission(input);
+        assert_eq!(normalized, "/manifest apply \n--output out \nmanifest.yaml");
+    }
+
+    #[test]
+    fn detect_syntax_language_identifies_supported_variants() {
+        assert_eq!(
+            detect_syntax_language("/manifest apply"),
+            SyntaxLanguage::Command
+        );
+        assert_eq!(
+            detect_syntax_language("pub fn run() -> Result<()>"),
+            SyntaxLanguage::Rust
+        );
+        assert_eq!(
+            detect_syntax_language("public class AppService"),
+            SyntaxLanguage::CSharp
+        );
+        assert_eq!(
+            detect_syntax_language("const run = async () => {}"),
+            SyntaxLanguage::JavaScript
+        );
+        assert_eq!(
+            detect_syntax_language("interface AppConfig { retries: number }"),
+            SyntaxLanguage::TypeScript
+        );
+        assert_eq!(detect_syntax_language("free text"), SyntaxLanguage::Plain);
+    }
+
+    #[test]
+    fn show_menu_requested_flag_resets_after_consume() {
+        let helper = CliCompleter::new();
+        assert!(!helper.take_show_menu_requested());
+
+        helper.show_menu_requested.store(true, Ordering::SeqCst);
+        assert!(helper.take_show_menu_requested());
+        assert!(!helper.take_show_menu_requested());
+    }
+
+    #[test]
+    fn highlight_command_line_includes_command_flags_and_strings() {
+        let theme = SyntaxTheme::default();
+        let highlighted = highlight_line_for_language(
+            "/manifest apply --path \"templates/app\" # note",
+            SyntaxLanguage::Command,
+            theme,
+        )
+        .expect("expected highlighted output");
+
+        assert!(highlighted.contains(theme.command));
+        assert!(highlighted.contains(theme.flag));
+        assert!(highlighted.contains(theme.string));
+        assert!(highlighted.contains(theme.comment));
+        assert!(highlighted.contains(theme.reset));
+    }
+
+    #[test]
+    fn highlight_rust_line_includes_keyword_and_comment_colors() {
+        let theme = SyntaxTheme::default();
+        let highlighted = highlight_line_for_language(
+            "pub fn run() { let value = \"ok\"; // status }",
+            SyntaxLanguage::Rust,
+            theme,
+        )
+        .expect("expected highlighted output");
+
+        assert!(highlighted.contains(theme.keyword));
+        assert!(highlighted.contains(theme.string));
+        assert!(highlighted.contains(theme.comment));
+        assert!(highlighted.contains(theme.reset));
+    }
+
+    #[test]
+    fn tree_sitter_highlight_marks_rust_comment_tokens() {
+        let theme = SyntaxTheme::default();
+        let highlighted =
+            tree_sitter_highlight_line("fn run() { // note }", SyntaxLanguage::Rust, theme)
+                .expect("expected tree-sitter highlight output");
+
+        assert!(highlighted.contains(theme.comment));
+        assert!(highlighted.contains(theme.reset));
+    }
+
+    #[test]
+    fn highlight_cache_stores_last_line_and_result() {
+        let theme = SyntaxTheme::default();
+        let line = "pub fn run() { let value = \"ok\"; }";
+
+        let first = highlight_line_for_language(line, SyntaxLanguage::Rust, theme);
+        let second = highlight_line_for_language(line, SyntaxLanguage::Rust, theme);
+        assert_eq!(first, second);
+
+        SYNTAX_HIGHLIGHT_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert_eq!(cache.line, line);
+            assert_eq!(cache.language, Some(SyntaxLanguage::Rust));
+            assert_eq!(cache.theme, Some(theme));
+            assert_eq!(cache.highlighted, second);
+        });
+    }
+
+    #[test]
+    fn highlight_long_line_uses_fallback_without_panicking() {
+        let theme = SyntaxTheme::default();
+        let long_payload = "x".repeat(MAX_HIGHLIGHT_LINE_BYTES + 64);
+        let line = format!("pub fn run() {{ {long_payload} }}");
+
+        let highlighted = highlight_line_for_language(&line, SyntaxLanguage::Rust, theme)
+            .expect("expected lexical fallback output");
+
+        assert!(highlighted.contains(theme.keyword));
+    }
+
+    #[test]
+    fn highlight_plain_text_returns_none() {
+        let theme = SyntaxTheme::default();
+        assert!(highlight_line_for_language("plain text", SyntaxLanguage::Plain, theme).is_none());
+    }
+
+    #[test]
+    fn default_history_path_has_expected_file_name() {
+        if let Some(path) = default_history_path() {
+            assert_eq!(
+                path.file_name().and_then(|value| value.to_str()),
+                Some("ntk.history")
+            );
+        }
     }
 }

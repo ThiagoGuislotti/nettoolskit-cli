@@ -113,6 +113,8 @@ impl OtlpMetricExporter {
 pub struct TracingConfig {
     /// Enable verbose (debug-level) log output.
     pub verbose: bool,
+    /// Requested base log level (off, error, warn, info, debug, trace).
+    pub log_level: String,
     /// Emit log records in structured JSON format.
     pub json_format: bool,
     /// Include the source-file path in each log line.
@@ -131,6 +133,7 @@ impl Default for TracingConfig {
     fn default() -> Self {
         Self {
             verbose: false,
+            log_level: "info".to_string(),
             json_format: false,
             with_file: false,
             with_line_numbers: true,
@@ -145,6 +148,11 @@ impl Default for TracingConfig {
 pub fn init_tracing(verbose: bool) -> Result<()> {
     let config = TracingConfig {
         verbose,
+        log_level: if verbose {
+            "debug".to_string()
+        } else {
+            "info".to_string()
+        },
         ..Default::default()
     };
 
@@ -299,14 +307,36 @@ fn create_env_filter(config: &TracingConfig) -> Result<EnvFilter> {
         return Ok(EnvFilter::try_new(env_filter)?);
     }
 
-    let default_filter = if config.verbose {
-        "nettoolskit=debug,nettoolskit_cli=debug,nettoolskit_commands=debug,nettoolskit_ui=debug,info"
-    } else {
-        "nettoolskit=info,warn"
-    };
+    let default_filter = default_filter_for_level(&config.log_level, config.verbose);
 
-    info!(filter = %default_filter, "Using default filter configuration");
+    info!(
+        filter = %default_filter,
+        requested_level = %config.log_level,
+        "Using default filter configuration"
+    );
     Ok(EnvFilter::try_new(default_filter)?)
+}
+
+fn default_filter_for_level(level: &str, verbose: bool) -> &'static str {
+    match level.trim().to_ascii_lowercase().as_str() {
+        "off" => "off",
+        "error" => "nettoolskit=error,error",
+        "warn" | "warning" => "nettoolskit=warn,warn",
+        "info" => "nettoolskit=info,warn",
+        "debug" => {
+            "nettoolskit=debug,nettoolskit_cli=debug,nettoolskit_commands=debug,nettoolskit_ui=debug,info"
+        }
+        "trace" => {
+            "nettoolskit=trace,nettoolskit_cli=trace,nettoolskit_commands=trace,nettoolskit_ui=trace,debug"
+        }
+        _ => {
+            if verbose {
+                "nettoolskit=debug,nettoolskit_cli=debug,nettoolskit_commands=debug,nettoolskit_ui=debug,info"
+            } else {
+                "nettoolskit=info,warn"
+            }
+        }
+    }
 }
 
 /// Initialize minimal tracing for production.
@@ -326,6 +356,7 @@ pub fn init_production_tracing() -> Result<()> {
 pub fn init_development_tracing() -> Result<()> {
     let config = TracingConfig {
         verbose: true,
+        log_level: "debug".to_string(),
         json_format: false,
         with_file: true,
         with_line_numbers: true,

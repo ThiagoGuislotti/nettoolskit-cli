@@ -4,6 +4,7 @@
 //! across all input contexts, ensuring uniform styling and behavior.
 
 use crate::core::capabilities::capabilities;
+use crate::interaction::terminal::prepare_prompt_line;
 use crossterm::{cursor, execute};
 use owo_colors::OwoColorize;
 use std::io::{self, Write};
@@ -20,6 +21,7 @@ const PROMPT_SYMBOL: &str = "> ";
 /// render_prompt().expect("Failed to render prompt");
 /// ```
 pub fn render_prompt() -> io::Result<()> {
+    prepare_prompt_line()?;
     force_blinking_cursor()?;
 
     if capabilities().color.has_color() {
@@ -47,6 +49,7 @@ pub fn render_prompt() -> io::Result<()> {
 /// render_prompt_with_command("/help").expect("Failed to render");
 /// ```
 pub fn render_prompt_with_command(cmd: &str) -> io::Result<()> {
+    prepare_prompt_line()?;
     force_blinking_cursor()?;
     if capabilities().color.has_color() {
         print!("\r\x1b[K{} {}", PROMPT_SYMBOL.white(), cmd);

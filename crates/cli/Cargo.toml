@@ -46,6 +46,12 @@ serde_json = { workspace = true }
 crossterm = { workspace = true }
 owo-colors = { workspace = true }
 supports-color = { workspace = true }
+rustyline = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-c-sharp = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-typescript = { workspace = true }
 
 # Tracing and observability
 tracing = { workspace = true }

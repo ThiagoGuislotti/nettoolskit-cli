@@ -2,7 +2,7 @@
 //!
 //! Main test suite aggregator for nettoolskit-orchestrator crate.
 //! Test structure mirrors the src/ directory structure:
-//! - models/: MainAction, Command, ExitStatus tests
+//! - models/: MainAction and ExitStatus tests
 //! - execution/: Processor and executor tests
 //! - error_tests: Error handling tests
 

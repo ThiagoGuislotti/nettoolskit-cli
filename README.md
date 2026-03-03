@@ -124,6 +124,8 @@ This workspace is organized as a multi-crate Rust project. Each crate has its ow
 Operational runbook and incident procedures:
 
 - [Incident Response and Troubleshooting Playbook](docs/operations/incident-response-playbook.md)
+- [Release Artifact Verification Guide](docs/operations/release-artifact-verification.md)
+- [Manual Release Verification Workflow (binaries + SBOM)](.github/workflows/release-verify.yml)
 - [TUI UX Guidelines](docs/ui/tui-ux-guidelines.md)
 
 ---
@@ -133,6 +135,9 @@ Operational runbook and incident procedures:
 Official platform compatibility tiers and support commitments are defined in:
 
 - [Compatibility Matrix and Support Policy](COMPATIBILITY.md)
+
+This document also includes the official support lifecycle and EOL table by minor release.
+Release pipeline gates also validate lifecycle table semantics before publishing artifacts.
 
 ---
 
@@ -222,6 +227,8 @@ We follow semantic versioning and conventional commits. Please ensure your contr
   - [crates/ui/README.md](crates/ui/README.md)
   - [COMPATIBILITY.md](COMPATIBILITY.md)
   - [docs/operations/incident-response-playbook.md](docs/operations/incident-response-playbook.md)
+  - [docs/operations/release-artifact-verification.md](docs/operations/release-artifact-verification.md)
+  - [.github/workflows/release-verify.yml](.github/workflows/release-verify.yml)
   - [docs/ui/tui-ux-guidelines.md](docs/ui/tui-ux-guidelines.md)
 
 ### External References

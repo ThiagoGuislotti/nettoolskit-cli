@@ -16,7 +16,6 @@ It provides models for command routing and an async execution layer that can run
 -   ✅ Command parsing and dispatch (`MainAction`, `get_main_action`, `process_command`)
 -   ✅ Async execution utilities (`AsyncCommandExecutor`, `CommandHandle`)
 -   ✅ Progress reporting primitives (`CommandProgress`, `ProgressSender`)
--   ✅ Backward-compatible exports (`Command`, `get_command`)
 
 ---
 
@@ -124,9 +123,6 @@ impl MainAction {
 }
 
 pub fn get_main_action(slash: &str) -> Option<MainAction>;
-
-pub use main_action::MainAction as Command;
-pub use main_action::get_main_action as get_command;
 pub use nettoolskit_core::ExitStatus;
 ```
 
