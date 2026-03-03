@@ -40,6 +40,21 @@ async fn test_process_quit_command() {
 }
 
 #[tokio::test]
+async fn test_process_clear_command() {
+    // Arrange
+    let command = "/clear";
+
+    // Act
+    let result = process_command(command).await;
+
+    // Assert
+    assert!(
+        matches!(result, ExitStatus::Success | ExitStatus::Error),
+        "Clear command should return a valid status"
+    );
+}
+
+#[tokio::test]
 async fn test_process_empty_command() {
     // Arrange
     let command = "";
@@ -157,6 +172,15 @@ async fn test_process_text_routes_help_alias() {
         result,
         ExitStatus::Success,
         "Help alias should route to /help command"
+    );
+}
+
+#[tokio::test]
+async fn test_process_text_routes_clear_alias() {
+    let result = process_text("limpar").await;
+    assert!(
+        matches!(result, ExitStatus::Success | ExitStatus::Error),
+        "Clear alias should route to /clear command"
     );
 }
 

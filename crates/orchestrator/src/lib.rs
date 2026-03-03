@@ -16,10 +16,4 @@ pub use execution::{
     },
     processor::{process_command, process_text},
 };
-pub use models::{get_command, get_main_action, Command, ExitStatus, MainAction};
-
-// Backward compatibility modules
-/// Backward-compatible re-export of model types.
-pub mod definitions {
-    pub use crate::models::*;
-}
+pub use models::{get_main_action, ExitStatus, MainAction};

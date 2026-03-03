@@ -20,26 +20,31 @@
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use nettoolskit_core::CommandEntry;
 use owo_colors::OwoColorize;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 pub mod display;
 /// User input handling and command parsing.
 pub mod input;
 
 use display::print_logo;
-use input::{read_line, InputResult};
+use input::{read_line, InputResult, RustylineInput};
 use nettoolskit_core::async_utils::with_timeout;
-use nettoolskit_orchestrator::{process_command, process_text, Command, ExitStatus};
+use nettoolskit_orchestrator::{
+    get_main_action, process_command, process_text, ExitStatus, MainAction,
+};
 use nettoolskit_otel::{
     init_tracing_with_config, next_correlation_id, Metrics, Timer, TracingConfig,
 };
 use nettoolskit_ui::{
     append_footer_log, begin_interactive_logging, clear_terminal, ensure_layout_integrity,
-    render_prompt, Color, CommandPalette, TerminalLayout,
+    footer_output_enabled, render_prompt, set_footer_output_enabled, Color, CommandPalette,
+    HistoryViewer, StatusBar, StatusBarMode, StatusNotificationLevel, TerminalLayout,
 };
 use tracing::{error, info, info_span, warn};
 
@@ -95,18 +100,35 @@ impl RawModeControl for RawModeGuard {
 }
 
 type ReadLineFuture<'a> = Pin<Box<dyn Future<Output = io::Result<InputResult>> + 'a>>;
+const HISTORY_COMMAND: &str = "/history";
+const SESSION_HISTORY_CAPACITY: usize = 200;
 
-/// Launch the interactive CLI mode
-pub async fn interactive_mode(verbose: bool) -> ExitStatus {
-    interactive_mode_with_runner(verbose, run_interactive_loop).await
+/// Runtime options for interactive mode.
+#[derive(Debug, Clone)]
+pub struct InteractiveOptions {
+    /// Enable verbose tracing output.
+    pub verbose: bool,
+    /// Base log level used by tracing filter setup.
+    pub log_level: String,
+    /// Enable footer stream rendering.
+    pub footer_output: bool,
 }
 
-async fn interactive_mode_with_runner<F, Fut>(verbose: bool, run_loop: F) -> ExitStatus
+/// Launch the interactive CLI mode
+pub async fn interactive_mode(options: InteractiveOptions) -> ExitStatus {
+    interactive_mode_with_runner(options, run_interactive_loop).await
+}
+
+async fn interactive_mode_with_runner<F, Fut>(
+    options: InteractiveOptions,
+    run_loop: F,
+) -> ExitStatus
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = io::Result<ExitStatus>>,
 {
     let session_correlation_id = next_correlation_id("session");
+    set_footer_output_enabled(options.footer_output);
     let mut log_guard = begin_interactive_logging();
 
     let (layout_failure_notice, _terminal_layout) =
@@ -127,7 +149,8 @@ where
 
     // Initialize telemetry with development configuration
     let tracing_config = TracingConfig {
-        verbose,
+        verbose: options.verbose,
+        log_level: options.log_level.clone(),
         with_line_numbers: false,
         interactive_mode: true, // Suppress tracing fmt output in interactive mode
         ..Default::default()
@@ -208,7 +231,6 @@ async fn run_interactive_loop() -> io::Result<ExitStatus> {
 }
 
 async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
-    let mut raw_mode = RawModeGuard::new()?;
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_fallback = interrupted.clone();
 
@@ -218,20 +240,144 @@ async fn run_input_loop(input_buffer: &mut String) -> io::Result<ExitStatus> {
     })
     .map_err(io::Error::other)?;
 
-    run_input_loop_with(
-        input_buffer,
-        &mut raw_mode,
-        interrupted,
-        |buffer, interrupted| Box::pin(read_line(buffer, interrupted)),
-        show_main_menu,
-        render_prompt,
-    )
-    .await
+    match RustylineInput::new() {
+        Ok(mut reader) => {
+            let mut status_bar = StatusBar::new()
+                .with_input_backend("rustyline")
+                .with_max_notifications(10);
+            run_input_loop_with_rustyline(&mut reader, interrupted, &mut status_bar).await
+        }
+        Err(err) => {
+            let _ = append_footer_log(&format!(
+                "Warning: Rustyline initialization failed, falling back to legacy input: {err}"
+            ));
+            let mut status_bar = StatusBar::new()
+                .with_input_backend("legacy")
+                .with_max_notifications(10);
+            status_bar.push_notification(
+                StatusNotificationLevel::Warning,
+                "Rustyline unavailable, using legacy input path",
+            );
+
+            let mut raw_mode = RawModeGuard::new()?;
+            run_input_loop_with(
+                input_buffer,
+                &mut raw_mode,
+                &mut status_bar,
+                interrupted,
+                |buffer, interrupted| Box::pin(read_line(buffer, interrupted)),
+                show_main_menu,
+                render_prompt,
+            )
+            .await
+        }
+    }
+}
+
+async fn run_input_loop_with_rustyline(
+    reader: &mut RustylineInput,
+    interrupted: Arc<AtomicBool>,
+    status_bar: &mut StatusBar,
+) -> io::Result<ExitStatus> {
+    let mut session_history = VecDeque::with_capacity(SESSION_HISTORY_CAPACITY);
+
+    loop {
+        ensure_layout_guard();
+        status_bar.set_mode(StatusBarMode::Ready);
+        render_status_bar(status_bar);
+
+        match reader.read_line(&interrupted)? {
+            InputResult::ShowMenu => {
+                status_bar.set_mode(StatusBarMode::Menu);
+                status_bar
+                    .push_notification(StatusNotificationLevel::Info, "Command palette opened");
+                if let Some(selected_cmd) = show_main_menu() {
+                    if selected_cmd == MainAction::Quit {
+                        status_bar.set_mode(StatusBarMode::Shutdown);
+                        render_status_bar(status_bar);
+                        print_goodbye();
+                        return Ok(ExitStatus::Success);
+                    }
+
+                    let selected_label = selected_cmd.slash_static();
+                    record_session_history(&mut session_history, &selected_label);
+                    if is_history_command(&selected_label) {
+                        status_bar.push_notification(
+                            StatusNotificationLevel::Info,
+                            "History viewer opened",
+                        );
+                        show_history_viewer(&session_history, status_bar)?;
+                        ensure_layout_guard();
+                        continue;
+                    }
+
+                    let started = Instant::now();
+                    status_bar.set_mode(StatusBarMode::Command);
+                    let status: ExitStatus = process_command(&selected_label).await;
+                    record_status_outcome(status_bar, status, started.elapsed(), &selected_label);
+                    if matches!(status, ExitStatus::Interrupted) {
+                        return Ok(status);
+                    }
+                    ensure_layout_guard();
+                }
+                ensure_layout_guard();
+            }
+            InputResult::Command(cmd) => {
+                record_session_history(&mut session_history, &cmd);
+                if is_history_command(&cmd) {
+                    status_bar.set_mode(StatusBarMode::Menu);
+                    status_bar
+                        .push_notification(StatusNotificationLevel::Info, "History viewer opened");
+                    show_history_viewer(&session_history, status_bar)?;
+                    ensure_layout_guard();
+                    continue;
+                }
+
+                if let Some(MainAction::Quit) = get_main_action(&cmd) {
+                    status_bar.set_mode(StatusBarMode::Shutdown);
+                    render_status_bar(status_bar);
+                    print_goodbye();
+                    return Ok(ExitStatus::Success);
+                }
+
+                let started = Instant::now();
+                status_bar.set_mode(StatusBarMode::Command);
+                let status: ExitStatus = process_command(&cmd).await;
+                record_status_outcome(status_bar, status, started.elapsed(), &cmd);
+                if matches!(status, ExitStatus::Interrupted) {
+                    return Ok(status);
+                }
+                ensure_layout_guard();
+            }
+            InputResult::Text(text) => {
+                if is_empty_text_submission(&text) {
+                    ensure_layout_guard();
+                    continue;
+                }
+                record_session_history(&mut session_history, &text);
+                status_bar.set_mode(StatusBarMode::Text);
+                let _ = process_text(&text).await;
+                status_bar.push_notification(StatusNotificationLevel::Info, "Text input processed");
+                ensure_layout_guard();
+            }
+            InputResult::Exit => {
+                status_bar.set_mode(StatusBarMode::Shutdown);
+                render_status_bar(status_bar);
+                if interrupted.load(Ordering::SeqCst) {
+                    println!("\n⚠️  {}", "Interrupted".yellow());
+                } else {
+                    print_goodbye();
+                }
+                return Ok(ExitStatus::Success);
+            }
+        }
+    }
 }
 
 async fn run_input_loop_with<R, F, M, P>(
     input_buffer: &mut String,
     raw_mode: &mut R,
+    status_bar: &mut StatusBar,
     interrupted: Arc<AtomicBool>,
     mut read_line_fn: F,
     mut show_menu_fn: M,
@@ -240,48 +386,88 @@ async fn run_input_loop_with<R, F, M, P>(
 where
     R: RawModeControl,
     F: for<'a> FnMut(&'a mut String, &'a Arc<AtomicBool>) -> ReadLineFuture<'a>,
-    M: FnMut() -> Option<Command>,
+    M: FnMut() -> Option<MainAction>,
     P: FnMut() -> io::Result<()>,
 {
+    let mut session_history = VecDeque::with_capacity(SESSION_HISTORY_CAPACITY);
+
     loop {
         raw_mode.enable()?;
+        status_bar.set_mode(StatusBarMode::Ready);
+        render_status_bar(status_bar);
         render_prompt_fn()?;
         input_buffer.clear();
 
         match read_line_fn(input_buffer, &interrupted).await? {
             InputResult::ShowMenu => {
                 // User typed "/" - show menu immediately
+                status_bar.set_mode(StatusBarMode::Menu);
+                status_bar
+                    .push_notification(StatusNotificationLevel::Info, "Command palette opened");
                 if let Some(selected_cmd) = show_menu_fn() {
                     raw_mode.disable()?;
 
                     // Check if user selected quit command
-                    if selected_cmd == Command::Quit {
+                    if selected_cmd == MainAction::Quit {
+                        status_bar.set_mode(StatusBarMode::Shutdown);
+                        render_status_bar(status_bar);
                         print_goodbye();
                         return Ok(ExitStatus::Success);
                     }
 
-                    let status: ExitStatus = process_command(&selected_cmd.slash_static()).await;
+                    let selected_label = selected_cmd.slash_static();
+                    record_session_history(&mut session_history, &selected_label);
+                    if is_history_command(&selected_label) {
+                        status_bar.push_notification(
+                            StatusNotificationLevel::Info,
+                            "History viewer opened",
+                        );
+                        show_history_viewer(&session_history, status_bar)?;
+                        raw_mode.enable()?;
+                        ensure_layout_guard();
+                        continue;
+                    }
+
+                    let started = Instant::now();
+                    status_bar.set_mode(StatusBarMode::Command);
+                    let status: ExitStatus = process_command(&selected_label).await;
+                    record_status_outcome(status_bar, status, started.elapsed(), &selected_label);
                     if matches!(status, ExitStatus::Interrupted) {
                         return Ok(status);
                     }
                     raw_mode.enable()?;
                     ensure_layout_guard();
                 }
+                ensure_layout_guard();
                 // Clear buffer and prompt for next input
                 input_buffer.clear();
-                println!();
                 continue;
             }
             InputResult::Command(cmd) => {
                 raw_mode.disable()?;
+                record_session_history(&mut session_history, &cmd);
+                if is_history_command(&cmd) {
+                    status_bar.set_mode(StatusBarMode::Menu);
+                    status_bar
+                        .push_notification(StatusNotificationLevel::Info, "History viewer opened");
+                    show_history_viewer(&session_history, status_bar)?;
+                    raw_mode.enable()?;
+                    ensure_layout_guard();
+                    continue;
+                }
 
                 // Check if user typed quit command
-                if let Some(Command::Quit) = nettoolskit_orchestrator::get_command(&cmd) {
+                if let Some(MainAction::Quit) = get_main_action(&cmd) {
+                    status_bar.set_mode(StatusBarMode::Shutdown);
+                    render_status_bar(status_bar);
                     print_goodbye();
                     return Ok(ExitStatus::Success);
                 }
 
+                let started = Instant::now();
+                status_bar.set_mode(StatusBarMode::Command);
                 let status: ExitStatus = process_command(&cmd).await;
+                record_status_outcome(status_bar, status, started.elapsed(), &cmd);
                 if matches!(status, ExitStatus::Interrupted) {
                     return Ok(status);
                 }
@@ -290,15 +476,23 @@ where
                 ensure_layout_guard();
             }
             InputResult::Text(text) => {
+                if is_empty_text_submission(&text) {
+                    raw_mode.enable()?;
+                    ensure_layout_guard();
+                    continue;
+                }
                 raw_mode.disable()?;
+                record_session_history(&mut session_history, &text);
+                status_bar.set_mode(StatusBarMode::Text);
                 let _ = process_text(&text).await;
+                status_bar.push_notification(StatusNotificationLevel::Info, "Text input processed");
                 raw_mode.enable()?;
-                // NOTE: Commented out to prevent screen clearing after text input
-                // This was causing input to disappear after Enter
-                // ensure_layout_guard();
+                ensure_layout_guard();
             }
             InputResult::Exit => {
                 raw_mode.disable()?;
+                status_bar.set_mode(StatusBarMode::Shutdown);
+                render_status_bar(status_bar);
                 // Check if this was triggered by Ctrl+C
                 if interrupted.load(Ordering::SeqCst) {
                     println!("\n⚠️  {}", "Interrupted".yellow());
@@ -308,15 +502,13 @@ where
                 return Ok(ExitStatus::Success);
             }
         }
-
-        println!();
     }
 }
 
-/// Show main menu when user types "/" - returns Command enum directly
-fn show_main_menu() -> Option<Command> {
+/// Show main menu when user types "/" - returns MainAction enum directly
+fn show_main_menu() -> Option<MainAction> {
     use nettoolskit_core::MenuProvider;
-    let menu_entries = Command::all_variants();
+    let menu_entries = MainAction::all_variants();
     let current_dir = std::env::current_dir()
         .ok()
         .and_then(|p| p.to_str().map(String::from))
@@ -333,6 +525,106 @@ fn show_main_menu() -> Option<Command> {
             .into_iter()
             .find(|cmd| cmd.slash_static() == label.trim())
     })
+}
+
+fn is_history_command(command: &str) -> bool {
+    command.trim().eq_ignore_ascii_case(HISTORY_COMMAND)
+}
+
+fn is_empty_text_submission(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
+fn record_session_history(history: &mut VecDeque<String>, entry: &str) {
+    let trimmed = entry.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    if history.len() == SESSION_HISTORY_CAPACITY {
+        history.pop_front();
+    }
+
+    history.push_back(trimmed.to_string());
+}
+
+fn show_history_viewer(history: &VecDeque<String>, status_bar: &mut StatusBar) -> io::Result<()> {
+    if history.is_empty() {
+        status_bar.push_notification(
+            StatusNotificationLevel::Warning,
+            "History is empty for this session",
+        );
+        println!(
+            "{}",
+            "No session history entries available.".color(Color::YELLOW)
+        );
+        return Ok(());
+    }
+
+    let mut viewer = HistoryViewer::new(history.iter().cloned().collect())
+        .with_title("Session History")
+        .with_subtitle("Use typing to filter entries. Enter selects. Esc cancels.")
+        .with_prompt("History entry:")
+        .with_help_message("Type to search. Up/Down navigate. Enter selects. Esc cancels.")
+        .with_page_size(12);
+    viewer.scroll_to_last_page();
+
+    match viewer.show() {
+        Some(selected) => {
+            status_bar.push_notification(
+                StatusNotificationLevel::Info,
+                format!("History selection: {selected}"),
+            );
+        }
+        None => {
+            status_bar.push_notification(StatusNotificationLevel::Info, "History viewer closed");
+        }
+    }
+
+    Ok(())
+}
+
+fn record_status_outcome(
+    status_bar: &mut StatusBar,
+    status: ExitStatus,
+    duration: std::time::Duration,
+    command_label: &str,
+) {
+    status_bar.record_command_result(status, duration);
+
+    match status {
+        ExitStatus::Success => {
+            status_bar.push_notification(
+                StatusNotificationLevel::Success,
+                format!("{command_label} completed"),
+            );
+        }
+        ExitStatus::Error => {
+            status_bar.push_notification(
+                StatusNotificationLevel::Error,
+                format!("{command_label} failed"),
+            );
+        }
+        ExitStatus::Interrupted => {
+            status_bar.push_notification(
+                StatusNotificationLevel::Warning,
+                format!("{command_label} interrupted"),
+            );
+        }
+    }
+}
+
+fn render_status_bar(status_bar: &StatusBar) {
+    // Inline status bar and footer logger both compete for dynamic area rendering.
+    // When footer output is enabled, skip inline status line to avoid visual duplication.
+    if footer_output_enabled() {
+        return;
+    }
+
+    if let Err(err) = status_bar.render() {
+        warn!(error = %err, "Failed to render interactive status bar");
+        let _ = append_footer_log(&format!("Warning: failed to render status bar: {err}"));
+    }
 }
 
 /// Print goodbye message to user
@@ -354,6 +646,14 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
     use std::sync::Mutex;
+
+    fn default_interactive_options() -> InteractiveOptions {
+        InteractiveOptions {
+            verbose: false,
+            log_level: "info".to_string(),
+            footer_output: true,
+        }
+    }
 
     /// Try to create a `RawModeGuard`. Returns `None` if a terminal is not
     /// available (e.g., headless CI), allowing tests to be silently skipped
@@ -455,14 +755,16 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_mode_with_runner_success_maps_to_success() {
-        let status =
-            interactive_mode_with_runner(false, || async { Ok(ExitStatus::Success) }).await;
+        let status = interactive_mode_with_runner(default_interactive_options(), || async {
+            Ok(ExitStatus::Success)
+        })
+        .await;
         assert_eq!(status, ExitStatus::Success);
     }
 
     #[tokio::test]
     async fn interactive_mode_with_runner_error_maps_to_error() {
-        let status = interactive_mode_with_runner(false, || async {
+        let status = interactive_mode_with_runner(default_interactive_options(), || async {
             Err(io::Error::other("synthetic interactive loop failure"))
         })
         .await;
@@ -474,10 +776,12 @@ mod tests {
         let mut buffer = String::new();
         let interrupted = Arc::new(AtomicBool::new(false));
         let mut raw_mode = FakeRawMode::default();
+        let mut status_bar = StatusBar::new().with_input_backend("test");
 
         let status = run_input_loop_with(
             &mut buffer,
             &mut raw_mode,
+            &mut status_bar,
             interrupted,
             scripted_reader(vec![InputResult::Exit]),
             || None,
@@ -496,10 +800,12 @@ mod tests {
         let mut buffer = String::new();
         let interrupted = Arc::new(AtomicBool::new(false));
         let mut raw_mode = FakeRawMode::default();
+        let mut status_bar = StatusBar::new().with_input_backend("test");
 
         let status = run_input_loop_with(
             &mut buffer,
             &mut raw_mode,
+            &mut status_bar,
             interrupted,
             scripted_reader(vec![InputResult::Command("/quit".to_string())]),
             || None,
@@ -517,13 +823,15 @@ mod tests {
         let mut buffer = String::new();
         let interrupted = Arc::new(AtomicBool::new(false));
         let mut raw_mode = FakeRawMode::default();
+        let mut status_bar = StatusBar::new().with_input_backend("test");
 
         let status = run_input_loop_with(
             &mut buffer,
             &mut raw_mode,
+            &mut status_bar,
             interrupted,
             scripted_reader(vec![InputResult::ShowMenu]),
-            || Some(Command::Quit),
+            || Some(MainAction::Quit),
             || Ok(()),
         )
         .await
@@ -538,11 +846,13 @@ mod tests {
         let mut buffer = String::new();
         let interrupted = Arc::new(AtomicBool::new(false));
         let mut raw_mode = FakeRawMode::default();
+        let mut status_bar = StatusBar::new().with_input_backend("test");
         let mut menu_calls = 0usize;
 
         let status = run_input_loop_with(
             &mut buffer,
             &mut raw_mode,
+            &mut status_bar,
             interrupted,
             scripted_reader(vec![InputResult::ShowMenu, InputResult::Exit]),
             || {
@@ -557,5 +867,91 @@ mod tests {
         assert_eq!(status, ExitStatus::Success);
         assert_eq!(menu_calls, 1);
         assert!(raw_mode.enable_calls >= 2);
+    }
+
+    #[tokio::test]
+    async fn run_input_loop_with_empty_text_does_not_add_processed_notification() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let mut raw_mode = FakeRawMode::default();
+        let mut status_bar = StatusBar::new().with_input_backend("test");
+
+        let status = run_input_loop_with(
+            &mut buffer,
+            &mut raw_mode,
+            &mut status_bar,
+            interrupted,
+            scripted_reader(vec![
+                InputResult::Text("   ".to_string()),
+                InputResult::Exit,
+            ]),
+            || None,
+            || Ok(()),
+        )
+        .await
+        .expect("loop should complete");
+
+        assert_eq!(status, ExitStatus::Success);
+        assert_ne!(
+            status_bar.latest_notification_message(),
+            Some("Text input processed")
+        );
+    }
+
+    #[test]
+    fn record_status_outcome_success_adds_notification() {
+        let mut status_bar = StatusBar::new().with_input_backend("test");
+        record_status_outcome(
+            &mut status_bar,
+            ExitStatus::Success,
+            std::time::Duration::from_millis(12),
+            "/help",
+        );
+
+        assert_eq!(
+            status_bar.latest_notification_message(),
+            Some("/help completed")
+        );
+    }
+
+    #[test]
+    fn record_status_outcome_error_adds_failure_notification() {
+        let mut status_bar = StatusBar::new().with_input_backend("test");
+        record_status_outcome(
+            &mut status_bar,
+            ExitStatus::Error,
+            std::time::Duration::from_millis(25),
+            "/manifest",
+        );
+
+        assert_eq!(
+            status_bar.latest_notification_message(),
+            Some("/manifest failed")
+        );
+    }
+
+    #[test]
+    fn is_history_command_matches_expected_alias() {
+        assert!(is_history_command("/history"));
+        assert!(is_history_command(" /history "));
+        assert!(!is_history_command("/help"));
+    }
+
+    #[test]
+    fn is_empty_text_submission_detects_blank_inputs() {
+        assert!(is_empty_text_submission(""));
+        assert!(is_empty_text_submission("   "));
+        assert!(!is_empty_text_submission("hello"));
+    }
+
+    #[test]
+    fn record_session_history_enforces_capacity() {
+        let mut history = VecDeque::new();
+        for idx in 0..(SESSION_HISTORY_CAPACITY + 5) {
+            record_session_history(&mut history, &format!("entry-{idx}"));
+        }
+
+        assert_eq!(history.len(), SESSION_HISTORY_CAPACITY);
+        assert_eq!(history.front().map(String::as_str), Some("entry-5"));
     }
 }

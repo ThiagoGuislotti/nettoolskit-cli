@@ -428,7 +428,7 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     );
     metrics.increment_counter(format!("command_{}_usage", cmd.trim_start_matches('/')));
 
-    // Parse command - pass full command string to get_command
+    // Parse command - pass full command string to get_main_action
     // It will handle "/ help", "/help", or "help" formats
     let parts: Vec<&str> = cmd.split_whitespace().collect();
 
@@ -452,7 +452,7 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     let result = match parsed {
         Some(MainAction::Help) => {
             use nettoolskit_ui::Color;
-            println!("{}", "� NetToolsKit CLI - Help".color(Color::CYAN).bold());
+            println!("{}", "NetToolsKit CLI - Help".color(Color::CYAN).bold());
             println!("\n{}", "Available Commands:".color(Color::WHITE).bold());
             println!();
 
@@ -488,6 +488,10 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
             println!(
                 "  {} - View or edit configuration",
                 "/config".color(Color::GREEN)
+            );
+            println!(
+                "  {} - Clear and redraw terminal layout",
+                "/clear".color(Color::GREEN)
             );
             println!("  {} - Exit the CLI", "/quit".color(Color::GREEN));
 
@@ -704,6 +708,17 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
             }
         }
         Some(MainAction::Config) => process_config_command(&parts),
+        Some(MainAction::Clear) => match nettoolskit_ui::reset_layout() {
+            Ok(()) => ExitStatus::Success,
+            Err(err) => {
+                use nettoolskit_ui::Color;
+                println!(
+                    "{}: {err}",
+                    "Failed to reset terminal layout".color(Color::RED).bold()
+                );
+                ExitStatus::Error
+            }
+        },
         Some(MainAction::Quit) => ExitStatus::Success, // Handled by CLI loop
         None => {
             use nettoolskit_ui::Color;
@@ -791,6 +806,7 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
             let config = AppConfig::default();
             match config.save_to(&config_path) {
                 Ok(()) => {
+                    apply_runtime_ui_config(&config);
                     println!(
                         "{}",
                         "✅ Configuration initialized".color(Color::GREEN).bold()
@@ -821,6 +837,7 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
             match set_config_value(&mut config, key, &value) {
                 Ok(()) => match config.save_to(&config_path) {
                     Ok(()) => {
+                        apply_runtime_ui_config(&config);
                         println!(
                             "{} {}={}",
                             "✅ Updated".color(Color::GREEN).bold(),
@@ -854,6 +871,7 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
             match unset_config_value(&mut config, key) {
                 Ok(()) => match config.save_to(&config_path) {
                     Ok(()) => {
+                        apply_runtime_ui_config(&config);
                         println!(
                             "{} {}",
                             "✅ Reset".color(Color::GREEN).bold(),
@@ -878,6 +896,7 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
             let config = AppConfig::default();
             match config.save_to(&config_path) {
                 Ok(()) => {
+                    apply_runtime_ui_config(&config);
                     println!(
                         "{}",
                         "✅ Configuration reset to defaults"
@@ -926,6 +945,7 @@ fn print_effective_config(config_path: &Path) {
     println!("{}", "[general]".color(Color::WHITE).bold());
     println!("  verbose = {}", effective.general.verbose);
     println!("  log_level = {}", effective.general.log_level);
+    println!("  footer_output = {}", effective.general.footer_output);
     println!("{}", "[display]".color(Color::WHITE).bold());
     println!("  color = {}", effective.display.color);
     println!("  unicode = {}", effective.display.unicode);
@@ -952,6 +972,7 @@ fn print_supported_config_keys() {
     println!("{}", "Supported keys:".color(Color::WHITE).bold());
     println!("  {}", "verbose".color(Color::CYAN));
     println!("  {}", "log_level".color(Color::CYAN));
+    println!("  {}", "footer_output".color(Color::CYAN));
     println!("  {}", "color".color(Color::CYAN));
     println!("  {}", "unicode".color(Color::CYAN));
     println!("  {}", "template_dir".color(Color::CYAN));
@@ -979,6 +1000,10 @@ fn load_persisted_or_default(config_path: &Path) -> AppConfig {
     }
 }
 
+fn apply_runtime_ui_config(config: &AppConfig) {
+    nettoolskit_ui::set_footer_output_enabled(config.general.footer_output);
+}
+
 fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<(), String> {
     let normalized = key.trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -990,7 +1015,14 @@ fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<()
             Ok(())
         }
         "log_level" | "log-level" | "general.log_level" | "general.log-level" => {
-            config.general.log_level = value.trim().to_string();
+            config.general.log_level = parse_log_level(value)?;
+            Ok(())
+        }
+        "footer_output" | "footer-output" | "general.footer_output" | "general.footer-output" => {
+            let parsed = parse_bool(value).ok_or_else(|| {
+                "footer_output must be one of: true, false, 1, 0, yes, no, on, off".to_string()
+            })?;
+            config.general.footer_output = parsed;
             Ok(())
         }
         "color" | "display.color" => {
@@ -1026,6 +1058,10 @@ fn unset_config_value(config: &mut AppConfig, key: &str) -> Result<(), String> {
             config.general.log_level = "info".to_string();
             Ok(())
         }
+        "footer_output" | "footer-output" | "general.footer_output" | "general.footer-output" => {
+            config.general.footer_output = true;
+            Ok(())
+        }
         "color" | "display.color" => {
             config.display.color = ColorMode::Auto;
             Ok(())
@@ -1051,6 +1087,15 @@ fn parse_bool(value: &str) -> Option<bool> {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
+    }
+}
+
+fn parse_log_level(value: &str) -> Result<String, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" | "error" | "warn" | "info" | "debug" | "trace" => {
+            Ok(value.trim().to_ascii_lowercase())
+        }
+        _ => Err("log_level must be one of: off, error, warn, info, debug, trace".to_string()),
     }
 }
 
@@ -1099,6 +1144,7 @@ fn infer_command_from_text(text: &str) -> Option<String> {
         "help" | "ajuda" => Some("/help".to_string()),
         "manifest" | "manifests" => Some(format!("/{}", trimmed)),
         "translate" => Some(format!("/{}", trimmed)),
+        "clear" | "cls" | "limpar" => Some("/clear".to_string()),
         "traduzir" => {
             if tokens.len() > 1 {
                 Some(format!("/translate {}", tokens[1..].join(" ")))
@@ -1126,6 +1172,8 @@ fn infer_command_from_text(text: &str) -> Option<String> {
             } else if has("config") || has("configuracao") || has("configuração") || has("settings")
             {
                 Some("/config".to_string())
+            } else if has("clear") || has("limpar") || has("cls") {
+                Some("/clear".to_string())
             } else {
                 None
             }
@@ -1268,6 +1316,12 @@ mod tests {
         assert!(set_config_value(&mut config, "verbose", "true").is_ok());
         assert!(config.general.verbose);
 
+        assert!(set_config_value(&mut config, "log_level", "trace").is_ok());
+        assert_eq!(config.general.log_level, "trace");
+
+        assert!(set_config_value(&mut config, "footer_output", "false").is_ok());
+        assert!(!config.general.footer_output);
+
         assert!(set_config_value(&mut config, "color", "never").is_ok());
         assert_eq!(config.display.color, ColorMode::Never);
 
@@ -1286,14 +1340,20 @@ mod tests {
     fn unset_config_value_resets_known_keys() {
         let mut config = AppConfig::default();
         config.general.verbose = true;
+        config.general.log_level = "debug".to_string();
+        config.general.footer_output = false;
         config.display.color = ColorMode::Always;
         config.templates.directory = Some("/tmp/x".to_string());
 
         assert!(unset_config_value(&mut config, "verbose").is_ok());
+        assert!(unset_config_value(&mut config, "log_level").is_ok());
+        assert!(unset_config_value(&mut config, "footer_output").is_ok());
         assert!(unset_config_value(&mut config, "color").is_ok());
         assert!(unset_config_value(&mut config, "template_dir").is_ok());
 
         assert!(!config.general.verbose);
+        assert_eq!(config.general.log_level, "info");
+        assert!(config.general.footer_output);
         assert_eq!(config.display.color, ColorMode::Auto);
         assert_eq!(config.templates.directory, None);
     }
@@ -1310,9 +1370,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_log_level_accepts_known_values() {
+        assert_eq!(parse_log_level("OFF").as_deref(), Ok("off"));
+        assert_eq!(parse_log_level("warn").as_deref(), Ok("warn"));
+        assert_eq!(parse_log_level("Trace").as_deref(), Ok("trace"));
+    }
+
+    #[test]
+    fn parse_log_level_rejects_unknown_values() {
+        assert!(parse_log_level("verbose").is_err());
+    }
+
+    #[test]
     fn infer_command_from_text_routes_direct_aliases() {
         assert_eq!(infer_command_from_text("help").as_deref(), Some("/help"));
         assert_eq!(infer_command_from_text("ajuda").as_deref(), Some("/help"));
+        assert_eq!(infer_command_from_text("clear").as_deref(), Some("/clear"));
+        assert_eq!(infer_command_from_text("limpar").as_deref(), Some("/clear"));
         assert_eq!(
             infer_command_from_text("manifest check sample.yaml").as_deref(),
             Some("/manifest check sample.yaml")
@@ -1340,6 +1414,10 @@ mod tests {
         assert_eq!(
             infer_command_from_text("open settings").as_deref(),
             Some("/config")
+        );
+        assert_eq!(
+            infer_command_from_text("pode limpar a tela?").as_deref(),
+            Some("/clear")
         );
     }
 

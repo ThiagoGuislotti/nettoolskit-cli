@@ -18,6 +18,7 @@
 //! [general]
 //! verbose = false
 //! log_level = "info"
+//! footer_output = true
 //!
 //! [display]
 //! color = "auto"          # "auto", "always", "never"
@@ -63,6 +64,9 @@ pub struct GeneralConfig {
 
     /// Log level filter (trace, debug, info, warn, error)
     pub log_level: String,
+
+    /// Enable interactive footer output stream
+    pub footer_output: bool,
 }
 
 /// Display and rendering settings
@@ -125,6 +129,7 @@ impl Default for GeneralConfig {
         Self {
             verbose: false,
             log_level: "info".to_string(),
+            footer_output: true,
         }
     }
 }
@@ -211,13 +216,19 @@ impl AppConfig {
     /// Apply environment variable overrides on top of file/default config
     fn apply_env_overrides(&mut self) {
         if let Ok(val) = env::var("NTK_VERBOSE") {
-            if is_truthy(&val) {
-                self.general.verbose = true;
+            if let Some(parsed) = parse_bool_value(&val) {
+                self.general.verbose = parsed;
             }
         }
 
         if let Ok(val) = env::var("NTK_LOG_LEVEL") {
             self.general.log_level = val;
+        }
+
+        if let Ok(val) = env::var("NTK_FOOTER_OUTPUT") {
+            if let Some(parsed) = parse_bool_value(&val) {
+                self.general.footer_output = parsed;
+            }
         }
 
         if let Ok(val) = env::var("NTK_COLOR") {
@@ -416,9 +427,12 @@ fn expand_tilde(path: &str) -> PathBuf {
 }
 
 /// Check if a string value is truthy
-fn is_truthy(val: &str) -> bool {
-    let v = val.trim().to_lowercase();
-    v == "1" || v == "true" || v == "yes" || v == "on"
+fn parse_bool_value(val: &str) -> Option<bool> {
+    match val.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -431,6 +445,7 @@ mod tests {
         let config = AppConfig::default();
         assert!(!config.general.verbose);
         assert_eq!(config.general.log_level, "info");
+        assert!(config.general.footer_output);
         assert_eq!(config.display.color, ColorMode::Auto);
         assert_eq!(config.display.unicode, UnicodeMode::Auto);
         assert!(config.templates.directory.is_none());
@@ -443,6 +458,7 @@ mod tests {
             general: GeneralConfig {
                 verbose: true,
                 log_level: "debug".to_string(),
+                footer_output: false,
             },
             display: DisplayConfig {
                 color: ColorMode::Always,
@@ -470,6 +486,7 @@ mod tests {
 [general]
 verbose = true
 log_level = "debug"
+footer_output = false
 
 [display]
 color = "never"
@@ -487,6 +504,7 @@ default_shell = "fish"
         let config = AppConfig::load_from(&path).unwrap();
         assert!(config.general.verbose);
         assert_eq!(config.general.log_level, "debug");
+        assert!(!config.general.footer_output);
         assert_eq!(config.display.color, ColorMode::Never);
         assert_eq!(config.display.unicode, UnicodeMode::Always);
         assert_eq!(
@@ -505,6 +523,7 @@ default_shell = "fish"
             general: GeneralConfig {
                 verbose: true,
                 log_level: "warn".to_string(),
+                footer_output: false,
             },
             ..AppConfig::default()
         };
@@ -525,6 +544,7 @@ verbose = true
         let config: AppConfig = toml::from_str(content).unwrap();
         assert!(config.general.verbose);
         assert_eq!(config.general.log_level, "info"); // default
+        assert!(config.general.footer_output); // default
         assert_eq!(config.display.color, ColorMode::Auto); // default
     }
 
@@ -562,17 +582,18 @@ verbose = true
     }
 
     #[test]
-    fn is_truthy_values() {
-        assert!(is_truthy("1"));
-        assert!(is_truthy("true"));
-        assert!(is_truthy("True"));
-        assert!(is_truthy("YES"));
-        assert!(is_truthy("on"));
-        assert!(is_truthy("  1  "));
-        assert!(!is_truthy("0"));
-        assert!(!is_truthy("false"));
-        assert!(!is_truthy("no"));
-        assert!(!is_truthy(""));
+    fn parse_bool_value_handles_supported_values() {
+        assert_eq!(parse_bool_value("1"), Some(true));
+        assert_eq!(parse_bool_value("true"), Some(true));
+        assert_eq!(parse_bool_value("True"), Some(true));
+        assert_eq!(parse_bool_value("YES"), Some(true));
+        assert_eq!(parse_bool_value("on"), Some(true));
+        assert_eq!(parse_bool_value("  1  "), Some(true));
+        assert_eq!(parse_bool_value("0"), Some(false));
+        assert_eq!(parse_bool_value("false"), Some(false));
+        assert_eq!(parse_bool_value("no"), Some(false));
+        assert_eq!(parse_bool_value(""), None);
+        assert_eq!(parse_bool_value("maybe"), None);
     }
 
     #[test]

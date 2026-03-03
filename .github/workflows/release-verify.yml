@@ -1,0 +1,245 @@
+name: Verify Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify (example: v1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  BINARY_NAME: ntk
+
+jobs:
+  verify-release:
+    name: Verify Release (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+    steps:
+      - name: Validate tag input format
+        shell: bash
+        run: |
+          tag="${{ inputs.tag }}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid tag '$tag'. Expected format: vMAJOR.MINOR.PATCH[-PRERELEASE]"
+            exit 1
+          fi
+
+      - name: Install GitHub CLI (linux fallback)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+
+      - name: Ensure GitHub CLI on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+            choco install gh -y
+          }
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify published release assets (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="${{ inputs.tag }}"
+          version="${tag#v}"
+          base="${BINARY_NAME}-${version}-${{ matrix.target }}"
+          archive="${base}.${{ matrix.archive }}"
+          checksum="${archive}.sha256"
+          archive_sig="${archive}.sig"
+          archive_cert="${archive}.pem"
+          checksum_sig="${checksum}.sig"
+          checksum_cert="${checksum}.pem"
+          sbom_cdx="${BINARY_NAME}-${version}-sbom.cyclonedx.json"
+          sbom_spdx="${BINARY_NAME}-${version}-sbom.spdx.json"
+          sbom_cdx_sig="${sbom_cdx}.sig"
+          sbom_cdx_cert="${sbom_cdx}.pem"
+          sbom_spdx_sig="${sbom_spdx}.sig"
+          sbom_spdx_cert="${sbom_spdx}.pem"
+          identity_regex="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+.*$"
+
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" \
+            --pattern "$checksum" \
+            --pattern "$archive_sig" \
+            --pattern "$archive_cert" \
+            --pattern "$checksum_sig" \
+            --pattern "$checksum_cert" \
+            --pattern "$sbom_cdx" \
+            --pattern "$sbom_spdx" \
+            --pattern "$sbom_cdx_sig" \
+            --pattern "$sbom_cdx_cert" \
+            --pattern "$sbom_spdx_sig" \
+            --pattern "$sbom_spdx_cert" \
+            --clobber
+
+          cosign verify-blob \
+            --certificate "$archive_cert" \
+            --signature "$archive_sig" \
+            --certificate-identity-regexp "$identity_regex" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+
+          cosign verify-blob \
+            --certificate "$checksum_cert" \
+            --signature "$checksum_sig" \
+            --certificate-identity-regexp "$identity_regex" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$checksum"
+
+          cosign verify-blob \
+            --certificate "$sbom_cdx_cert" \
+            --signature "$sbom_cdx_sig" \
+            --certificate-identity-regexp "$identity_regex" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$sbom_cdx"
+
+          cosign verify-blob \
+            --certificate "$sbom_spdx_cert" \
+            --signature "$sbom_spdx_sig" \
+            --certificate-identity-regexp "$identity_regex" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$sbom_spdx"
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c "$checksum"
+          else
+            shasum -a 256 -c "$checksum"
+          fi
+
+          grep -Eq '"bomFormat"[[:space:]]*:[[:space:]]*"CycloneDX"' "$sbom_cdx" || {
+            echo "::error::Invalid CycloneDX SBOM metadata in $sbom_cdx (missing bomFormat=CycloneDX)."
+            exit 1
+          }
+          grep -Eq '"specVersion"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+' "$sbom_cdx" || {
+            echo "::error::Invalid CycloneDX SBOM metadata in $sbom_cdx (missing specVersion)."
+            exit 1
+          }
+          grep -Eq '"spdxVersion"[[:space:]]*:[[:space:]]*"SPDX-' "$sbom_spdx" || {
+            echo "::error::Invalid SPDX SBOM metadata in $sbom_spdx (missing spdxVersion=SPDX-*)."
+            exit 1
+          }
+
+          tar xzf "$archive"
+          "./$base/${BINARY_NAME}" --version
+          "./$base/${BINARY_NAME}" --help >/dev/null
+          "./$base/${BINARY_NAME}" manifest --help >/dev/null
+
+      - name: Verify published release assets (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tag = "${{ inputs.tag }}"
+          $version = $tag.Substring(1)
+          $base = "${env:BINARY_NAME}-${version}-${{ matrix.target }}"
+          $archive = "$base.${{ matrix.archive }}"
+          $checksum = "$archive.sha256"
+          $archiveSig = "$archive.sig"
+          $archiveCert = "$archive.pem"
+          $checksumSig = "$checksum.sig"
+          $checksumCert = "$checksum.pem"
+          $sbomCycloneDx = "${env:BINARY_NAME}-${version}-sbom.cyclonedx.json"
+          $sbomSpdx = "${env:BINARY_NAME}-${version}-sbom.spdx.json"
+          $sbomCycloneDxSig = "$sbomCycloneDx.sig"
+          $sbomCycloneDxCert = "$sbomCycloneDx.pem"
+          $sbomSpdxSig = "$sbomSpdx.sig"
+          $sbomSpdxCert = "$sbomSpdx.pem"
+          $identityRegex = "^https://github.com/$env:GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+.*$"
+
+          gh release download $tag --repo $env:GITHUB_REPOSITORY `
+            --pattern $archive `
+            --pattern $checksum `
+            --pattern $archiveSig `
+            --pattern $archiveCert `
+            --pattern $checksumSig `
+            --pattern $checksumCert `
+            --pattern $sbomCycloneDx `
+            --pattern $sbomSpdx `
+            --pattern $sbomCycloneDxSig `
+            --pattern $sbomCycloneDxCert `
+            --pattern $sbomSpdxSig `
+            --pattern $sbomSpdxCert `
+            --clobber
+
+          cosign verify-blob `
+            --certificate $archiveCert `
+            --signature $archiveSig `
+            --certificate-identity-regexp $identityRegex `
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
+            $archive
+
+          cosign verify-blob `
+            --certificate $checksumCert `
+            --signature $checksumSig `
+            --certificate-identity-regexp $identityRegex `
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
+            $checksum
+
+          cosign verify-blob `
+            --certificate $sbomCycloneDxCert `
+            --signature $sbomCycloneDxSig `
+            --certificate-identity-regexp $identityRegex `
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
+            $sbomCycloneDx
+
+          cosign verify-blob `
+            --certificate $sbomSpdxCert `
+            --signature $sbomSpdxSig `
+            --certificate-identity-regexp $identityRegex `
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
+            $sbomSpdx
+
+          $checksumLine = (Get-Content $checksum | Select-Object -First 1).Trim()
+          $expectedHash = ($checksumLine -split '\s+')[0].ToLowerInvariant()
+          $actualHash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expectedHash -ne $actualHash) {
+            throw "Checksum mismatch for $archive"
+          }
+
+          $cycloneDx = Get-Content -Raw $sbomCycloneDx | ConvertFrom-Json
+          if ($cycloneDx.bomFormat -ne "CycloneDX" -or [string]::IsNullOrWhiteSpace([string]$cycloneDx.specVersion)) {
+            throw "Invalid CycloneDX SBOM metadata in $sbomCycloneDx"
+          }
+
+          $spdx = Get-Content -Raw $sbomSpdx | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace([string]$spdx.spdxVersion) -or -not ([string]$spdx.spdxVersion).StartsWith("SPDX-")) {
+            throw "Invalid SPDX SBOM metadata in $sbomSpdx"
+          }
+
+          Expand-Archive -Path $archive -DestinationPath .
+          $binaryPath = Join-Path $base "${env:BINARY_NAME}.exe"
+          & $binaryPath --version
+          & $binaryPath --help | Out-Null
+          & $binaryPath manifest --help | Out-Null

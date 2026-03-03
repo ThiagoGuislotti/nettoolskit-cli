@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Decision log centralized in `CHANGELOG.md` as the single source of truth for architecture/engineering decisions.
 - Added `COMPATIBILITY.md` as the official compatibility matrix and support policy for release artifacts.
+- Added release verification runbook (`docs/operations/release-artifact-verification.md`) for checksum and keyless cosign validation of published artifacts.
+- Added manual release verification workflow (`.github/workflows/release-verify.yml`) for tag-based validation of published assets.
+- Added formal support lifecycle and EOL table in `COMPATIBILITY.md` with dated maintenance windows.
+- Added SBOM verification coverage (signature + metadata sanity) to the manual release verification workflow.
+- Added deterministic PowerShell-based compatibility lifecycle validation in the release workflow to enforce EOL policy semantics.
+- Added shared-script pattern to release validation: workflow clones `copilot-instructions` and uses shared lifecycle validator when available (inline fallback retained).
+- Added `rustyline`-based CLI input path with persisted history and command auto-complete (with fallback to the legacy input loop if initialization fails).
+- Added multiline input support in CLI (`rustyline` validator + explicit trailing `\` continuation marker).
+- Added interactive `FilePicker` component with fuzzy filtering, regex mode (`re:`), literal mode (`lit:`), and keyboard navigation for manifest file selection.
+- Added interactive `StatusBar` component with mode indicator, bounded notifications queue, command outcome counters, and runtime usage summary.
+- Added interactive `HistoryViewer` component with pagination, indexed entry rendering, and case-insensitive filtering.
+- Added interactive input syntax highlighting in `rustyline` for commands/flags plus lexical styles for Rust, C#, JavaScript, and TypeScript lines.
+- Added `tree-sitter` parser integration for Rust, C#, JavaScript, and TypeScript token-aware interactive highlighting.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
@@ -73,6 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rust toolchain is now pinned via `rust-toolchain.toml` and CI MSRV check moved to `1.85.0`.
 - Release pipeline now generates and publishes SBOM assets in CycloneDX and SPDX formats.
 - Release pipeline now validates compatibility/support documentation and ships `COMPATIBILITY.md` inside packaged artifacts.
+- Release pipeline now enforces presence of support lifecycle/EOL section and EOL table header in `COMPATIBILITY.md`.
+- CI coverage job now exports `lcov`, JSON summary, and HTML report artifacts, and enforces minimum line/function coverage thresholds.
+- Manifest interactive commands (`check`, `render`, `apply`) now try picker-based manifest selection first, with manual path input fallback on cancel.
+- Interactive CLI loops (`rustyline` and legacy raw-mode fallback) now render a live status bar above the prompt and update status by command outcome.
+- Interactive CLI now handles local `/history` command to open session history viewer without delegating to orchestrator command routing.
+- Interactive `rustyline` helper now applies lightweight ANSI-based highlighting with language detection and keyword/string/comment styling.
+- Interactive syntax highlighting now uses parser reuse + thread-local cache and a bounded large-line fast-path for lower input latency.
 
 ### Fixed
 - Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.
@@ -94,6 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Additional validation for OTLP migration:
   - `cargo clippy -p nettoolskit-otel --all-targets --all-features -- -D warnings`
   - `cargo test -p nettoolskit-otel --all-targets`
+- Added release gate validation for compatibility lifecycle semantics in GitHub Actions.
+- Added coverage sweep validation with `cargo llvm-cov` and report exports (line coverage baseline around `68.2%`, functions around `72.5%`).
 
 ## [1.0.0] - 2025-01-04
 

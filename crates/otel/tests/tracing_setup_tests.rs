@@ -9,6 +9,7 @@ fn test_tracing_config_default() {
     let config = TracingConfig::default();
 
     assert!(!config.verbose);
+    assert_eq!(config.log_level, "info");
     assert!(!config.json_format);
     assert!(!config.with_file);
     assert!(config.with_line_numbers);
@@ -21,6 +22,7 @@ fn test_tracing_config_default() {
 fn test_tracing_config_custom() {
     let config = TracingConfig {
         verbose: true,
+        log_level: "trace".to_string(),
         json_format: true,
         with_file: true,
         with_line_numbers: false,
@@ -30,6 +32,7 @@ fn test_tracing_config_custom() {
     };
 
     assert!(config.verbose);
+    assert_eq!(config.log_level, "trace");
     assert!(config.json_format);
     assert!(config.with_file);
     assert!(!config.with_line_numbers);

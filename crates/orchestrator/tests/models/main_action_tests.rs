@@ -62,6 +62,18 @@ fn test_main_action_config_variant() {
 }
 
 #[test]
+fn test_main_action_clear_variant() {
+    // Arrange
+    let action = MainAction::Clear;
+
+    // Act
+    let is_clear = matches!(action, MainAction::Clear);
+
+    // Assert
+    assert!(is_clear, "MainAction::Clear should match Clear variant");
+}
+
+#[test]
 fn test_main_action_quit_variant() {
     // Arrange
     let action = MainAction::Quit;
@@ -133,6 +145,18 @@ fn test_main_action_slash_static_config() {
 }
 
 #[test]
+fn test_main_action_slash_static_clear() {
+    // Arrange
+    let action = MainAction::Clear;
+
+    // Act
+    let slash_cmd = action.slash_static();
+
+    // Assert
+    assert_eq!(slash_cmd, "/clear", "Clear should produce /clear command");
+}
+
+#[test]
 fn test_main_action_slash_static_quit() {
     // Arrange
     let action = MainAction::Quit;
@@ -154,6 +178,7 @@ fn test_main_action_pattern_matching_exhaustive() {
         MainAction::Manifest,
         MainAction::Translate,
         MainAction::Config,
+        MainAction::Clear,
         MainAction::Quit,
     ];
 
@@ -164,6 +189,7 @@ fn test_main_action_pattern_matching_exhaustive() {
             MainAction::Manifest => true,
             MainAction::Translate => true,
             MainAction::Config => true,
+            MainAction::Clear => true,
             MainAction::Quit => true,
         };
         assert!(matched, "All MainAction variants should be handled");

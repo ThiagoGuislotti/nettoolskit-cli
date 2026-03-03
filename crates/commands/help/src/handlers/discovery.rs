@@ -1,7 +1,7 @@
 //! Manifest discovery handler
 
 use crate::models::ManifestInfo;
-use nettoolskit_manifest::parser::ManifestParser;
+use nettoolskit_manifest::ManifestParser;
 use nettoolskit_otel::Metrics;
 use owo_colors::OwoColorize;
 use std::path::{Path, PathBuf};
@@ -107,6 +107,7 @@ async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
             .max_depth(10)
             .follow_links(false)
             .into_iter()
+            .filter_entry(|entry| !entry.file_type().is_dir() || !should_skip_dir(entry.path()))
         {
             let entry = match entry_result {
                 Ok(e) => e,
@@ -117,13 +118,7 @@ async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
             if path.is_file() {
                 if let Some(file_name) = path.file_name() {
                     let name = file_name.to_string_lossy();
-
-                    // Support both manifest.yaml and *.manifest.yaml patterns
-                    if name.ends_with(".manifest.yaml")
-                        || name.ends_with(".manifest.yml")
-                        || name == "manifest.yaml"
-                        || name == "manifest.yml"
-                    {
+                    if is_manifest_file_name(&name) {
                         debug!("Found manifest: {:?}", path);
                         manifests.push(path.to_path_buf());
                     }
@@ -131,7 +126,48 @@ async fn find_manifest_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
             }
         }
 
+        manifests.sort_unstable();
+        manifests.dedup();
         Ok(manifests)
     })
     .await?
+}
+
+fn is_manifest_file_name(name: &str) -> bool {
+    name.ends_with(".manifest.yaml")
+        || name.ends_with(".manifest.yml")
+        || name == "manifest.yaml"
+        || name == "manifest.yml"
+}
+
+fn should_skip_dir(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some(".git" | "target" | "node_modules" | ".idea" | ".vscode")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_manifest_file_name, should_skip_dir};
+    use std::path::Path;
+
+    #[test]
+    fn is_manifest_file_name_matches_supported_patterns() {
+        assert!(is_manifest_file_name("manifest.yaml"));
+        assert!(is_manifest_file_name("manifest.yml"));
+        assert!(is_manifest_file_name("feature.manifest.yaml"));
+        assert!(is_manifest_file_name("feature.manifest.yml"));
+        assert!(!is_manifest_file_name("manifest.json"));
+    }
+
+    #[test]
+    fn should_skip_dir_filters_known_heavy_directories() {
+        assert!(should_skip_dir(Path::new("target")));
+        assert!(should_skip_dir(Path::new(".git")));
+        assert!(should_skip_dir(Path::new("node_modules")));
+        assert!(should_skip_dir(Path::new(".idea")));
+        assert!(should_skip_dir(Path::new(".vscode")));
+        assert!(!should_skip_dir(Path::new("src")));
+    }
 }
