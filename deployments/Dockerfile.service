@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.85-bookworm AS builder
+WORKDIR /workspace
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+COPY benchmarks ./benchmarks
+
+RUN cargo build --release -p nettoolskit-cli
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /workspace/target/release/ntk /usr/local/bin/ntk
+
+ENV NTK_RUNTIME_MODE=service
+ENV NTK_LOG_LEVEL=info
+ENV XDG_DATA_HOME=/var/lib/ntk
+ENV XDG_CONFIG_HOME=/var/lib/ntk/config
+
+VOLUME ["/var/lib/ntk"]
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["ntk", "service", "--host", "0.0.0.0", "--port", "8080"]

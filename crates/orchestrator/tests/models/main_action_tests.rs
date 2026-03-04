@@ -62,6 +62,18 @@ fn test_main_action_ai_variant() {
 }
 
 #[test]
+fn test_main_action_task_variant() {
+    // Arrange
+    let action = MainAction::Task;
+
+    // Act
+    let is_task = matches!(action, MainAction::Task);
+
+    // Assert
+    assert!(is_task, "MainAction::Task should match Task variant");
+}
+
+#[test]
 fn test_main_action_config_variant() {
     // Arrange
     let action = MainAction::Config;
@@ -154,6 +166,18 @@ fn test_main_action_slash_static_ai() {
 }
 
 #[test]
+fn test_main_action_slash_static_task() {
+    // Arrange
+    let action = MainAction::Task;
+
+    // Act
+    let slash_cmd = action.slash_static();
+
+    // Assert
+    assert_eq!(slash_cmd, "/task", "Task should produce /task command");
+}
+
+#[test]
 fn test_main_action_slash_static_config() {
     // Arrange
     let action = MainAction::Config;
@@ -202,6 +226,7 @@ fn test_main_action_pattern_matching_exhaustive() {
         MainAction::Manifest,
         MainAction::Translate,
         MainAction::Ai,
+        MainAction::Task,
         MainAction::Config,
         MainAction::Clear,
         MainAction::Quit,
@@ -214,6 +239,7 @@ fn test_main_action_pattern_matching_exhaustive() {
             MainAction::Manifest => true,
             MainAction::Translate => true,
             MainAction::Ai => true,
+            MainAction::Task => true,
             MainAction::Config => true,
             MainAction::Clear => true,
             MainAction::Quit => true,

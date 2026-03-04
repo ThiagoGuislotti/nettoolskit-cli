@@ -27,6 +27,10 @@ pub enum MainAction {
     #[strum(serialize = "ai")]
     Ai,
 
+    /// Task manager commands for dual runtime orchestration
+    #[strum(serialize = "task")]
+    Task,
+
     /// View and edit user configuration
     #[strum(serialize = "config")]
     Config,
@@ -53,6 +57,9 @@ impl MainAction {
             MainAction::Ai => {
                 "AI assistant commands (ask, plan, explain, resume, apply with dry-run/approval)"
             }
+            MainAction::Task => {
+                "Task manager commands (submit, list, watch, cancel) with local fallback"
+            }
             MainAction::Config => "View and edit user configuration",
             MainAction::Clear => "Clear and redraw the interactive terminal layout",
             MainAction::Quit => "Exit NetToolsKit CLI",
@@ -67,6 +74,7 @@ impl MenuEntry for MainAction {
             MainAction::Manifest => "/manifest",
             MainAction::Translate => "/translate",
             MainAction::Ai => "/ai",
+            MainAction::Task => "/task",
             MainAction::Config => "/config",
             MainAction::Clear => "/clear",
             MainAction::Quit => "/quit",

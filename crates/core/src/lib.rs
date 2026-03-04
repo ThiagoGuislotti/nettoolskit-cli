@@ -21,6 +21,9 @@ pub mod config;
 /// AI workspace-context collection and redaction utilities
 pub mod ai_context;
 
+/// Shared runtime contracts for CLI and background-service execution modes.
+pub mod runtime;
+
 /// String manipulation utilities
 #[path = "string-utils/lib.rs"]
 pub mod string_utils;
@@ -42,3 +45,7 @@ pub use config::{AppConfig, ColorMode, UnicodeMode};
 pub use exit_status::ExitStatus;
 pub use features::Features;
 pub use menu::{CommandEntry, MenuEntry, MenuProvider};
+pub use runtime::{
+    resolve_runtime_mode, RuntimeMode, TaskAuditEvent, TaskExecutionStatus, TaskIntent,
+    TaskIntentKind, NTK_RUNTIME_MODE_ENV,
+};

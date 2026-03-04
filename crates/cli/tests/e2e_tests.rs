@@ -115,6 +115,16 @@ fn help_shows_translate_subcommand() {
         .stdout(predicate::str::contains("translate"));
 }
 
+#[test]
+fn service_help_subcommand_returns_zero() {
+    ntk()
+        .args(["service", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("service"))
+        .stdout(predicate::str::contains("--port"));
+}
+
 // ─── translate subcommand ────────────────────────────────────────────────
 
 #[test]

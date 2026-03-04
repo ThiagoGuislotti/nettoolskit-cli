@@ -19,6 +19,7 @@
 //! verbose = false
 //! log_level = "info"
 //! footer_output = true
+//! runtime_mode = "cli"
 //! attention_bell = false
 //! attention_desktop_notification = false
 //! attention_unfocused_only = false
@@ -42,6 +43,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
+
+use crate::runtime::{resolve_runtime_mode, RuntimeMode};
 
 /// Primary application configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -72,6 +75,9 @@ pub struct GeneralConfig {
 
     /// Enable interactive footer output stream
     pub footer_output: bool,
+
+    /// Runtime mode selection: `cli` or `service`
+    pub runtime_mode: RuntimeMode,
 
     /// Emit terminal attention bell on command failures in interactive mode
     pub attention_bell: bool,
@@ -150,6 +156,7 @@ impl Default for GeneralConfig {
             verbose: false,
             log_level: "info".to_string(),
             footer_output: true,
+            runtime_mode: RuntimeMode::Cli,
             attention_bell: false,
             attention_desktop_notification: false,
             attention_unfocused_only: false,
@@ -255,6 +262,11 @@ impl AppConfig {
                 self.general.footer_output = parsed;
             }
         }
+
+        self.general.runtime_mode = resolve_runtime_mode(
+            self.general.runtime_mode,
+            env::var("NTK_RUNTIME_MODE").ok().as_deref(),
+        );
 
         if let Ok(val) = env::var("NTK_ATTENTION_BELL") {
             if let Some(parsed) = parse_bool_value(&val) {
@@ -506,6 +518,7 @@ mod tests {
         assert!(!config.general.verbose);
         assert_eq!(config.general.log_level, "info");
         assert!(config.general.footer_output);
+        assert_eq!(config.general.runtime_mode, RuntimeMode::Cli);
         assert!(!config.general.attention_bell);
         assert!(!config.general.attention_desktop_notification);
         assert!(!config.general.attention_unfocused_only);
@@ -524,6 +537,7 @@ mod tests {
                 verbose: true,
                 log_level: "debug".to_string(),
                 footer_output: false,
+                runtime_mode: RuntimeMode::Service,
                 attention_bell: true,
                 attention_desktop_notification: true,
                 attention_unfocused_only: true,
@@ -557,6 +571,7 @@ mod tests {
 verbose = true
 log_level = "debug"
 footer_output = false
+runtime_mode = "service"
 attention_bell = true
 attention_desktop_notification = true
 attention_unfocused_only = true
@@ -580,6 +595,7 @@ default_shell = "fish"
         assert!(config.general.verbose);
         assert_eq!(config.general.log_level, "debug");
         assert!(!config.general.footer_output);
+        assert_eq!(config.general.runtime_mode, RuntimeMode::Service);
         assert!(config.general.attention_bell);
         assert!(config.general.attention_desktop_notification);
         assert!(config.general.attention_unfocused_only);
@@ -604,6 +620,7 @@ default_shell = "fish"
                 verbose: true,
                 log_level: "warn".to_string(),
                 footer_output: false,
+                runtime_mode: RuntimeMode::Service,
                 attention_bell: true,
                 attention_desktop_notification: true,
                 attention_unfocused_only: true,
@@ -630,6 +647,7 @@ verbose = true
         assert!(config.general.verbose);
         assert_eq!(config.general.log_level, "info"); // default
         assert!(config.general.footer_output); // default
+        assert_eq!(config.general.runtime_mode, RuntimeMode::Cli); // default
         assert!(!config.general.attention_bell); // default
         assert!(!config.general.attention_desktop_notification); // default
         assert!(!config.general.attention_unfocused_only); // default

@@ -19,25 +19,43 @@ use nettoolskit_core::ai_context::{
     collect_workspace_context, render_context_system_message, AiContextBudget,
 };
 use nettoolskit_core::file_search::{search_files, SearchConfig};
-use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
+use nettoolskit_core::{
+    AppConfig, ColorMode, CommandEntry, RuntimeMode, TaskAuditEvent, TaskExecutionStatus,
+    TaskIntent, TaskIntentKind, UnicodeMode,
+};
 use nettoolskit_otel::{next_correlation_id, Metrics, Timer};
 use owo_colors::OwoColorize;
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use std::time::{Duration, Instant};
 use strum::IntoEnumIterator;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::Semaphore;
 use tracing::{info, info_span, warn};
 
 static RUNTIME_METRICS: OnceLock<Metrics> = OnceLock::new();
 static COMMAND_CACHE: OnceLock<Mutex<CommandResultCache>> = OnceLock::new();
 static AI_RATE_LIMITER: OnceLock<Mutex<AiRateLimitState>> = OnceLock::new();
+static TASK_REGISTRY: OnceLock<Mutex<HashMap<String, TaskRecord>>> = OnceLock::new();
+static TASK_AUDIT_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<TaskAuditEvent>>>> = OnceLock::new();
+static TASK_WORKER_SENDER: OnceLock<mpsc::Sender<QueuedTask>> = OnceLock::new();
+static TASK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const COMMAND_CACHE_MAX_ENTRIES: usize = 128;
 const COMMAND_CACHE_MAX_SIZE_BYTES: usize = 2 * 1024 * 1024;
 const COMMAND_CACHE_LOG_INTERVAL_SECONDS: u64 = 30;
+const TASK_AUDIT_MAX_EVENTS_PER_TASK: usize = 32;
+const DEFAULT_TASK_QUEUE_CAPACITY: usize = 64;
+const DEFAULT_TASK_MAX_CONCURRENCY: usize = 2;
+const DEFAULT_TASK_MAX_RETRIES: usize = 2;
+const DEFAULT_TASK_RETRY_BASE_DELAY_MS: u64 = 300;
+const DEFAULT_TASK_RETRY_MAX_DELAY_MS: u64 = 1_500;
 const AI_CONTEXT_DEFAULT_ALLOWLIST: &[&str] = &[
     "Cargo.toml",
     "README.md",
@@ -101,6 +119,71 @@ impl Default for AiRateLimitState {
     }
 }
 
+#[derive(Debug, Clone)]
+struct TaskRecord {
+    id: String,
+    intent: TaskIntent,
+    status: TaskExecutionStatus,
+    runtime_mode: RuntimeMode,
+    execution_target: String,
+    status_message: String,
+    attempts: usize,
+    max_attempts: usize,
+    created_at_unix_ms: u64,
+    updated_at_unix_ms: u64,
+}
+
+impl TaskRecord {
+    fn new(
+        id: String,
+        intent: TaskIntent,
+        runtime_mode: RuntimeMode,
+        max_attempts: usize,
+        now_unix_ms: u64,
+    ) -> Self {
+        Self {
+            id,
+            intent,
+            status: TaskExecutionStatus::Queued,
+            runtime_mode,
+            execution_target: "local-fallback".to_string(),
+            status_message: "Queued for execution".to_string(),
+            attempts: 0,
+            max_attempts: max_attempts.max(1),
+            created_at_unix_ms: now_unix_ms,
+            updated_at_unix_ms: now_unix_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TaskWorkerPolicy {
+    queue_capacity: usize,
+    max_concurrency: usize,
+    max_retries: usize,
+    retry_base_delay: Duration,
+    retry_max_delay: Duration,
+}
+
+impl Default for TaskWorkerPolicy {
+    fn default() -> Self {
+        Self {
+            queue_capacity: DEFAULT_TASK_QUEUE_CAPACITY,
+            max_concurrency: DEFAULT_TASK_MAX_CONCURRENCY,
+            max_retries: DEFAULT_TASK_MAX_RETRIES,
+            retry_base_delay: Duration::from_millis(DEFAULT_TASK_RETRY_BASE_DELAY_MS),
+            retry_max_delay: Duration::from_millis(DEFAULT_TASK_RETRY_MAX_DELAY_MS),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct QueuedTask {
+    id: String,
+    intent: TaskIntent,
+    runtime_mode: RuntimeMode,
+}
+
 fn runtime_metrics() -> &'static Metrics {
     RUNTIME_METRICS.get_or_init(Metrics::new)
 }
@@ -119,11 +202,62 @@ fn ai_rate_limiter() -> &'static Mutex<AiRateLimitState> {
     AI_RATE_LIMITER.get_or_init(|| Mutex::new(AiRateLimitState::default()))
 }
 
+fn task_registry() -> &'static Mutex<HashMap<String, TaskRecord>> {
+    TASK_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn task_audit_registry() -> &'static Mutex<HashMap<String, Vec<TaskAuditEvent>>> {
+    TASK_AUDIT_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn with_command_cache<T>(f: impl FnOnce(&mut CommandResultCache) -> T) -> T {
     let mut guard = command_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     f(&mut guard)
+}
+
+fn with_task_registry<T>(f: impl FnOnce(&mut HashMap<String, TaskRecord>) -> T) -> T {
+    let mut guard = task_registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut guard)
+}
+
+fn with_task_audit_registry<T>(
+    f: impl FnOnce(&mut HashMap<String, Vec<TaskAuditEvent>>) -> T,
+) -> T {
+    let mut guard = task_audit_registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut guard)
+}
+
+fn append_task_audit_event(
+    task_id: &str,
+    runtime_mode: RuntimeMode,
+    status: TaskExecutionStatus,
+    message: impl Into<String>,
+) {
+    let event = TaskAuditEvent::new(
+        task_id.to_string(),
+        runtime_mode,
+        status,
+        message,
+        current_unix_timestamp_ms(),
+    );
+    with_task_audit_registry(|registry| {
+        let events = registry.entry(task_id.to_string()).or_default();
+        events.push(event);
+        if events.len() > TASK_AUDIT_MAX_EVENTS_PER_TASK {
+            let extra = events.len() - TASK_AUDIT_MAX_EVENTS_PER_TASK;
+            events.drain(0..extra);
+        }
+    });
+}
+
+fn list_task_audit_events(task_id: &str) -> Vec<TaskAuditEvent> {
+    with_task_audit_registry(|registry| registry.get(task_id).cloned().unwrap_or_default())
 }
 
 fn maybe_log_command_cache_stats(stats: CacheStats, metrics: &Metrics) {
@@ -1541,6 +1675,772 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
     }
 }
 
+fn current_unix_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn next_task_id() -> String {
+    let sequence = TASK_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("task-{}-{sequence:08x}", current_unix_timestamp_ms())
+}
+
+fn task_intent_kind_label(kind: TaskIntentKind) -> &'static str {
+    match kind {
+        TaskIntentKind::CommandExecution => "command",
+        TaskIntentKind::AiAsk => "ai-ask",
+        TaskIntentKind::AiPlan => "ai-plan",
+        TaskIntentKind::AiExplain => "ai-explain",
+        TaskIntentKind::AiApplyDryRun => "ai-apply-dry-run",
+    }
+}
+
+fn parse_task_intent_kind(value: &str) -> Option<TaskIntentKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "command" | "cmd" => Some(TaskIntentKind::CommandExecution),
+        "ai-ask" | "ask" => Some(TaskIntentKind::AiAsk),
+        "ai-plan" | "plan" => Some(TaskIntentKind::AiPlan),
+        "ai-explain" | "explain" => Some(TaskIntentKind::AiExplain),
+        "ai-apply-dry-run" | "apply-dry-run" | "apply" => Some(TaskIntentKind::AiApplyDryRun),
+        _ => None,
+    }
+}
+
+fn task_status_label(status: TaskExecutionStatus) -> &'static str {
+    match status {
+        TaskExecutionStatus::Queued => "queued",
+        TaskExecutionStatus::Running => "running",
+        TaskExecutionStatus::Succeeded => "succeeded",
+        TaskExecutionStatus::Failed => "failed",
+        TaskExecutionStatus::Cancelled => "cancelled",
+    }
+}
+
+fn task_service_endpoint_from_env() -> Option<String> {
+    std::env::var("NTK_TASK_SERVICE_ENDPOINT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_task_execution_target(runtime_mode: RuntimeMode) -> (String, Option<String>) {
+    match runtime_mode {
+        RuntimeMode::Service => match task_service_endpoint_from_env() {
+            Some(endpoint) => (
+                "background-worker-local".to_string(),
+                Some(format!(
+                    "Background service endpoint is configured ({endpoint}) but remote dispatch is not enabled yet; using embedded background worker."
+                )),
+            ),
+            None => (
+                "background-worker-local".to_string(),
+                Some(
+                    "Runtime mode is set to service without remote endpoint; using embedded background worker."
+                        .to_string(),
+                ),
+            ),
+        },
+        RuntimeMode::Cli => (
+            "local-fallback".to_string(),
+            task_service_endpoint_from_env().map(|endpoint| {
+                format!(
+                    "CLI runtime keeps execution local; service endpoint ({endpoint}) ignored for now."
+                )
+            }),
+        ),
+    }
+}
+
+fn task_worker_policy_from_env() -> TaskWorkerPolicy {
+    let mut policy = TaskWorkerPolicy::default();
+
+    if let Ok(value) = std::env::var("NTK_TASK_QUEUE_CAPACITY") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.queue_capacity = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_TASK_MAX_CONCURRENCY") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.max_concurrency = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_TASK_MAX_RETRIES") {
+        if let Ok(parsed) = value.trim().parse::<usize>() {
+            policy.max_retries = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_TASK_RETRY_BASE_MS") {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.retry_base_delay = Duration::from_millis(parsed);
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_TASK_RETRY_MAX_MS") {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.retry_max_delay = Duration::from_millis(parsed);
+        }
+    }
+
+    if policy.retry_max_delay < policy.retry_base_delay {
+        policy.retry_max_delay = policy.retry_base_delay;
+    }
+
+    policy
+}
+
+fn task_retry_delay(policy: TaskWorkerPolicy, attempt: usize) -> Duration {
+    let exponent = attempt.saturating_sub(1) as u32;
+    let factor = 2u128.saturating_pow(exponent);
+    let base_ms = policy.retry_base_delay.as_millis();
+    let max_ms = policy.retry_max_delay.as_millis();
+    let delay_ms = (base_ms.saturating_mul(factor)).min(max_ms) as u64;
+    Duration::from_millis(delay_ms)
+}
+
+fn task_worker_sender() -> mpsc::Sender<QueuedTask> {
+    TASK_WORKER_SENDER
+        .get_or_init(|| {
+            let policy = task_worker_policy_from_env();
+            let (sender, receiver) = mpsc::channel(policy.queue_capacity);
+            start_task_worker_dispatcher(receiver, policy);
+            sender
+        })
+        .clone()
+}
+
+fn start_task_worker_dispatcher(
+    mut receiver: mpsc::Receiver<QueuedTask>,
+    policy: TaskWorkerPolicy,
+) {
+    tokio::spawn(async move {
+        let semaphore = Arc::new(Semaphore::new(policy.max_concurrency));
+
+        while let Some(task) = receiver.recv().await {
+            let permit = match semaphore.clone().acquire_owned().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    warn!("task worker semaphore closed; stopping dispatcher");
+                    break;
+                }
+            };
+            let policy_for_task = policy;
+            tokio::spawn(async move {
+                let _permit = permit;
+                run_task_in_background(task, policy_for_task).await;
+            });
+        }
+    });
+}
+
+fn submit_task_to_worker(
+    task_id: String,
+    intent: TaskIntent,
+    runtime_mode: RuntimeMode,
+) -> Result<(), String> {
+    match task_worker_sender().try_send(QueuedTask {
+        id: task_id,
+        intent,
+        runtime_mode,
+    }) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => Err(
+            "Task queue is at capacity. Retry later or increase NTK_TASK_QUEUE_CAPACITY."
+                .to_string(),
+        ),
+        Err(TrySendError::Closed(_)) => Err(
+            "Background worker queue is unavailable. Restart the session and retry.".to_string(),
+        ),
+    }
+}
+
+fn update_task_attempt(task_id: &str, attempts: usize) -> Option<TaskRecord> {
+    let updated = with_task_registry(|registry| {
+        let record = registry.get_mut(task_id)?;
+        record.attempts = attempts;
+        record.updated_at_unix_ms = current_unix_timestamp_ms();
+        Some(record.clone())
+    });
+    if let Some(record) = &updated {
+        append_task_audit_event(
+            &record.id,
+            record.runtime_mode,
+            record.status,
+            format!("Attempt set to {}/{}", record.attempts, record.max_attempts),
+        );
+    }
+    updated
+}
+
+fn is_task_cancelled(task_id: &str) -> bool {
+    with_task_registry(|registry| {
+        registry
+            .get(task_id)
+            .map(|record| record.status == TaskExecutionStatus::Cancelled)
+            .unwrap_or(false)
+    })
+}
+
+async fn run_task_in_background(task: QueuedTask, policy: TaskWorkerPolicy) {
+    let max_attempts = policy.max_retries.saturating_add(1);
+
+    for attempt in 1..=max_attempts {
+        if is_task_cancelled(&task.id) {
+            let _ = update_task_record_status(
+                &task.id,
+                TaskExecutionStatus::Cancelled,
+                "Task was cancelled before worker execution",
+            );
+            return;
+        }
+
+        let _ = update_task_attempt(&task.id, attempt);
+        let _ = update_task_record_status(
+            &task.id,
+            TaskExecutionStatus::Running,
+            format!(
+                "Background worker ({}) attempt {attempt}/{max_attempts} in progress",
+                task.runtime_mode
+            ),
+        );
+
+        let (status, detail) = execute_task_locally(&task.intent).await;
+        if is_task_cancelled(&task.id) {
+            let _ = update_task_record_status(
+                &task.id,
+                TaskExecutionStatus::Cancelled,
+                "Cancellation requested while task was running",
+            );
+            return;
+        }
+
+        if status == TaskExecutionStatus::Failed && attempt < max_attempts {
+            let delay = task_retry_delay(policy, attempt);
+            let _ = update_task_record_status(
+                &task.id,
+                TaskExecutionStatus::Running,
+                format!(
+                    "Attempt {attempt}/{max_attempts} failed; retrying in {}ms ({detail})",
+                    delay.as_millis()
+                ),
+            );
+            tokio::time::sleep(delay).await;
+            continue;
+        }
+
+        let _ = update_task_record_status(
+            &task.id,
+            status,
+            format!("{detail} (attempt {attempt}/{max_attempts})"),
+        );
+        return;
+    }
+}
+
+fn update_task_record_status(
+    task_id: &str,
+    status: TaskExecutionStatus,
+    message: impl Into<String>,
+) -> Option<TaskRecord> {
+    let message = message.into();
+    let updated = with_task_registry(|registry| {
+        let record = registry.get_mut(task_id)?;
+        if !record.status.can_transition_to(status) {
+            warn!(
+                task_id,
+                from = task_status_label(record.status),
+                to = task_status_label(status),
+                "invalid task status transition ignored"
+            );
+            return Some(record.clone());
+        }
+        record.status = status;
+        record.status_message = message;
+        record.updated_at_unix_ms = current_unix_timestamp_ms();
+        Some(record.clone())
+    });
+
+    if let Some(record) = &updated {
+        append_task_audit_event(
+            &record.id,
+            record.runtime_mode,
+            record.status,
+            record.status_message.clone(),
+        );
+    }
+    updated
+}
+
+fn set_task_execution_target(task_id: &str, execution_target: String) -> Option<TaskRecord> {
+    let updated = with_task_registry(|registry| {
+        let record = registry.get_mut(task_id)?;
+        record.execution_target = execution_target;
+        record.updated_at_unix_ms = current_unix_timestamp_ms();
+        Some(record.clone())
+    });
+    if let Some(record) = &updated {
+        append_task_audit_event(
+            &record.id,
+            record.runtime_mode,
+            record.status,
+            format!("Execution target set to {}", record.execution_target),
+        );
+    }
+    updated
+}
+
+fn task_status_to_exit_status(status: TaskExecutionStatus) -> ExitStatus {
+    match status {
+        TaskExecutionStatus::Queued
+        | TaskExecutionStatus::Running
+        | TaskExecutionStatus::Succeeded => ExitStatus::Success,
+        TaskExecutionStatus::Cancelled => ExitStatus::Interrupted,
+        TaskExecutionStatus::Failed => ExitStatus::Error,
+    }
+}
+
+async fn execute_task_locally(intent: &TaskIntent) -> (TaskExecutionStatus, String) {
+    let payload = intent.payload.trim().to_string();
+    match intent.kind {
+        TaskIntentKind::AiAsk => {
+            let owned_parts = ["/ai".to_string(), "ask".to_string(), payload];
+            let refs = owned_parts.iter().map(String::as_str).collect::<Vec<_>>();
+            let status = process_ai_command(&refs, Some("ask")).await;
+            let outcome = match status {
+                ExitStatus::Success => TaskExecutionStatus::Succeeded,
+                ExitStatus::Interrupted => TaskExecutionStatus::Cancelled,
+                ExitStatus::Error => TaskExecutionStatus::Failed,
+            };
+            (
+                outcome,
+                format!("Delegated to `/ai ask` (status: {status:?})"),
+            )
+        }
+        TaskIntentKind::AiPlan => {
+            let owned_parts = ["/ai".to_string(), "plan".to_string(), payload];
+            let refs = owned_parts.iter().map(String::as_str).collect::<Vec<_>>();
+            let status = process_ai_command(&refs, Some("plan")).await;
+            let outcome = match status {
+                ExitStatus::Success => TaskExecutionStatus::Succeeded,
+                ExitStatus::Interrupted => TaskExecutionStatus::Cancelled,
+                ExitStatus::Error => TaskExecutionStatus::Failed,
+            };
+            (
+                outcome,
+                format!("Delegated to `/ai plan` (status: {status:?})"),
+            )
+        }
+        TaskIntentKind::AiExplain => {
+            let owned_parts = ["/ai".to_string(), "explain".to_string(), payload];
+            let refs = owned_parts.iter().map(String::as_str).collect::<Vec<_>>();
+            let status = process_ai_command(&refs, Some("explain")).await;
+            let outcome = match status {
+                ExitStatus::Success => TaskExecutionStatus::Succeeded,
+                ExitStatus::Interrupted => TaskExecutionStatus::Cancelled,
+                ExitStatus::Error => TaskExecutionStatus::Failed,
+            };
+            (
+                outcome,
+                format!("Delegated to `/ai explain` (status: {status:?})"),
+            )
+        }
+        TaskIntentKind::AiApplyDryRun => {
+            let owned_parts = [
+                "/ai".to_string(),
+                "apply".to_string(),
+                "--dry-run".to_string(),
+                payload,
+            ];
+            let refs = owned_parts.iter().map(String::as_str).collect::<Vec<_>>();
+            let status = process_ai_command(&refs, Some("apply")).await;
+            let outcome = match status {
+                ExitStatus::Success => TaskExecutionStatus::Succeeded,
+                ExitStatus::Interrupted => TaskExecutionStatus::Cancelled,
+                ExitStatus::Error => TaskExecutionStatus::Failed,
+            };
+            (
+                outcome,
+                format!("Delegated to `/ai apply --dry-run` (status: {status:?})"),
+            )
+        }
+        TaskIntentKind::CommandExecution => {
+            if payload.trim_start().starts_with("/task") || payload.starts_with("task ") {
+                return (
+                    TaskExecutionStatus::Failed,
+                    "Nested `/task` command execution is not allowed".to_string(),
+                );
+            }
+
+            (
+                TaskExecutionStatus::Failed,
+                "Local fallback for `command` intent is not enabled yet; use ai-* intents or run the command directly."
+                    .to_string(),
+            )
+        }
+    }
+}
+
+fn print_task_usage() {
+    use nettoolskit_ui::Color;
+    println!("{}", "🗂️ Task Manager Commands".color(Color::CYAN).bold());
+    println!(
+        "  {}",
+        "/task submit <intent> <payload>".color(Color::GREEN)
+    );
+    println!("  {}", "/task list".color(Color::GREEN));
+    println!("  {}", "/task watch <task-id>".color(Color::GREEN));
+    println!("  {}", "/task cancel <task-id>".color(Color::GREEN));
+    println!();
+    println!("{}", "Supported intents:".color(Color::WHITE).bold());
+    println!("  {}", "command".color(Color::CYAN));
+    println!("  {}", "ai-ask".color(Color::CYAN));
+    println!("  {}", "ai-plan".color(Color::CYAN));
+    println!("  {}", "ai-explain".color(Color::CYAN));
+    println!("  {}", "ai-apply-dry-run".color(Color::CYAN));
+}
+
+fn print_task_list(records: &[TaskRecord]) {
+    use nettoolskit_ui::Color;
+    if records.is_empty() {
+        println!("{}", "No task records found.".color(Color::YELLOW));
+        return;
+    }
+
+    println!("{}", "🗂️ Local Task Records".color(Color::CYAN).bold());
+    for record in records {
+        println!(
+            "  {} | {} | {} | mode:{} | target:{} | attempts:{}/{}",
+            record.id.color(Color::WHITE),
+            task_status_label(record.status).color(Color::GREEN),
+            task_intent_kind_label(record.intent.kind).color(Color::CYAN),
+            record.runtime_mode.to_string().color(Color::WHITE),
+            record.execution_target.color(Color::YELLOW),
+            record.attempts,
+            record.max_attempts,
+        );
+    }
+}
+
+async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    if parts.len() < 4 {
+        println!(
+            "{}",
+            "Usage: /task submit <intent> <payload>".color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    }
+
+    let Some(intent_kind) = parse_task_intent_kind(parts[2]) else {
+        println!(
+            "{} {}",
+            "✗ Unsupported task intent:".color(Color::RED).bold(),
+            parts[2].color(Color::YELLOW)
+        );
+        println!(
+            "{}",
+            "Supported intents: command, ai-ask, ai-plan, ai-explain, ai-apply-dry-run"
+                .color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    };
+
+    let payload = parts[3..].join(" ");
+    if payload.trim().is_empty() {
+        println!(
+            "{}",
+            "✗ Task payload cannot be empty.".color(Color::RED).bold()
+        );
+        return ExitStatus::Error;
+    }
+
+    let runtime_mode = AppConfig::load().general.runtime_mode;
+    let worker_policy = task_worker_policy_from_env();
+    let max_attempts = match runtime_mode {
+        RuntimeMode::Service => worker_policy.max_retries.saturating_add(1),
+        RuntimeMode::Cli => 1,
+    };
+    let task_id = next_task_id();
+    let now = current_unix_timestamp_ms();
+    let title = format!("{} task", task_intent_kind_label(intent_kind));
+    let intent = TaskIntent::new(intent_kind, title, payload);
+    let record = TaskRecord::new(
+        task_id.clone(),
+        intent.clone(),
+        runtime_mode,
+        max_attempts,
+        now,
+    );
+
+    with_task_registry(|registry| {
+        registry.insert(task_id.clone(), record);
+    });
+    append_task_audit_event(
+        &task_id,
+        runtime_mode,
+        TaskExecutionStatus::Queued,
+        format!(
+            "Task submitted (intent: {}, mode: {})",
+            task_intent_kind_label(intent_kind),
+            runtime_mode
+        ),
+    );
+
+    let (execution_target, fallback_reason) = resolve_task_execution_target(runtime_mode);
+    let _ = set_task_execution_target(&task_id, execution_target.clone());
+    if let Some(reason) = fallback_reason {
+        println!(
+            "{} {}",
+            "⚠".color(Color::YELLOW),
+            reason.color(Color::YELLOW)
+        );
+        let _ = nettoolskit_ui::append_footer_log(&format!("task: {reason}"));
+    }
+
+    let intent_fallback = intent.clone();
+    let final_record = match runtime_mode {
+        RuntimeMode::Service => {
+            let submit_result = submit_task_to_worker(task_id.clone(), intent, runtime_mode);
+            match submit_result {
+                Ok(()) => with_task_registry(|registry| registry.get(&task_id).cloned())
+                    .unwrap_or_else(|| {
+                        let mut missing = TaskRecord::new(
+                            task_id.clone(),
+                            intent_fallback.clone(),
+                            runtime_mode,
+                            max_attempts,
+                            now,
+                        );
+                        missing.execution_target = execution_target.clone();
+                        missing.status_message =
+                            "Task queued for background worker execution".to_string();
+                        missing
+                    }),
+                Err(error) => {
+                    let failed =
+                        update_task_record_status(&task_id, TaskExecutionStatus::Failed, &error)
+                            .unwrap_or_else(|| {
+                                let mut missing = TaskRecord::new(
+                                    task_id.clone(),
+                                    intent_fallback.clone(),
+                                    runtime_mode,
+                                    max_attempts,
+                                    now,
+                                );
+                                missing.status = TaskExecutionStatus::Failed;
+                                missing.execution_target = execution_target.clone();
+                                missing.status_message = error.clone();
+                                missing
+                            });
+                    println!(
+                        "{} {}",
+                        "✗".color(Color::RED).bold(),
+                        error.color(Color::RED)
+                    );
+                    return task_status_to_exit_status(failed.status);
+                }
+            }
+        }
+        RuntimeMode::Cli => {
+            let _ = update_task_record_status(
+                &task_id,
+                TaskExecutionStatus::Running,
+                format!(
+                    "Executing intent {} locally",
+                    task_intent_kind_label(intent_kind)
+                ),
+            );
+            let _ = update_task_attempt(&task_id, 1);
+            let (final_status, status_message) = execute_task_locally(&intent).await;
+            update_task_record_status(&task_id, final_status, status_message).unwrap_or_else(|| {
+                let mut missing = TaskRecord::new(
+                    task_id.clone(),
+                    intent_fallback,
+                    runtime_mode,
+                    max_attempts,
+                    now,
+                );
+                missing.status = final_status;
+                missing.attempts = 1;
+                missing.execution_target = execution_target;
+                missing
+            })
+        }
+    };
+
+    println!("{}", "✅ Task submitted".color(Color::GREEN).bold());
+    println!("  id: {}", final_record.id.color(Color::CYAN));
+    println!(
+        "  intent: {}",
+        task_intent_kind_label(final_record.intent.kind).color(Color::WHITE)
+    );
+    println!(
+        "  status: {}",
+        task_status_label(final_record.status).color(Color::WHITE)
+    );
+    println!(
+        "  target: {}",
+        final_record.execution_target.color(Color::WHITE)
+    );
+    println!(
+        "  attempts: {}/{}",
+        final_record.attempts, final_record.max_attempts
+    );
+    println!(
+        "  detail: {}",
+        final_record.status_message.color(Color::WHITE)
+    );
+
+    task_status_to_exit_status(final_record.status)
+}
+
+fn handle_task_list() -> ExitStatus {
+    let mut records: Vec<TaskRecord> =
+        with_task_registry(|registry| registry.values().cloned().collect());
+    records.sort_by(|left, right| right.updated_at_unix_ms.cmp(&left.updated_at_unix_ms));
+    print_task_list(&records);
+    ExitStatus::Success
+}
+
+fn handle_task_watch(parts: &[&str]) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    if parts.len() < 3 {
+        println!("{}", "Usage: /task watch <task-id>".color(Color::YELLOW));
+        return ExitStatus::Error;
+    }
+
+    let task_id = parts[2].trim();
+    let record = with_task_registry(|registry| registry.get(task_id).cloned());
+    let Some(record) = record else {
+        println!(
+            "{} {}",
+            "✗ Task not found:".color(Color::RED).bold(),
+            task_id.color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    };
+
+    println!("{}", "🔎 Task Details".color(Color::CYAN).bold());
+    println!("  id: {}", record.id.color(Color::CYAN));
+    println!(
+        "  intent: {}",
+        task_intent_kind_label(record.intent.kind).color(Color::WHITE)
+    );
+    println!("  payload: {}", record.intent.payload.color(Color::WHITE));
+    println!(
+        "  status: {}",
+        task_status_label(record.status).color(Color::WHITE)
+    );
+    println!(
+        "  mode: {}",
+        record.runtime_mode.to_string().color(Color::WHITE)
+    );
+    println!("  target: {}", record.execution_target.color(Color::WHITE));
+    println!("  attempts: {}/{}", record.attempts, record.max_attempts);
+    println!("  detail: {}", record.status_message.color(Color::WHITE));
+    println!("  created_at_ms: {}", record.created_at_unix_ms);
+    println!("  updated_at_ms: {}", record.updated_at_unix_ms);
+    let audits = list_task_audit_events(task_id);
+    if !audits.is_empty() {
+        println!("  audit_events: {}", audits.len());
+        for event in audits.iter().rev().take(5).rev() {
+            println!(
+                "    - [{}] {}",
+                task_status_label(event.status),
+                event.message
+            );
+        }
+    }
+
+    ExitStatus::Success
+}
+
+fn handle_task_cancel(parts: &[&str]) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    if parts.len() < 3 {
+        println!("{}", "Usage: /task cancel <task-id>".color(Color::YELLOW));
+        return ExitStatus::Error;
+    }
+
+    let task_id = parts[2].trim().to_string();
+    let current = with_task_registry(|registry| registry.get(&task_id).cloned());
+    let cancelled = match current {
+        Some(record) => {
+            if !matches!(
+                record.status,
+                TaskExecutionStatus::Queued | TaskExecutionStatus::Running
+            ) {
+                Err(format!(
+                    "Task is already terminal (status: {})",
+                    task_status_label(record.status)
+                ))
+            } else {
+                update_task_record_status(
+                    &task_id,
+                    TaskExecutionStatus::Cancelled,
+                    "Cancelled by user request",
+                )
+                .ok_or_else(|| format!("Task not found: {task_id}"))
+            }
+        }
+        None => Err(format!("Task not found: {task_id}")),
+    };
+
+    match cancelled {
+        Ok(record) => {
+            println!(
+                "{} {}",
+                "✅ Task cancelled:".color(Color::GREEN).bold(),
+                record.id.color(Color::CYAN)
+            );
+            ExitStatus::Success
+        }
+        Err(error) => {
+            println!(
+                "{} {}",
+                "✗".color(Color::RED).bold(),
+                error.color(Color::RED)
+            );
+            ExitStatus::Error
+        }
+    }
+}
+
+async fn process_task_command(parts: &[&str]) -> ExitStatus {
+    let Some(subcommand) = parts.get(1).copied() else {
+        print_task_usage();
+        return ExitStatus::Success;
+    };
+
+    match subcommand.trim().to_ascii_lowercase().as_str() {
+        "help" => {
+            print_task_usage();
+            ExitStatus::Success
+        }
+        "submit" => handle_task_submit(parts).await,
+        "list" => handle_task_list(),
+        "watch" => handle_task_watch(parts),
+        "cancel" => handle_task_cancel(parts),
+        _ => {
+            use nettoolskit_ui::Color;
+            println!(
+                "{} {}",
+                "✗ Unknown /task subcommand:".color(Color::RED).bold(),
+                subcommand.color(Color::YELLOW)
+            );
+            print_task_usage();
+            ExitStatus::Error
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AsyncManifestAlias {
     New,
@@ -1958,6 +2858,10 @@ pub async fn process_command_with_interrupt(
 - `/ai resume <session-id>` - Set active local AI session id for conversation continuity
 - `/ai apply --dry-run <instruction>` - Generate non-destructive patch guidance
 - `/ai apply --approve-write <instruction>` - Explicitly approve mutating apply intent
+- `/task submit <intent> <payload>` - Submit a task for managed execution (local fallback)
+- `/task list` - List local task records
+- `/task watch <task-id>` - Inspect task status/details
+- `/task cancel <task-id>` - Cancel queued/running task record
 - `/clear` - Clear and redraw terminal layout
 - `/quit` - Exit the CLI
 "
@@ -2232,6 +3136,7 @@ pub async fn process_command_with_interrupt(
                 }
             }
             Some(MainAction::Ai) => process_ai_command(&parts, subcommand).await,
+            Some(MainAction::Task) => process_task_command(&parts).await,
             Some(MainAction::Config) => process_config_command(&parts),
             Some(MainAction::Clear) => match nettoolskit_ui::reset_layout() {
                 Ok(()) => ExitStatus::Success,
@@ -2499,6 +3404,7 @@ fn print_effective_config(config_path: &Path) {
     println!("  verbose = {}", effective.general.verbose);
     println!("  log_level = {}", effective.general.log_level);
     println!("  footer_output = {}", effective.general.footer_output);
+    println!("  runtime_mode = {}", effective.general.runtime_mode);
     println!("  attention_bell = {}", effective.general.attention_bell);
     println!(
         "  attention_desktop_notification = {}",
@@ -2543,6 +3449,7 @@ fn print_supported_config_keys() {
     println!("  {}", "verbose".color(Color::CYAN));
     println!("  {}", "log_level".color(Color::CYAN));
     println!("  {}", "footer_output".color(Color::CYAN));
+    println!("  {}", "runtime_mode".color(Color::CYAN));
     println!("  {}", "attention_bell".color(Color::CYAN));
     println!("  {}", "attention_desktop_notification".color(Color::CYAN));
     println!("  {}", "attention_unfocused_only".color(Color::CYAN));
@@ -2630,6 +3537,11 @@ fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<()
                 "footer_output must be one of: true, false, 1, 0, yes, no, on, off".to_string()
             })?;
             config.general.footer_output = parsed;
+            Ok(())
+        }
+        "runtime_mode" | "runtime-mode" | "general.runtime_mode" | "general.runtime-mode" => {
+            let parsed = parse_runtime_mode(value)?;
+            config.general.runtime_mode = parsed;
             Ok(())
         }
         "attention_bell"
@@ -2721,6 +3633,10 @@ fn unset_config_value(config: &mut AppConfig, key: &str) -> Result<(), String> {
             config.general.footer_output = true;
             Ok(())
         }
+        "runtime_mode" | "runtime-mode" | "general.runtime_mode" | "general.runtime-mode" => {
+            config.general.runtime_mode = AppConfig::default().general.runtime_mode;
+            Ok(())
+        }
         "attention_bell"
         | "attention-bell"
         | "general.attention_bell"
@@ -2798,6 +3714,13 @@ fn parse_log_level(value: &str) -> Result<String, String> {
     }
 }
 
+fn parse_runtime_mode(value: &str) -> Result<RuntimeMode, String> {
+    value
+        .trim()
+        .parse::<RuntimeMode>()
+        .map_err(|_| "runtime_mode must be one of: cli, service".to_string())
+}
+
 fn parse_color_mode(value: &str) -> Result<ColorMode, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(ColorMode::Auto),
@@ -2844,6 +3767,14 @@ fn infer_command_from_text(text: &str) -> Option<String> {
         "manifest" | "manifests" => Some(format!("/{}", trimmed)),
         "translate" => Some(format!("/{}", trimmed)),
         "ai" => Some(format!("/{}", trimmed)),
+        "task" => Some(format!("/{}", trimmed)),
+        "tasks" | "tarefa" | "tarefas" => {
+            if tokens.len() > 1 {
+                Some(format!("/task {}", tokens[1..].join(" ")))
+            } else {
+                Some("/task".to_string())
+            }
+        }
         "assistant" | "copilot" => {
             if tokens.len() > 1 {
                 Some(format!("/ai {}", tokens[1..].join(" ")))
@@ -2983,6 +3914,15 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
+    use std::sync::OnceLock;
+    use std::time::Duration;
+    use tokio::sync::Mutex;
+
+    static ENV_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    async fn env_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        ENV_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
+    }
 
     #[test]
     fn sanitize_metric_component_normalizes_symbols() {
@@ -3328,6 +4268,9 @@ mod tests {
         assert!(set_config_value(&mut config, "footer_output", "false").is_ok());
         assert!(!config.general.footer_output);
 
+        assert!(set_config_value(&mut config, "runtime_mode", "service").is_ok());
+        assert_eq!(config.general.runtime_mode, RuntimeMode::Service);
+
         assert!(set_config_value(&mut config, "attention_bell", "true").is_ok());
         assert!(config.general.attention_bell);
 
@@ -3363,6 +4306,7 @@ mod tests {
         config.general.verbose = true;
         config.general.log_level = "debug".to_string();
         config.general.footer_output = false;
+        config.general.runtime_mode = RuntimeMode::Service;
         config.general.attention_bell = true;
         config.general.attention_desktop_notification = true;
         config.general.attention_unfocused_only = true;
@@ -3374,6 +4318,7 @@ mod tests {
         assert!(unset_config_value(&mut config, "verbose").is_ok());
         assert!(unset_config_value(&mut config, "log_level").is_ok());
         assert!(unset_config_value(&mut config, "footer_output").is_ok());
+        assert!(unset_config_value(&mut config, "runtime_mode").is_ok());
         assert!(unset_config_value(&mut config, "attention_bell").is_ok());
         assert!(unset_config_value(&mut config, "attention_desktop_notification").is_ok());
         assert!(unset_config_value(&mut config, "attention_unfocused_only").is_ok());
@@ -3385,6 +4330,7 @@ mod tests {
         assert!(!config.general.verbose);
         assert_eq!(config.general.log_level, "info");
         assert!(config.general.footer_output);
+        assert_eq!(config.general.runtime_mode, RuntimeMode::Cli);
         assert!(!config.general.attention_bell);
         assert!(!config.general.attention_desktop_notification);
         assert!(!config.general.attention_unfocused_only);
@@ -3427,6 +4373,17 @@ mod tests {
     #[test]
     fn parse_log_level_rejects_unknown_values() {
         assert!(parse_log_level("verbose").is_err());
+    }
+
+    #[test]
+    fn parse_runtime_mode_accepts_known_values() {
+        assert_eq!(parse_runtime_mode("cli"), Ok(RuntimeMode::Cli));
+        assert_eq!(parse_runtime_mode("service"), Ok(RuntimeMode::Service));
+    }
+
+    #[test]
+    fn parse_runtime_mode_rejects_unknown_values() {
+        assert!(parse_runtime_mode("worker").is_err());
     }
 
     #[test]
@@ -3537,5 +4494,114 @@ mod tests {
         let parts = vec!["/ai", "resume", "session-dev"];
         let status = process_ai_command(&parts, Some("resume")).await;
         assert_eq!(status, ExitStatus::Success);
+    }
+
+    #[test]
+    fn parse_task_intent_kind_maps_supported_values() {
+        assert_eq!(
+            parse_task_intent_kind("command"),
+            Some(TaskIntentKind::CommandExecution)
+        );
+        assert_eq!(
+            parse_task_intent_kind("ai-plan"),
+            Some(TaskIntentKind::AiPlan)
+        );
+        assert_eq!(
+            parse_task_intent_kind("apply-dry-run"),
+            Some(TaskIntentKind::AiApplyDryRun)
+        );
+        assert_eq!(parse_task_intent_kind("unknown"), None);
+    }
+
+    #[test]
+    fn task_retry_delay_is_exponential_and_bounded() {
+        let policy = TaskWorkerPolicy {
+            queue_capacity: 16,
+            max_concurrency: 2,
+            max_retries: 3,
+            retry_base_delay: Duration::from_millis(40),
+            retry_max_delay: Duration::from_millis(90),
+        };
+
+        assert_eq!(task_retry_delay(policy, 1), Duration::from_millis(40));
+        assert_eq!(task_retry_delay(policy, 2), Duration::from_millis(80));
+        assert_eq!(task_retry_delay(policy, 3), Duration::from_millis(90));
+    }
+
+    #[test]
+    fn resolve_task_execution_target_service_uses_background_worker_label() {
+        let (target, _note) = resolve_task_execution_target(RuntimeMode::Service);
+        assert_eq!(target, "background-worker-local");
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_ai_plan_succeeds() {
+        let parts = vec!["/task", "submit", "ai-plan", "prepare", "deployment"];
+        let status = process_task_command(&parts).await;
+        assert_eq!(status, ExitStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_service_mode_queues_background_task() {
+        let _guard = env_test_guard().await;
+        std::env::set_var("NTK_RUNTIME_MODE", "service");
+        std::env::set_var("NTK_AI_PROVIDER", "mock");
+
+        let payload_marker = format!("service-queue-test-{}", current_unix_timestamp_ms());
+        let parts = vec!["/task", "submit", "ai-plan", payload_marker.as_str()];
+        let status = process_task_command(&parts).await;
+
+        std::env::remove_var("NTK_AI_PROVIDER");
+        std::env::remove_var("NTK_RUNTIME_MODE");
+
+        assert_eq!(status, ExitStatus::Success);
+
+        let record = with_task_registry(|registry| {
+            registry
+                .values()
+                .filter(|task| task.runtime_mode == RuntimeMode::Service)
+                .filter(|task| task.intent.payload.contains(payload_marker.as_str()))
+                .max_by_key(|task| task.updated_at_unix_ms)
+                .cloned()
+        })
+        .expect("service task should exist in registry");
+
+        assert_eq!(record.runtime_mode, RuntimeMode::Service);
+        assert_eq!(record.execution_target, "background-worker-local");
+        assert!(record.max_attempts >= 1);
+        assert!(matches!(
+            record.status,
+            TaskExecutionStatus::Queued
+                | TaskExecutionStatus::Running
+                | TaskExecutionStatus::Succeeded
+                | TaskExecutionStatus::Failed
+                | TaskExecutionStatus::Cancelled
+        ));
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_without_payload_returns_error() {
+        let parts = vec!["/task", "submit", "ai-plan"];
+        let status = process_task_command(&parts).await;
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_task_command_watch_without_id_returns_error() {
+        let parts = vec!["/task", "watch"];
+        let status = process_task_command(&parts).await;
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[test]
+    fn infer_command_from_text_routes_task_aliases() {
+        assert_eq!(
+            infer_command_from_text("task list").as_deref(),
+            Some("/task list")
+        );
+        assert_eq!(
+            infer_command_from_text("tarefas submit ai-plan objetivo").as_deref(),
+            Some("/task submit ai-plan objetivo")
+        );
     }
 }

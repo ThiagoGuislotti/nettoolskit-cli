@@ -9,6 +9,9 @@ use nettoolskit_otel::{
     init_tracing_with_config, next_correlation_id, shutdown_tracing, TracingConfig,
 };
 use nettoolskit_ui::{set_color_override, set_unicode_override, ColorLevel};
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tracing::{info, info_span};
 
 /// Global arguments available across all commands
@@ -57,6 +60,37 @@ pub enum Commands {
         #[clap(value_enum)]
         shell: Shell,
     },
+
+    /// Run background service mode with HTTP health and task submission endpoints
+    Service {
+        /// Bind host for the service listener
+        #[clap(long, default_value = "0.0.0.0")]
+        host: String,
+
+        /// Bind port for the service listener
+        #[clap(long, default_value_t = 8080)]
+        port: u16,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct ServiceTaskSubmitRequest {
+    intent: String,
+    payload: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceTaskSubmitResponse {
+    accepted: bool,
+    exit_status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceHealthResponse {
+    status: String,
+    runtime_mode: String,
+    uptime_seconds: u64,
+    version: String,
 }
 
 /// Non-interactive manifest subcommands.
@@ -152,6 +186,172 @@ impl Commands {
             Commands::Completions { shell } => {
                 clap_complete::generate(shell, &mut Cli::command(), "ntk", &mut std::io::stdout());
                 ExitStatus::Success
+            }
+            Commands::Service { host, port } => run_service_mode(host, port).await,
+        }
+    }
+}
+
+fn parse_http_request_line(request: &str) -> Option<(&str, &str)> {
+    let line = request.lines().next()?.trim();
+    let mut parts = line.split_whitespace();
+    let method = parts.next()?;
+    let path = parts.next()?;
+    Some((method, path))
+}
+
+fn request_body(request: &str) -> &str {
+    request
+        .split_once("\r\n\r\n")
+        .map_or("", |(_, body)| body.trim())
+}
+
+fn build_http_response(status: &str, content_type: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn exit_status_label(status: ExitStatus) -> &'static str {
+    match status {
+        ExitStatus::Success => "success",
+        ExitStatus::Error => "error",
+        ExitStatus::Interrupted => "interrupted",
+    }
+}
+
+async fn write_json_response<T: Serialize>(
+    stream: &mut TcpStream,
+    status: &str,
+    payload: &T,
+) -> std::io::Result<()> {
+    let body = serde_json::to_string(payload).unwrap_or_else(|_| {
+        "{\"accepted\":false,\"exit_status\":\"error\",\"message\":\"serialization\"}".to_string()
+    });
+    let response = build_http_response(status, "application/json", &body);
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
+async fn write_plain_response(
+    stream: &mut TcpStream,
+    status: &str,
+    body: &str,
+) -> std::io::Result<()> {
+    let response = build_http_response(status, "text/plain; charset=utf-8", body);
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
+async fn handle_service_connection(
+    mut stream: TcpStream,
+    started_at: std::time::Instant,
+) -> std::io::Result<()> {
+    let mut buffer = vec![0_u8; 32 * 1024];
+    let bytes_read = stream.read(&mut buffer).await?;
+    if bytes_read == 0 {
+        return Ok(());
+    }
+
+    let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+    let Some((method, path)) = parse_http_request_line(&request) else {
+        write_plain_response(&mut stream, "400 Bad Request", "invalid request line").await?;
+        return Ok(());
+    };
+
+    match (method, path) {
+        ("GET", "/") => {
+            write_plain_response(
+                &mut stream,
+                "200 OK",
+                "NetToolsKit service mode is running.\nUse GET /health.",
+            )
+            .await?;
+        }
+        ("GET", "/health") | ("GET", "/ready") => {
+            let payload = ServiceHealthResponse {
+                status: "ok".to_string(),
+                runtime_mode: AppConfig::load().general.runtime_mode.to_string(),
+                uptime_seconds: started_at.elapsed().as_secs(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            };
+            write_json_response(&mut stream, "200 OK", &payload).await?;
+        }
+        ("POST", "/task/submit") => {
+            let body = request_body(&request);
+            let parsed: Result<ServiceTaskSubmitRequest, _> = serde_json::from_str(body);
+            let Ok(payload) = parsed else {
+                write_plain_response(
+                    &mut stream,
+                    "400 Bad Request",
+                    "invalid JSON payload for /task/submit",
+                )
+                .await?;
+                return Ok(());
+            };
+
+            if payload.intent.trim().is_empty() || payload.payload.trim().is_empty() {
+                write_plain_response(
+                    &mut stream,
+                    "400 Bad Request",
+                    "intent and payload are required",
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let command = format!(
+                "/task submit {} {}",
+                payload.intent.trim(),
+                payload.payload.trim()
+            );
+            let status = nettoolskit_orchestrator::process_command(&command).await;
+            let response_payload = ServiceTaskSubmitResponse {
+                accepted: status != ExitStatus::Error,
+                exit_status: exit_status_label(status).to_string(),
+            };
+            let status_line = if response_payload.accepted {
+                "202 Accepted"
+            } else {
+                "400 Bad Request"
+            };
+            write_json_response(&mut stream, status_line, &response_payload).await?;
+        }
+        _ => {
+            write_plain_response(&mut stream, "404 Not Found", "not found").await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_service_mode(host: String, port: u16) -> ExitStatus {
+    let bind_addr = format!("{host}:{port}");
+    let listener = match TcpListener::bind(&bind_addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Failed to bind service listener on {bind_addr}: {error}");
+            return ExitStatus::Error;
+        }
+    };
+
+    println!("NetToolsKit service mode listening on http://{bind_addr}");
+    println!("Health endpoint: GET /health");
+    println!("Task submit endpoint: POST /task/submit");
+
+    let started_at = std::time::Instant::now();
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                tokio::spawn(async move {
+                    if let Err(error) = handle_service_connection(stream, started_at).await {
+                        tracing::warn!(%error, "service connection handling failed");
+                    }
+                });
+            }
+            Err(error) => {
+                tracing::warn!(%error, "service listener accept failed");
             }
         }
     }
@@ -273,4 +473,124 @@ async fn main() {
 
     // Exit with appropriate code
     std::process::exit(exit_status.into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn parse_http_request_line_extracts_method_and_path() {
+        let raw = "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let parsed = parse_http_request_line(raw);
+        assert_eq!(parsed, Some(("GET", "/health")));
+    }
+
+    #[test]
+    fn request_body_extracts_payload_segment() {
+        let raw = "POST /task/submit HTTP/1.1\r\nHost: localhost\r\n\r\n{\"intent\":\"ai-plan\"}";
+        assert_eq!(request_body(raw), "{\"intent\":\"ai-plan\"}");
+    }
+
+    #[test]
+    fn build_http_response_contains_status_and_length() {
+        let response = build_http_response("200 OK", "text/plain", "ok");
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Length: 2"));
+        assert!(response.ends_with("\r\n\r\nok"));
+    }
+
+    async fn execute_service_request(request: &str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should provide local address");
+
+        let request_data = request.to_string();
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(address)
+                .await
+                .expect("client should connect to test listener");
+            stream
+                .write_all(request_data.as_bytes())
+                .await
+                .expect("client should write request");
+            stream
+                .shutdown()
+                .await
+                .expect("client should shutdown write");
+
+            let mut response = Vec::new();
+            stream
+                .read_to_end(&mut response)
+                .await
+                .expect("client should read response");
+            String::from_utf8(response).expect("response should be valid UTF-8")
+        });
+
+        let (server_stream, _) = listener
+            .accept()
+            .await
+            .expect("server should accept client");
+        handle_service_connection(server_stream, std::time::Instant::now())
+            .await
+            .expect("service handler should process request");
+
+        client
+            .await
+            .expect("client task should complete without panic")
+    }
+
+    #[tokio::test]
+    async fn service_mode_health_endpoint_returns_ok_json() {
+        let response =
+            execute_service_request("GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "health endpoint should return 200"
+        );
+        assert!(
+            response.contains("\"status\":\"ok\""),
+            "health response should expose status=ok"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_task_submit_rejects_invalid_json() {
+        let response = execute_service_request(
+            "POST /task/submit HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n{invalid",
+        )
+        .await;
+        assert!(
+            response.starts_with("HTTP/1.1 400 Bad Request"),
+            "invalid payload should be rejected"
+        );
+        assert!(
+            response.contains("invalid JSON payload"),
+            "response should explain invalid JSON reason"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_task_submit_accepts_valid_payload() {
+        let request = concat!(
+            "POST /task/submit HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"intent\":\"ai-plan\",\"payload\":\"validate dual runtime gate\"}"
+        );
+        let response = execute_service_request(request).await;
+        assert!(
+            response.starts_with("HTTP/1.1 202 Accepted"),
+            "valid submit should be accepted"
+        );
+        assert!(
+            response.contains("\"accepted\":true"),
+            "accepted response should be true"
+        );
+    }
 }

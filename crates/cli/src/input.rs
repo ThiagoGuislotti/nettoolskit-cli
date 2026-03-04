@@ -62,6 +62,11 @@ const COMPLETION_COMMANDS: &[&str] = &[
     "/ai resume",
     "/ai apply --dry-run",
     "/ai apply --approve-write",
+    "/task",
+    "/task submit",
+    "/task list",
+    "/task watch",
+    "/task cancel",
     "/history",
     "/config",
     "/clear",
@@ -1469,6 +1474,12 @@ mod tests {
         assert!(ai_candidates.contains(&"/ai plan"));
         assert!(ai_candidates.contains(&"/ai resume"));
         assert!(ai_candidates.contains(&"/ai apply --approve-write"));
+
+        let task_candidates = completion_candidates("/task");
+        assert!(task_candidates.contains(&"/task submit"));
+        assert!(task_candidates.contains(&"/task list"));
+        assert!(task_candidates.contains(&"/task watch"));
+        assert!(task_candidates.contains(&"/task cancel"));
     }
 
     #[test]
@@ -1487,6 +1498,9 @@ mod tests {
 
         let hint = predict_command_hint("/ai pl", true);
         assert_eq!(hint.as_deref(), Some("an"));
+
+        let hint = predict_command_hint("/task su", true);
+        assert_eq!(hint.as_deref(), Some("bmit"));
     }
 
     #[test]

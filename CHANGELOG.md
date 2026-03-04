@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added language-aware fenced code block highlighting in Markdown renderer (Rust, C#, JavaScript, TypeScript, JSON, TOML, Bash, PowerShell).
 - Added dedicated AI E2E integration tests in orchestrator for `/ai plan`, `/ai apply --dry-run`, safety blocking of mutating apply without approval, and free-text alias routing to AI flows.
 - Added explicit CI `AI Gate` job to enforce AI-specific E2E/safety/resilience test slices.
+- Added shared runtime contracts in `nettoolskit-core` for dual-mode execution planning (`RuntimeMode`, `TaskIntentKind`, `TaskIntent`, `TaskExecutionStatus`, `TaskAuditEvent`).
+- Added embedded background worker runtime in orchestrator for service-mode task execution with bounded queue, concurrency limits, retry backoff, cancellation, and task audit trail.
+- Added `ntk service` subcommand with HTTP endpoints (`GET /health`, `GET /ready`, `POST /task/submit`) for local background-service operation.
+- Added local Docker service baseline assets: `deployments/Dockerfile.service`, `deployments/docker-compose.local.yml`, and `deployments/service.local.env.example`.
+- Added local service-mode operations runbook: `docs/operations/service-mode-local-runbook.md`.
+- Added CI `Dual Runtime Gate` job validating runtime-mode contracts, service orchestration tests, service endpoint tests, and Docker compose smoke checks.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
@@ -122,6 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive status bar rendering now goes through frame scheduling (coalesced/rate-limited), and legacy async input polling now uses scheduler-aware timeouts for smoother frame cadence.
 - Markdown rendering now applies token-level ANSI styling for fenced code blocks (keywords/strings/numbers/comments) while preserving non-color fallback output.
 - Enterprise roadmap Phase 8 (AI Assistant Integration) is now fully delivered, including operational controls and AI-specific release gating.
+- Configuration now supports deterministic runtime mode selection (`general.runtime_mode`) with environment override (`NTK_RUNTIME_MODE`), and `/config` supports showing/updating runtime mode.
+- `/task submit` now uses runtime-aware execution: immediate local execution in `cli` mode, and asynchronous queued background-worker dispatch in `service` mode.
+- `/task list` and `/task watch` now include retry-attempt metadata and recent audit event history for task lifecycle transparency.
+- Non-interactive CLI now supports a long-running service runtime profile via `ntk service --host <host> --port <port>`.
 
 ### Fixed
 - Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.
@@ -148,6 +158,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added release gate validation for compatibility lifecycle semantics in GitHub Actions.
 - Added coverage sweep validation with `cargo llvm-cov` and report exports (line coverage baseline around `68.2%`, functions around `72.5%`).
 - Added AI gate validation slices in CI: `e2e_ai_*`, `process_ai_command_*`, and retry/rate-limit resilience tests.
+- Added dual-runtime service-mode task tests validating queue submission behavior and worker retry-delay policy semantics.
+- Added service CLI tests covering `service --help` command surface and HTTP helper parsing/response routines.
+- Added service endpoint handler tests for `GET /health`, invalid JSON rejection on `POST /task/submit`, and accepted task submission responses.
 
 ## [1.0.0] - 2025-01-04
 

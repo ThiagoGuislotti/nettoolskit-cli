@@ -4,7 +4,15 @@
 
 use nettoolskit_orchestrator::{process_command, process_text, ExitStatus};
 use std::fs;
+use std::sync::OnceLock;
 use tempfile::tempdir;
+use tokio::sync::Mutex;
+
+static ENV_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+async fn env_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    ENV_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
+}
 
 // Command Processing Tests
 
@@ -150,6 +158,64 @@ async fn test_process_ai_apply_with_explicit_write_approval_succeeds() {
         result,
         ExitStatus::Success,
         "AI apply with explicit write approval should pass approval gateway"
+    );
+}
+
+#[tokio::test]
+async fn test_process_task_submit_ai_plan_with_local_fallback_succeeds() {
+    let result = process_command("/task submit ai-plan implement dual runtime mode").await;
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Task submit for ai-plan should run with local fallback and succeed"
+    );
+}
+
+#[tokio::test]
+async fn test_process_task_submit_ai_plan_in_service_mode_queues_successfully() {
+    let _guard = env_test_guard().await;
+    std::env::set_var("NTK_RUNTIME_MODE", "service");
+    std::env::set_var("NTK_AI_PROVIDER", "mock");
+
+    let result = process_command("/task submit ai-plan queue service mode task").await;
+
+    std::env::remove_var("NTK_AI_PROVIDER");
+    std::env::remove_var("NTK_RUNTIME_MODE");
+
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Task submit in service mode should queue task and return success"
+    );
+}
+
+#[tokio::test]
+async fn test_process_task_submit_without_payload_fails() {
+    let result = process_command("/task submit ai-plan").await;
+    assert_eq!(
+        result,
+        ExitStatus::Error,
+        "Task submit without payload should fail validation"
+    );
+}
+
+#[tokio::test]
+async fn test_process_task_list_succeeds() {
+    let result = process_command("/task list").await;
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Task list should return success even when empty"
+    );
+}
+
+#[tokio::test]
+async fn test_process_task_watch_without_id_fails() {
+    let result = process_command("/task watch").await;
+    assert_eq!(
+        result,
+        ExitStatus::Error,
+        "Task watch must require explicit task id"
     );
 }
 

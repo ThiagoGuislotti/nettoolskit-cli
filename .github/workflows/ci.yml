@@ -89,6 +89,51 @@ jobs:
           cargo test -p nettoolskit-orchestrator --lib request_ai_stream_with_retry_
           cargo test -p nettoolskit-orchestrator --lib evaluate_ai_rate_limit_
 
+  # ─── Dual Runtime Validation Gate ─────────────────────────────
+  dual-runtime-gate:
+    name: Dual Runtime Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: dual-runtime-gate
+      - name: Runtime mode contract tests
+        run: cargo test -p nettoolskit-core runtime_mode_
+      - name: Task service orchestration tests
+        run: cargo test -p nettoolskit-orchestrator --test test_suite test_process_task_
+      - name: Service endpoint tests
+        run: cargo test -p nettoolskit-cli --bin ntk service_mode_
+      - name: Docker compose profile validation
+        run: docker compose -f deployments/docker-compose.local.yml config
+      - name: Docker service smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f deployments/docker-compose.local.yml up --build -d
+
+          for i in {1..30}; do
+            if curl -fsS "http://127.0.0.1:8080/health" | grep -q '"status":"ok"'; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS "http://127.0.0.1:8080/health" | tee /tmp/ntk-health.json
+          grep -q '"runtime_mode":"service"' /tmp/ntk-health.json
+
+          curl -fsS -X POST "http://127.0.0.1:8080/task/submit" \
+            -H "Content-Type: application/json" \
+            -d '{"intent":"ai-plan","payload":"ci dual runtime smoke"}' | tee /tmp/ntk-submit.json
+          grep -q '"accepted":true' /tmp/ntk-submit.json
+      - name: Docker logs on failure
+        if: failure()
+        run: docker compose -f deployments/docker-compose.local.yml logs --no-color
+      - name: Docker compose down
+        if: always()
+        run: docker compose -f deployments/docker-compose.local.yml down -v
+
   # ─── Parallel Stress (templating) ─────────────────────────────
   templating-parallel-stress:
     name: Templating Parallel Stress
