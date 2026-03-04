@@ -311,3 +311,69 @@ async fn test_translate_to_rust_convention_conversion() {
     assert!(content.contains("{{field_name}}"));
     assert!(content.contains("{{method_name}}"));
 }
+
+// ─── Clojure integration tests ────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_translate_to_clojure_creates_output_file() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let template_path = temp_dir.path().join("Entity.cs.hbs");
+
+    fs::write(
+        &template_path,
+        "namespace {{namespace}} {\n    public class {{class_name}} {}\n}",
+    )
+    .expect("Failed to write template");
+
+    let request = TranslateRequest {
+        from: "dotnet".to_string(),
+        to: "clojure".to_string(),
+        path: template_path.to_string_lossy().to_string(),
+    };
+
+    let result = handle_translate(request).await;
+    assert_eq!(result, ExitStatus::Success);
+
+    let output_path = temp_dir.path().join("Entity.clj");
+    assert!(
+        output_path.exists(),
+        "Clojure output file should be created"
+    );
+
+    let content = fs::read_to_string(&output_path).expect("Failed to read output");
+    assert!(content.contains("{{namespace}}"));
+    assert!(content.contains("{{class-name}}"));
+}
+
+// ─── TypeScript integration tests ─────────────────────────────────────────
+
+#[tokio::test]
+async fn test_translate_to_typescript_creates_output_file() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let template_path = temp_dir.path().join("Entity.cs.hbs");
+
+    fs::write(
+        &template_path,
+        "namespace {{namespace}} {\n    public class {{class_name}} {}\n}",
+    )
+    .expect("Failed to write template");
+
+    let request = TranslateRequest {
+        from: "dotnet".to_string(),
+        to: "typescript".to_string(),
+        path: template_path.to_string_lossy().to_string(),
+    };
+
+    let result = handle_translate(request).await;
+    assert_eq!(result, ExitStatus::Success);
+
+    let output_path = temp_dir.path().join("Entity.ts");
+    assert!(
+        output_path.exists(),
+        "TypeScript output file should be created"
+    );
+
+    let content = fs::read_to_string(&output_path).expect("Failed to read output");
+    assert!(content.contains("{{moduleName}}"));
+    assert!(content.contains("{{className}}"));
+}

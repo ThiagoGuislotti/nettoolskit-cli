@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Clear the terminal screen and move cursor to top-left position.
 ///
@@ -72,8 +72,15 @@ static ACTIVE_LAYOUT: Lazy<Mutex<Option<Arc<TerminalLayoutInner>>>> =
 static PENDING_LOGS: Lazy<Mutex<VecDeque<String>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static INTERACTIVE_MODE: AtomicBool = AtomicBool::new(false);
 static FOOTER_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(true);
+static FOCUS_DETECTION_ENABLED: AtomicBool = AtomicBool::new(false);
+static TERMINAL_FOCUSED: AtomicBool = AtomicBool::new(true);
 
 const PENDING_LOG_CAPACITY: usize = 256;
+
+/// Target frame rate for terminal frame coalescing.
+const FRAME_TARGET_FPS: u16 = 60;
+/// Default poll timeout used when no frame is pending.
+const FRAME_IDLE_POLL_MS: u64 = 50;
 
 /// Tracks a pending resize event timestamp for trailing-edge debounce.
 static PENDING_RESIZE: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
@@ -85,6 +92,102 @@ const RESIZE_DEBOUNCE_MS: u64 = 80;
 /// Prevents `append_log_line` (triggered via tracing/UiWriter) from rendering
 /// the footer at stale positions while the screen is being reconstructed.
 static RECONFIGURING: AtomicBool = AtomicBool::new(false);
+
+static FRAME_SCHEDULER: Lazy<Mutex<FrameScheduler>> = Lazy::new(|| {
+    Mutex::new(FrameScheduler::new(
+        FRAME_TARGET_FPS,
+        Duration::from_millis(FRAME_IDLE_POLL_MS),
+    ))
+});
+
+#[derive(Debug, Clone)]
+struct FrameScheduler {
+    frame_interval: Duration,
+    idle_poll_timeout: Duration,
+    last_frame_at: Option<Instant>,
+    pending_frame: bool,
+}
+
+impl FrameScheduler {
+    fn new(target_fps: u16, idle_poll_timeout: Duration) -> Self {
+        // Keep sane defaults even if target_fps is accidentally configured to zero.
+        let fps = target_fps.max(1) as u64;
+        let frame_interval = Duration::from_nanos(1_000_000_000_u64 / fps);
+        Self {
+            frame_interval,
+            idle_poll_timeout,
+            last_frame_at: None,
+            pending_frame: false,
+        }
+    }
+
+    fn request_frame(&mut self) {
+        self.pending_frame = true;
+    }
+
+    fn try_consume_frame(&mut self, now: Instant) -> bool {
+        if !self.pending_frame {
+            return false;
+        }
+
+        if let Some(last_frame_at) = self.last_frame_at {
+            if now.duration_since(last_frame_at) < self.frame_interval {
+                return false;
+            }
+        }
+
+        self.last_frame_at = Some(now);
+        self.pending_frame = false;
+        true
+    }
+
+    fn poll_timeout(&self, now: Instant) -> Duration {
+        if !self.pending_frame {
+            return self.idle_poll_timeout;
+        }
+
+        let Some(last_frame_at) = self.last_frame_at else {
+            return Duration::from_millis(1);
+        };
+
+        let elapsed = now.duration_since(last_frame_at);
+        if elapsed >= self.frame_interval {
+            Duration::from_millis(1)
+        } else {
+            self.frame_interval - elapsed
+        }
+    }
+}
+
+/// Request a terminal frame render in the shared scheduler.
+///
+/// Multiple requests before consumption are coalesced into a single frame.
+pub fn request_terminal_frame() {
+    let mut scheduler = FRAME_SCHEDULER.lock().unwrap_or_else(|e| e.into_inner());
+    scheduler.request_frame();
+}
+
+/// Try to consume a scheduled terminal frame.
+///
+/// Returns `true` when a frame should be rendered now, or `false` when
+/// there is no pending frame or the frame budget has not elapsed yet.
+#[must_use]
+pub fn consume_scheduled_terminal_frame() -> bool {
+    let mut scheduler = FRAME_SCHEDULER.lock().unwrap_or_else(|e| e.into_inner());
+    scheduler.try_consume_frame(Instant::now())
+}
+
+/// Compute event-loop poll timeout based on frame scheduler pressure.
+///
+/// When no frame is pending this returns `default_timeout`. When a frame is
+/// pending, the timeout is reduced so async loops wake up close to the next
+/// frame boundary (60 FPS target by default).
+#[must_use]
+pub fn scheduled_frame_poll_timeout(default_timeout: Duration) -> Duration {
+    let scheduler = FRAME_SCHEDULER.lock().unwrap_or_else(|e| e.into_inner());
+    let scheduled_timeout = scheduler.poll_timeout(Instant::now());
+    min(default_timeout, scheduled_timeout)
+}
 
 /// Guard that enables interactive logging mode while in scope.
 pub struct InteractiveLogGuard {
@@ -147,6 +250,46 @@ pub fn set_footer_output_enabled(enabled: bool) {
 #[must_use]
 pub fn footer_output_enabled() -> bool {
     FOOTER_OUTPUT_ENABLED.load(Ordering::SeqCst)
+}
+
+/// Enable or disable focus-based notification gating at runtime.
+///
+/// When disabled, focus state is reset to focused.
+pub fn set_focus_detection_enabled(enabled: bool) {
+    FOCUS_DETECTION_ENABLED.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        TERMINAL_FOCUSED.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Returns whether focus detection is currently enabled.
+#[must_use]
+pub fn focus_detection_enabled() -> bool {
+    FOCUS_DETECTION_ENABLED.load(Ordering::SeqCst)
+}
+
+/// Update terminal focus state (`true` = focused, `false` = unfocused).
+pub fn set_terminal_focused(focused: bool) {
+    TERMINAL_FOCUSED.store(focused, Ordering::SeqCst);
+}
+
+/// Returns current terminal focus state.
+#[must_use]
+pub fn terminal_focused() -> bool {
+    TERMINAL_FOCUSED.load(Ordering::SeqCst)
+}
+
+/// Determines whether an attention signal should be emitted.
+///
+/// If `unfocused_only` is enabled, signals are only emitted when focus
+/// detection is active and the terminal is currently unfocused.
+#[must_use]
+pub fn should_emit_attention_signal(unfocused_only: bool) -> bool {
+    if !unfocused_only {
+        return true;
+    }
+
+    focus_detection_enabled() && !terminal_focused()
 }
 
 /// Manage the interactive terminal layout with fixed header and footer.
@@ -742,6 +885,16 @@ pub fn process_pending_resize() -> io::Result<()> {
     Ok(())
 }
 
+/// Emit an attention bell (`BEL`, `\x07`) to the active terminal.
+///
+/// This is used as a lightweight, cross-platform notification signal when
+/// important events happen (for example command failures in interactive mode).
+pub fn emit_attention_bell() -> io::Result<()> {
+    let mut stdout = io::stdout();
+    stdout.write_all(b"\x07")?;
+    stdout.flush()
+}
+
 /// Append a formatted log line to the footer; fallback to stdout if layout is inactive.
 pub fn append_footer_log(line: &str) -> io::Result<()> {
     if !FOOTER_OUTPUT_ENABLED.load(Ordering::SeqCst) {
@@ -774,11 +927,13 @@ pub fn append_footer_log(line: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_footer_log, calculate_layout_metrics, clamp_cursor_to_metrics,
-        footer_output_enabled, handle_resize, normalize_log_entry, pad_to_width,
-        prepare_prompt_line, process_pending_resize, reset_layout, set_footer_output_enabled,
-        truncate_to_width, LayoutMetrics, FOOTER_TARGET_HEIGHT, INTERACTIVE_MODE,
-        MIN_DYNAMIC_HEIGHT, PENDING_RESIZE, RECONFIGURING, RESIZE_DEBOUNCE_MS,
+        append_footer_log, calculate_layout_metrics, clamp_cursor_to_metrics, emit_attention_bell,
+        focus_detection_enabled, footer_output_enabled, handle_resize, normalize_log_entry,
+        pad_to_width, prepare_prompt_line, process_pending_resize, reset_layout,
+        set_focus_detection_enabled, set_footer_output_enabled, set_terminal_focused,
+        should_emit_attention_signal, terminal_focused, truncate_to_width, FrameScheduler,
+        LayoutMetrics, FOOTER_TARGET_HEIGHT, INTERACTIVE_MODE, MIN_DYNAMIC_HEIGHT, PENDING_RESIZE,
+        RECONFIGURING, RESIZE_DEBOUNCE_MS,
     };
     use serial_test::serial;
     use std::collections::VecDeque;
@@ -823,6 +978,48 @@ mod tests {
 
         let clamped = clamp_cursor_to_metrics((140, 42), metrics);
         assert_eq!(clamped, (79, 19));
+    }
+
+    #[test]
+    fn frame_scheduler_coalesces_multiple_requests_into_single_frame() {
+        let mut scheduler = FrameScheduler::new(60, Duration::from_millis(50));
+        let now = Instant::now();
+
+        scheduler.request_frame();
+        scheduler.request_frame();
+        scheduler.request_frame();
+
+        assert!(scheduler.try_consume_frame(now));
+        assert!(!scheduler.try_consume_frame(now));
+    }
+
+    #[test]
+    fn frame_scheduler_enforces_rate_limit_for_back_to_back_frames() {
+        let mut scheduler = FrameScheduler::new(60, Duration::from_millis(50));
+        let first = Instant::now();
+
+        scheduler.request_frame();
+        assert!(scheduler.try_consume_frame(first));
+
+        scheduler.request_frame();
+        assert!(!scheduler.try_consume_frame(first + Duration::from_millis(5)));
+        assert!(scheduler.try_consume_frame(first + Duration::from_millis(17)));
+    }
+
+    #[test]
+    fn frame_scheduler_poll_timeout_respects_pending_state() {
+        let mut scheduler = FrameScheduler::new(60, Duration::from_millis(50));
+        let now = Instant::now();
+
+        assert_eq!(scheduler.poll_timeout(now), Duration::from_millis(50));
+        scheduler.request_frame();
+        assert_eq!(scheduler.poll_timeout(now), Duration::from_millis(1));
+
+        assert!(scheduler.try_consume_frame(now));
+        scheduler.request_frame();
+        let timeout = scheduler.poll_timeout(now + Duration::from_millis(2));
+        assert!(timeout > Duration::from_millis(1));
+        assert!(timeout <= Duration::from_millis(50));
     }
 
     // === Phase 1.5: Resize Unit Tests ===
@@ -1229,6 +1426,33 @@ mod tests {
 
         let pending = PENDING_LOGS.lock().unwrap_or_else(|e| e.into_inner());
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn emit_attention_bell_succeeds() {
+        let result = emit_attention_bell();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn attention_signal_gating_uses_focus_state_when_requested() {
+        set_focus_detection_enabled(false);
+        set_terminal_focused(true);
+        assert!(!should_emit_attention_signal(true));
+
+        set_focus_detection_enabled(true);
+        set_terminal_focused(true);
+        assert!(!should_emit_attention_signal(true));
+
+        set_terminal_focused(false);
+        assert!(should_emit_attention_signal(true));
+
+        assert!(should_emit_attention_signal(false));
+        assert!(!terminal_focused());
+        assert!(focus_detection_enabled());
+
+        set_focus_detection_enabled(false);
+        set_terminal_focused(true);
     }
 
     #[test]

@@ -18,6 +18,9 @@ pub mod features;
 /// User configuration with layered loading (file → env → defaults)
 pub mod config;
 
+/// AI workspace-context collection and redaction utilities
+pub mod ai_context;
+
 /// String manipulation utilities
 #[path = "string-utils/lib.rs"]
 pub mod string_utils;

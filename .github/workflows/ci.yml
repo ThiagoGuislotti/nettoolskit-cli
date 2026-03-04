@@ -69,6 +69,26 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+  # ─── AI Safety/Resilience Gate ────────────────────────────────
+  ai-gate:
+    name: AI Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ai-gate
+      - name: Run AI E2E command scenarios
+        run: cargo test -p nettoolskit-orchestrator --test test_suite e2e_ai_
+      - name: Run AI safety and resilience slices
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p nettoolskit-orchestrator --lib process_ai_command_
+          cargo test -p nettoolskit-orchestrator --lib request_ai_stream_with_retry_
+          cargo test -p nettoolskit-orchestrator --lib evaluate_ai_rate_limit_
+
   # ─── Parallel Stress (templating) ─────────────────────────────
   templating-parallel-stress:
     name: Templating Parallel Stress

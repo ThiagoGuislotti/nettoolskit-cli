@@ -50,6 +50,18 @@ fn test_main_action_translate_variant() {
 }
 
 #[test]
+fn test_main_action_ai_variant() {
+    // Arrange
+    let action = MainAction::Ai;
+
+    // Act
+    let is_ai = matches!(action, MainAction::Ai);
+
+    // Assert
+    assert!(is_ai, "MainAction::Ai should match Ai variant");
+}
+
+#[test]
 fn test_main_action_config_variant() {
     // Arrange
     let action = MainAction::Config;
@@ -130,6 +142,18 @@ fn test_main_action_slash_static_translate() {
 }
 
 #[test]
+fn test_main_action_slash_static_ai() {
+    // Arrange
+    let action = MainAction::Ai;
+
+    // Act
+    let slash_cmd = action.slash_static();
+
+    // Assert
+    assert_eq!(slash_cmd, "/ai", "Ai should produce /ai command");
+}
+
+#[test]
 fn test_main_action_slash_static_config() {
     // Arrange
     let action = MainAction::Config;
@@ -177,6 +201,7 @@ fn test_main_action_pattern_matching_exhaustive() {
         MainAction::Help,
         MainAction::Manifest,
         MainAction::Translate,
+        MainAction::Ai,
         MainAction::Config,
         MainAction::Clear,
         MainAction::Quit,
@@ -188,6 +213,7 @@ fn test_main_action_pattern_matching_exhaustive() {
             MainAction::Help => true,
             MainAction::Manifest => true,
             MainAction::Translate => true,
+            MainAction::Ai => true,
             MainAction::Config => true,
             MainAction::Clear => true,
             MainAction::Quit => true,

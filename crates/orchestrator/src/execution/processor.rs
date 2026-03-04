@@ -1,20 +1,160 @@
 //! Command processor implementation
 
+use crate::execution::ai::{
+    AiChunk, AiMessage, AiProvider, AiProviderError, AiRequest, AiResponse, AiRole, MockAiProvider,
+    OpenAiCompatibleProvider, OpenAiCompatibleProviderConfig,
+};
+use crate::execution::ai_session::{
+    prune_local_ai_session_snapshots, resolve_active_ai_session_id, set_active_ai_session_id,
+    LocalAiSessionState,
+};
+use crate::execution::approval::{request_approval, ApprovalDecision, ApprovalRequest};
+use crate::execution::cache::{CacheKey, CacheStats, CacheTtl, CacheValue, CommandResultCache};
+use crate::execution::executor::{AsyncCommandExecutor, CommandProgress, ProgressSender};
+use crate::execution::plugins::{
+    command_plugin_count, run_after_command_plugins, run_before_command_plugins, CommandHookContext,
+};
 use crate::models::{ExitStatus, MainAction};
+use nettoolskit_core::ai_context::{
+    collect_workspace_context, render_context_system_message, AiContextBudget,
+};
 use nettoolskit_core::file_search::{search_files, SearchConfig};
 use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
 use nettoolskit_otel::{next_correlation_id, Metrics, Timer};
 use owo_colors::OwoColorize;
+use std::future::Future;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use strum::IntoEnumIterator;
-use tracing::{info, info_span};
+use tracing::{info, info_span, warn};
 
 static RUNTIME_METRICS: OnceLock<Metrics> = OnceLock::new();
+static COMMAND_CACHE: OnceLock<Mutex<CommandResultCache>> = OnceLock::new();
+static AI_RATE_LIMITER: OnceLock<Mutex<AiRateLimitState>> = OnceLock::new();
+const COMMAND_CACHE_MAX_ENTRIES: usize = 128;
+const COMMAND_CACHE_MAX_SIZE_BYTES: usize = 2 * 1024 * 1024;
+const COMMAND_CACHE_LOG_INTERVAL_SECONDS: u64 = 30;
+const AI_CONTEXT_DEFAULT_ALLOWLIST: &[&str] = &[
+    "Cargo.toml",
+    "README.md",
+    "CHANGELOG.md",
+    ".temp/planning/enterprise-progress-tracker.md",
+];
+const AI_SESSION_CONTEXT_MESSAGE_LIMIT: usize = 12;
+const DEFAULT_AI_RATE_LIMIT_REQUESTS: usize = 30;
+const DEFAULT_AI_RATE_LIMIT_WINDOW_SECONDS: u64 = 60;
+const DEFAULT_AI_MAX_RETRIES: usize = 2;
+const DEFAULT_AI_RETRY_BASE_DELAY_MS: u64 = 250;
+const DEFAULT_AI_RETRY_MAX_DELAY_MS: u64 = 2_000;
+const DEFAULT_AI_REQUEST_TIMEOUT_MS: u64 = 45_000;
+
+#[derive(Debug, Clone, Copy)]
+struct AiRateLimitPolicy {
+    max_requests: usize,
+    window: Duration,
+}
+
+impl Default for AiRateLimitPolicy {
+    fn default() -> Self {
+        Self {
+            max_requests: DEFAULT_AI_RATE_LIMIT_REQUESTS,
+            window: Duration::from_secs(DEFAULT_AI_RATE_LIMIT_WINDOW_SECONDS),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AiRetryPolicy {
+    max_retries: usize,
+    base_delay: Duration,
+    max_delay: Duration,
+    request_timeout: Duration,
+}
+
+impl Default for AiRetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: DEFAULT_AI_MAX_RETRIES,
+            base_delay: Duration::from_millis(DEFAULT_AI_RETRY_BASE_DELAY_MS),
+            max_delay: Duration::from_millis(DEFAULT_AI_RETRY_MAX_DELAY_MS),
+            request_timeout: Duration::from_millis(DEFAULT_AI_REQUEST_TIMEOUT_MS),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct AiRateLimitState {
+    window_started_at: Instant,
+    used_requests: usize,
+}
+
+impl Default for AiRateLimitState {
+    fn default() -> Self {
+        Self {
+            window_started_at: Instant::now(),
+            used_requests: 0,
+        }
+    }
+}
 
 fn runtime_metrics() -> &'static Metrics {
     RUNTIME_METRICS.get_or_init(Metrics::new)
+}
+
+fn command_cache() -> &'static Mutex<CommandResultCache> {
+    COMMAND_CACHE.get_or_init(|| {
+        Mutex::new(CommandResultCache::new(
+            COMMAND_CACHE_MAX_ENTRIES,
+            COMMAND_CACHE_MAX_SIZE_BYTES,
+            CacheTtl::default(),
+        ))
+    })
+}
+
+fn ai_rate_limiter() -> &'static Mutex<AiRateLimitState> {
+    AI_RATE_LIMITER.get_or_init(|| Mutex::new(AiRateLimitState::default()))
+}
+
+fn with_command_cache<T>(f: impl FnOnce(&mut CommandResultCache) -> T) -> T {
+    let mut guard = command_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut guard)
+}
+
+fn maybe_log_command_cache_stats(stats: CacheStats, metrics: &Metrics) {
+    metrics.set_gauge("runtime_command_cache_entries", stats.entries as f64);
+    metrics.set_gauge("runtime_command_cache_size_bytes", stats.size_bytes as f64);
+    metrics.set_gauge("runtime_command_cache_hits_total", stats.hits as f64);
+    metrics.set_gauge("runtime_command_cache_misses_total", stats.misses as f64);
+    metrics.set_gauge(
+        "runtime_command_cache_evictions_total",
+        stats.evictions as f64,
+    );
+
+    let uptime_seconds = metrics
+        .get_gauge("runtime_uptime_seconds")
+        .unwrap_or(0.0)
+        .max(0.0);
+    let log_interval = COMMAND_CACHE_LOG_INTERVAL_SECONDS as f64;
+    let should_log = COMMAND_CACHE_LOG_INTERVAL_SECONDS > 0
+        && (uptime_seconds as u64) % COMMAND_CACHE_LOG_INTERVAL_SECONDS == 0
+        && uptime_seconds > 0.0;
+
+    if should_log && uptime_seconds % log_interval < 1.0 {
+        tracing::debug!(
+            cache_entries = stats.entries,
+            cache_size_bytes = stats.size_bytes,
+            cache_hits = stats.hits,
+            cache_misses = stats.misses,
+            cache_evictions = stats.evictions,
+            "Runtime command cache stats snapshot"
+        );
+    }
 }
 
 fn sanitize_metric_component(input: &str) -> String {
@@ -135,12 +275,16 @@ fn has_flag(parts: &[&str], flag: &str) -> bool {
     parts.iter().any(|part| *part == flag)
 }
 
-fn first_manifest_positional_path(parts: &[&str]) -> Option<PathBuf> {
+fn first_positional_path(parts: &[&str], start_index: usize) -> Option<PathBuf> {
     parts
         .iter()
-        .skip(2)
+        .skip(start_index)
         .find(|part| !part.starts_with("--"))
         .map(|part| PathBuf::from(*part))
+}
+
+fn first_manifest_positional_path(parts: &[&str]) -> Option<PathBuf> {
+    first_positional_path(parts, 2)
 }
 
 fn parse_output_root(parts: &[&str]) -> Option<PathBuf> {
@@ -241,10 +385,14 @@ fn print_manifest_validation(
     println!();
 }
 
-fn resolve_manifest_target_path(parts: &[&str], action_label: &str) -> Result<PathBuf, ExitStatus> {
+fn resolve_manifest_target_path_from(
+    parts: &[&str],
+    action_label: &str,
+    start_index: usize,
+) -> Result<PathBuf, ExitStatus> {
     use nettoolskit_ui::Color;
 
-    if let Some(path) = first_manifest_positional_path(parts) {
+    if let Some(path) = first_positional_path(parts, start_index) {
         return Ok(path);
     }
 
@@ -294,6 +442,10 @@ fn resolve_manifest_target_path(parts: &[&str], action_label: &str) -> Result<Pa
             Err(ExitStatus::Error)
         }
     }
+}
+
+fn resolve_manifest_target_path(parts: &[&str], action_label: &str) -> Result<PathBuf, ExitStatus> {
+    resolve_manifest_target_path_from(parts, action_label, 2)
 }
 
 fn print_execution_summary(summary: &nettoolskit_manifest::core::models::ExecutionSummary) {
@@ -398,6 +550,1280 @@ fn parse_translate_request(
     Ok(nettoolskit_translate::TranslateRequest { from, to, path })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiIntent {
+    Ask,
+    Plan,
+    Explain,
+    ApplyDryRun,
+}
+
+impl AiIntent {
+    fn from_subcommand(subcommand: &str) -> Option<Self> {
+        match subcommand.trim().to_ascii_lowercase().as_str() {
+            "ask" => Some(Self::Ask),
+            "plan" => Some(Self::Plan),
+            "explain" => Some(Self::Explain),
+            "apply" => Some(Self::ApplyDryRun),
+            _ => None,
+        }
+    }
+
+    fn as_label(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Plan => "plan",
+            Self::Explain => "explain",
+            Self::ApplyDryRun => "apply",
+        }
+    }
+
+    fn system_prompt(self) -> &'static str {
+        match self {
+            Self::Ask => {
+                "You are NetToolsKit CLI assistant. Provide concise, actionable engineering answers."
+            }
+            Self::Plan => {
+                "You are NetToolsKit CLI planning assistant. Return step-by-step implementation plans with validation and risks."
+            }
+            Self::Explain => {
+                "You are NetToolsKit CLI explainer. Clarify technical behavior with practical examples."
+            }
+            Self::ApplyDryRun => {
+                "You are NetToolsKit CLI dry-run assistant. Propose safe, non-destructive patch steps and explain expected impact."
+            }
+        }
+    }
+}
+
+fn ai_prompt_start(parts: &[&str]) -> usize {
+    if parts.first().copied() == Some("/") {
+        3
+    } else {
+        2
+    }
+}
+
+fn collect_ai_prompt(parts: &[&str], start_index: usize) -> String {
+    parts
+        .iter()
+        .skip(start_index)
+        .filter(|part| !part.starts_with("--"))
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+fn parse_timeout_millis(value: &str) -> Option<u64> {
+    let parsed = value.trim().parse::<u64>().ok()?;
+    (parsed > 0).then_some(parsed)
+}
+
+fn parse_nonzero_usize(value: &str) -> Option<usize> {
+    let parsed = value.trim().parse::<usize>().ok()?;
+    (parsed > 0).then_some(parsed)
+}
+
+fn parse_positive_f64(value: &str) -> Option<f64> {
+    let parsed = value.trim().parse::<f64>().ok()?;
+    (parsed > 0.0).then_some(parsed)
+}
+
+fn ai_retry_policy_from_env() -> AiRetryPolicy {
+    let mut policy = AiRetryPolicy::default();
+
+    if let Ok(value) = std::env::var("NTK_AI_MAX_RETRIES") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.max_retries = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_AI_RETRY_BASE_MS") {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.base_delay = Duration::from_millis(parsed);
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_AI_RETRY_MAX_MS") {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.max_delay = Duration::from_millis(parsed);
+        }
+    }
+
+    if policy.max_delay < policy.base_delay {
+        policy.max_delay = policy.base_delay;
+    }
+
+    if let Ok(value) = std::env::var("NTK_AI_REQUEST_TIMEOUT_MS") {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.request_timeout = Duration::from_millis(parsed);
+        }
+    }
+
+    policy
+}
+
+fn ai_rate_limit_policy_from_env() -> AiRateLimitPolicy {
+    let mut policy = AiRateLimitPolicy::default();
+
+    if let Ok(value) = std::env::var("NTK_AI_RATE_LIMIT_REQUESTS") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.max_requests = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_AI_RATE_LIMIT_WINDOW_SECONDS") {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.window = Duration::from_secs(parsed);
+        }
+    }
+
+    policy
+}
+
+fn ai_retry_delay(policy: AiRetryPolicy, retry_number: usize) -> Duration {
+    let exponent = retry_number.saturating_sub(1).min(16);
+    let multiplier = 1_u64 << exponent;
+    let base_ms = policy.base_delay.as_millis() as u64;
+    let max_ms = policy.max_delay.as_millis() as u64;
+    let delay_ms = base_ms.saturating_mul(multiplier).min(max_ms).max(base_ms);
+    Duration::from_millis(delay_ms)
+}
+
+fn is_retriable_ai_error(error: &AiProviderError) -> bool {
+    matches!(
+        error,
+        AiProviderError::Timeout { .. }
+            | AiProviderError::Unavailable(_)
+            | AiProviderError::Transport(_)
+    )
+}
+
+fn ai_provider_health_metric_name(provider_id: &str) -> String {
+    format!(
+        "runtime_ai_provider_{}_health",
+        sanitize_metric_component(provider_id)
+    )
+}
+
+fn set_ai_provider_health(metrics: &Metrics, provider_id: &str, healthy: bool) {
+    let value = if healthy { 1.0 } else { 0.0 };
+    metrics.set_gauge("runtime_ai_provider_health", value);
+    metrics.set_gauge(ai_provider_health_metric_name(provider_id), value);
+}
+
+fn evaluate_ai_rate_limit(
+    state: &mut AiRateLimitState,
+    policy: AiRateLimitPolicy,
+    now: Instant,
+) -> Result<usize, u64> {
+    let elapsed = now
+        .checked_duration_since(state.window_started_at)
+        .unwrap_or(Duration::ZERO);
+
+    if elapsed >= policy.window {
+        state.window_started_at = now;
+        state.used_requests = 0;
+    }
+
+    let window_elapsed = now
+        .checked_duration_since(state.window_started_at)
+        .unwrap_or(Duration::ZERO);
+    if state.used_requests >= policy.max_requests {
+        let retry_after = policy
+            .window
+            .saturating_sub(window_elapsed)
+            .as_secs()
+            .max(1);
+        return Err(retry_after);
+    }
+
+    state.used_requests = state.used_requests.saturating_add(1);
+    Ok(policy.max_requests.saturating_sub(state.used_requests))
+}
+
+fn enforce_ai_rate_limit(metrics: &Metrics) -> Result<(), u64> {
+    let policy = ai_rate_limit_policy_from_env();
+    let mut limiter = ai_rate_limiter()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match evaluate_ai_rate_limit(&mut limiter, policy, Instant::now()) {
+        Ok(remaining) => {
+            metrics.set_gauge("runtime_ai_rate_limit_remaining", remaining as f64);
+            metrics.set_gauge("runtime_ai_rate_limit_retry_after_seconds", 0.0);
+            Ok(())
+        }
+        Err(retry_after) => {
+            metrics.increment_counter("runtime_ai_rate_limited_total");
+            metrics.set_gauge("runtime_ai_rate_limit_remaining", 0.0);
+            metrics.set_gauge(
+                "runtime_ai_rate_limit_retry_after_seconds",
+                retry_after as f64,
+            );
+            Err(retry_after)
+        }
+    }
+}
+
+fn update_ai_approval_ratio(metrics: &Metrics) {
+    let total = metrics.get_counter("runtime_ai_approvals_total");
+    if total == 0 {
+        return;
+    }
+
+    let approved = metrics.get_counter("runtime_ai_approvals_approved_total");
+    let ratio = (approved as f64 / total as f64) * 100.0;
+    metrics.set_gauge("runtime_ai_approval_ratio_pct", ratio);
+}
+
+fn update_ai_approval_metrics(metrics: &Metrics, approved: bool) {
+    metrics.increment_counter("runtime_ai_approvals_total");
+    if approved {
+        metrics.increment_counter("runtime_ai_approvals_approved_total");
+    } else {
+        metrics.increment_counter("runtime_ai_approvals_denied_total");
+    }
+    update_ai_approval_ratio(metrics);
+}
+
+fn update_ai_request_rate_gauges(metrics: &Metrics) {
+    let total = metrics.get_counter("runtime_ai_requests_total");
+    if total == 0 {
+        return;
+    }
+
+    let total_f64 = total as f64;
+    let success = metrics.get_counter("runtime_ai_requests_success_total") as f64;
+    let errors = metrics.get_counter("runtime_ai_requests_error_total") as f64;
+    let timeouts = metrics.get_counter("runtime_ai_requests_timeout_total") as f64;
+
+    metrics.set_gauge("runtime_ai_success_rate_pct", (success / total_f64) * 100.0);
+    metrics.set_gauge("runtime_ai_error_rate_pct", (errors / total_f64) * 100.0);
+    metrics.set_gauge(
+        "runtime_ai_timeout_rate_pct",
+        (timeouts / total_f64) * 100.0,
+    );
+}
+
+fn estimate_token_count(text: &str) -> u64 {
+    let chars = text.chars().count() as u64;
+    chars.div_ceil(4).max(1)
+}
+
+fn estimate_request_input_tokens(request: &AiRequest) -> u64 {
+    request
+        .messages
+        .iter()
+        .map(|message| estimate_token_count(&message.content))
+        .sum()
+}
+
+fn add_gauge_value(metrics: &Metrics, name: &str, delta: f64) {
+    let updated = metrics.get_gauge(name).unwrap_or(0.0) + delta;
+    metrics.set_gauge(name, updated);
+}
+
+fn ai_input_cost_rate_per_1k_from_env() -> f64 {
+    std::env::var("NTK_AI_COST_PER_1K_INPUT_USD")
+        .ok()
+        .and_then(|value| parse_positive_f64(&value))
+        .unwrap_or(0.0)
+}
+
+fn ai_output_cost_rate_per_1k_from_env() -> f64 {
+    std::env::var("NTK_AI_COST_PER_1K_OUTPUT_USD")
+        .ok()
+        .and_then(|value| parse_positive_f64(&value))
+        .unwrap_or(0.0)
+}
+
+fn record_ai_usage_estimates(metrics: &Metrics, request: &AiRequest, output: &str) {
+    let input_tokens = estimate_request_input_tokens(request);
+    let output_tokens = estimate_token_count(output);
+    let total_tokens = input_tokens.saturating_add(output_tokens);
+
+    metrics.increment_counter("runtime_ai_usage_samples_total");
+    metrics.set_gauge("runtime_ai_last_input_tokens_estimate", input_tokens as f64);
+    metrics.set_gauge(
+        "runtime_ai_last_output_tokens_estimate",
+        output_tokens as f64,
+    );
+    metrics.set_gauge("runtime_ai_last_total_tokens_estimate", total_tokens as f64);
+    add_gauge_value(
+        metrics,
+        "runtime_ai_input_tokens_estimated_total",
+        input_tokens as f64,
+    );
+    add_gauge_value(
+        metrics,
+        "runtime_ai_output_tokens_estimated_total",
+        output_tokens as f64,
+    );
+    add_gauge_value(
+        metrics,
+        "runtime_ai_tokens_estimated_total",
+        total_tokens as f64,
+    );
+
+    let input_rate = ai_input_cost_rate_per_1k_from_env();
+    let output_rate = ai_output_cost_rate_per_1k_from_env();
+    let estimated_cost = ((input_tokens as f64 / 1000.0) * input_rate)
+        + ((output_tokens as f64 / 1000.0) * output_rate);
+
+    metrics.set_gauge("runtime_ai_last_cost_estimate_usd", estimated_cost);
+    add_gauge_value(
+        metrics,
+        "runtime_ai_cost_estimate_total_usd",
+        estimated_cost,
+    );
+}
+
+fn ai_error_guidance_message(error: &AiProviderError) -> Option<&'static str> {
+    match error {
+        AiProviderError::Timeout { .. } => Some(
+            "Provider timeout reached. Try lowering context size or adjusting NTK_AI_TIMEOUT_MS / NTK_AI_REQUEST_TIMEOUT_MS.",
+        ),
+        AiProviderError::Unavailable(_) => Some(
+            "Provider is unavailable. You can retry, or switch to NTK_AI_PROVIDER=mock while service recovers.",
+        ),
+        AiProviderError::Transport(_) => Some(
+            "Provider transport failed. Verify endpoint/network/API key or set NTK_AI_FALLBACK_TEXT for degraded mode.",
+        ),
+        AiProviderError::InvalidResponse(_) => Some(
+            "Provider returned malformed output. Check model compatibility and endpoint schema.",
+        ),
+        AiProviderError::InvalidRequest(_) => None,
+    }
+}
+
+async fn request_ai_stream_with_retry(
+    provider: &dyn AiProvider,
+    request: &AiRequest,
+    retry_policy: AiRetryPolicy,
+    metrics: &Metrics,
+    intent: AiIntent,
+) -> Result<(Vec<AiChunk>, usize), AiProviderError> {
+    let mut retries = 0usize;
+
+    loop {
+        let attempt_started = Instant::now();
+        let result = match tokio::time::timeout(
+            retry_policy.request_timeout,
+            provider.stream(request.clone()),
+        )
+        .await
+        {
+            Ok(inner) => inner,
+            Err(_) => Err(AiProviderError::Timeout {
+                timeout: retry_policy.request_timeout,
+            }),
+        };
+        metrics.record_timing("runtime_ai_attempt_latency", attempt_started.elapsed());
+
+        match result {
+            Ok(chunks) => return Ok((chunks, retries)),
+            Err(error) => {
+                let can_retry = retries < retry_policy.max_retries && is_retriable_ai_error(&error);
+                if !can_retry {
+                    return Err(error);
+                }
+
+                retries = retries.saturating_add(1);
+                metrics.increment_counter("runtime_ai_retries_total");
+                metrics.increment_counter(format!(
+                    "runtime_ai_intent_{}_retries_total",
+                    intent.as_label()
+                ));
+                let delay = ai_retry_delay(retry_policy, retries);
+                metrics.set_gauge("runtime_ai_last_retry_delay_ms", delay.as_millis() as f64);
+                let _ = nettoolskit_ui::append_footer_log(&format!(
+                    "ai: transient failure, retry {}/{} in {}ms",
+                    retries,
+                    retry_policy.max_retries,
+                    delay.as_millis()
+                ));
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+}
+
+fn parse_ai_context_paths(value: &str) -> Vec<PathBuf> {
+    value
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn ai_context_budget_from_env() -> AiContextBudget {
+    let mut budget = AiContextBudget::default();
+
+    if let Ok(value) = std::env::var("NTK_AI_CONTEXT_MAX_FILES") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            budget.max_files = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_AI_CONTEXT_MAX_FILE_BYTES") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            budget.max_file_bytes = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var("NTK_AI_CONTEXT_MAX_BYTES") {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            budget.max_total_bytes = parsed;
+        }
+    }
+
+    budget
+}
+
+fn ai_context_allowlist_paths() -> Vec<PathBuf> {
+    let mut paths = AI_CONTEXT_DEFAULT_ALLOWLIST
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+
+    if let Ok(extra_paths) = std::env::var("NTK_AI_CONTEXT_PATHS") {
+        paths.extend(parse_ai_context_paths(&extra_paths));
+    }
+
+    paths
+}
+
+fn build_ai_context_system_message() -> Option<String> {
+    let workspace_root = std::env::current_dir().ok()?;
+    let allowlist = ai_context_allowlist_paths();
+    if allowlist.is_empty() {
+        return None;
+    }
+
+    let bundle =
+        collect_workspace_context(&workspace_root, &allowlist, ai_context_budget_from_env());
+    if bundle.is_empty() {
+        return None;
+    }
+
+    render_context_system_message(&bundle)
+}
+
+fn mocked_ai_response(intent: AiIntent, prompt: &str) -> AiResponse {
+    let mut preview = prompt.chars().take(96).collect::<String>();
+    if prompt.chars().count() > 96 {
+        preview.push_str("...");
+    }
+
+    let content = match intent {
+        AiIntent::Ask => format!(
+            "Mock AI answer: `{preview}`\nConfigure NTK_AI_PROVIDER=openai and NTK_AI_API_KEY to use a live model."
+        ),
+        AiIntent::Plan => format!(
+            "Mock AI plan for `{preview}`:\n1. Define scope\n2. Implement in slices\n3. Validate with tests and clippy"
+        ),
+        AiIntent::Explain => format!(
+            "Mock AI explanation for `{preview}`:\n- Inputs parsed\n- Action executed\n- Output reported"
+        ),
+        AiIntent::ApplyDryRun => format!(
+            "Mock AI dry-run apply for `{preview}`:\n- Proposed file changes only\n- No mutation performed"
+        ),
+    };
+
+    AiResponse::new("mock-assistant", content)
+}
+
+fn ai_provider_from_env(intent: AiIntent, prompt: &str) -> Result<Box<dyn AiProvider>, String> {
+    let provider_name = std::env::var("NTK_AI_PROVIDER")
+        .unwrap_or_else(|_| "mock".to_string())
+        .trim()
+        .to_ascii_lowercase();
+
+    if provider_name == "openai" || provider_name == "openai-compatible" {
+        let mut config = OpenAiCompatibleProviderConfig::default();
+        if let Ok(endpoint) = std::env::var("NTK_AI_ENDPOINT") {
+            if !endpoint.trim().is_empty() {
+                config.endpoint = endpoint;
+            }
+        }
+        if let Ok(api_key) = std::env::var("NTK_AI_API_KEY") {
+            if !api_key.trim().is_empty() {
+                config.api_key = Some(api_key);
+            }
+        }
+        if let Ok(model) = std::env::var("NTK_AI_MODEL") {
+            if !model.trim().is_empty() {
+                config.default_model = model;
+            }
+        }
+        if let Ok(timeout_ms) = std::env::var("NTK_AI_TIMEOUT_MS") {
+            if let Some(value) = parse_timeout_millis(&timeout_ms) {
+                config.timeout = Duration::from_millis(value);
+            }
+        }
+        if let Ok(fallback) = std::env::var("NTK_AI_FALLBACK_TEXT") {
+            if !fallback.trim().is_empty() {
+                config.fallback_output_text = Some(fallback);
+            }
+        }
+
+        let provider = OpenAiCompatibleProvider::new(config).map_err(|error| error.to_string())?;
+        return Ok(Box::new(provider));
+    }
+
+    Ok(Box::new(MockAiProvider::new(mocked_ai_response(
+        intent, prompt,
+    ))))
+}
+
+fn build_ai_request(intent: AiIntent, prompt: &str) -> AiRequest {
+    let mut request = AiRequest::from_user_prompt(prompt.to_string());
+    request.stream = true;
+    request.messages.insert(
+        0,
+        AiMessage::new(AiRole::System, intent.system_prompt().to_string()),
+    );
+
+    match intent {
+        AiIntent::Ask => {
+            request.temperature = Some(0.4);
+            request.max_output_tokens = Some(1024);
+        }
+        AiIntent::Plan => {
+            request.temperature = Some(0.2);
+            request.max_output_tokens = Some(1400);
+        }
+        AiIntent::Explain => {
+            request.temperature = Some(0.3);
+            request.max_output_tokens = Some(1200);
+        }
+        AiIntent::ApplyDryRun => {
+            request.temperature = Some(0.1);
+            request.max_output_tokens = Some(1600);
+        }
+    }
+
+    request
+}
+
+fn ai_session_retention_limit() -> usize {
+    AppConfig::load().general.ai_session_retention.max(1)
+}
+
+fn default_ai_session_retention() -> usize {
+    AppConfig::default().general.ai_session_retention.max(1)
+}
+
+fn load_or_initialize_ai_session(session_id: &str) -> LocalAiSessionState {
+    match LocalAiSessionState::load_local_snapshot(session_id) {
+        Ok(Some(session)) => session,
+        Ok(None) => LocalAiSessionState::new(session_id),
+        Err(err) => {
+            warn!(
+                error = %err,
+                session_id,
+                "Failed to load AI session snapshot; starting a new one"
+            );
+            LocalAiSessionState::new(session_id)
+        }
+    }
+}
+
+fn inject_ai_session_context(request: &mut AiRequest, session: &LocalAiSessionState) {
+    let history_messages = session.recent_messages(AI_SESSION_CONTEXT_MESSAGE_LIMIT);
+    if history_messages.is_empty() {
+        return;
+    }
+
+    let insertion_index = request.messages.len().saturating_sub(1);
+    request
+        .messages
+        .splice(insertion_index..insertion_index, history_messages);
+}
+
+fn persist_ai_session_exchange(
+    session_id: &str,
+    intent: AiIntent,
+    provider_id: &str,
+    prompt: &str,
+    output: &str,
+) {
+    let mut session = load_or_initialize_ai_session(session_id);
+    if !session.append_exchange(intent.as_label(), provider_id, prompt, output) {
+        return;
+    }
+
+    match session.save_local_snapshot() {
+        Ok(Some(path)) => {
+            let _ = nettoolskit_ui::append_footer_log(&format!(
+                "ai: session persisted id={} path={}",
+                session.id,
+                path.display()
+            ));
+        }
+        Ok(None) => {
+            let _ = nettoolskit_ui::append_footer_log(
+                "ai: local data dir unavailable; session persistence skipped",
+            );
+        }
+        Err(err) => {
+            warn!(
+                error = %err,
+                session_id,
+                "Failed to persist AI session snapshot"
+            );
+            let _ = nettoolskit_ui::append_footer_log(&format!(
+                "ai: failed to persist session snapshot - {err}"
+            ));
+        }
+    }
+
+    let retention = ai_session_retention_limit();
+    match prune_local_ai_session_snapshots(retention) {
+        Ok(Some(removed)) if removed > 0 => {
+            let _ = nettoolskit_ui::append_footer_log(&format!(
+                "ai: pruned {removed} old session snapshot(s)"
+            ));
+        }
+        Ok(Some(_)) | Ok(None) => {}
+        Err(err) => {
+            warn!(error = %err, "Failed to prune AI session snapshots");
+            let _ = nettoolskit_ui::append_footer_log(&format!(
+                "ai: failed to prune session snapshots - {err}"
+            ));
+        }
+    }
+}
+
+fn handle_ai_resume_subcommand(parts: &[&str]) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    let prompt_start = ai_prompt_start(parts);
+    let session_id = collect_ai_prompt(parts, prompt_start);
+    if session_id.is_empty() {
+        println!(
+            "{}",
+            "Usage: /ai resume <session-id> (interactive picker available with `/ai resume` in CLI mode)"
+                .color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    }
+
+    let active_session = set_active_ai_session_id(&session_id);
+    match LocalAiSessionState::load_local_snapshot(&active_session) {
+        Ok(Some(session)) => {
+            println!(
+                "{} {}",
+                "✅ Active AI session resumed:".color(Color::GREEN).bold(),
+                session.id.color(Color::CYAN)
+            );
+            println!(
+                "  exchanges:{} last:{}",
+                session.exchanges.len(),
+                session.last_activity_ms
+            );
+        }
+        Ok(None) => {
+            println!(
+                "{} {}",
+                "✅ Active AI session set:".color(Color::GREEN).bold(),
+                active_session.color(Color::CYAN)
+            );
+            println!(
+                "{}",
+                "No persisted history found for this id yet; a new local session snapshot will be created on next AI response."
+                    .color(Color::YELLOW)
+            );
+        }
+        Err(err) => {
+            println!(
+                "{} {}",
+                "⚠ Active AI session set, but failed to read local snapshot:"
+                    .color(Color::YELLOW)
+                    .bold(),
+                err.to_string().color(Color::YELLOW)
+            );
+        }
+    }
+
+    let _ =
+        nettoolskit_ui::append_footer_log(&format!("ai: active session set id={active_session}"));
+    ExitStatus::Success
+}
+
+async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    let Some(raw_subcommand) = subcommand else {
+        println!("{}", "🤖 AI Assistant Commands".color(Color::CYAN).bold());
+        println!("  {}", "/ai ask <prompt>".color(Color::GREEN));
+        println!("  {}", "/ai plan <goal>".color(Color::GREEN));
+        println!("  {}", "/ai explain <topic>".color(Color::GREEN));
+        println!("  {}", "/ai resume <session-id>".color(Color::GREEN));
+        println!(
+            "  {}",
+            "/ai apply --dry-run <instruction>".color(Color::GREEN)
+        );
+        println!(
+            "  {}",
+            "/ai apply --approve-write <instruction>".color(Color::YELLOW)
+        );
+        println!();
+        println!(
+            "{}",
+            "Use NTK_AI_PROVIDER=openai to enable live provider calls (defaults to mock)."
+                .color(Color::YELLOW)
+        );
+        println!(
+            "{}",
+            "Operational controls: NTK_AI_MAX_RETRIES, NTK_AI_REQUEST_TIMEOUT_MS, NTK_AI_RATE_LIMIT_REQUESTS, NTK_AI_RATE_LIMIT_WINDOW_SECONDS."
+                .color(Color::YELLOW)
+        );
+        return ExitStatus::Success;
+    };
+
+    if raw_subcommand.trim().eq_ignore_ascii_case("resume") {
+        return handle_ai_resume_subcommand(parts);
+    }
+
+    let Some(intent) = AiIntent::from_subcommand(raw_subcommand) else {
+        println!(
+            "{} {}",
+            "✗ Unknown /ai subcommand:".color(Color::RED).bold(),
+            raw_subcommand.color(Color::YELLOW)
+        );
+        println!(
+            "{}",
+            "Valid subcommands: ask, plan, explain, resume, apply".color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    };
+
+    let dry_run = has_flag(parts, "--dry-run");
+    let explicit_write_approval = has_flag(parts, "--approve-write");
+
+    let prompt = collect_ai_prompt(parts, ai_prompt_start(parts));
+    if prompt.is_empty() {
+        let usage = if matches!(intent, AiIntent::ApplyDryRun) {
+            "Usage: /ai apply --dry-run <instruction> | /ai apply --approve-write <instruction>"
+                .to_string()
+        } else {
+            format!("Usage: /ai {} <prompt>", intent.as_label())
+        };
+
+        println!(
+            "{}",
+            format!("✗ Missing prompt for /ai {}.", intent.as_label())
+                .color(Color::RED)
+                .bold()
+        );
+        println!("{}", usage.color(Color::YELLOW));
+        return ExitStatus::Error;
+    }
+
+    let ai_metrics = runtime_metrics().clone();
+    ai_metrics.increment_counter("runtime_ai_requests_total");
+    ai_metrics.increment_counter(format!("runtime_ai_intent_{}_total", intent.as_label()));
+    if let Err(retry_after_seconds) = enforce_ai_rate_limit(&ai_metrics) {
+        ai_metrics.increment_counter("runtime_ai_requests_error_total");
+        update_ai_request_rate_gauges(&ai_metrics);
+        println!(
+            "{}",
+            format!(
+                "✗ AI rate limit reached. Try again in ~{retry_after_seconds}s, or adjust NTK_AI_RATE_LIMIT_REQUESTS/NTK_AI_RATE_LIMIT_WINDOW_SECONDS."
+            )
+            .color(Color::RED)
+            .bold()
+        );
+        return ExitStatus::Error;
+    }
+
+    if matches!(intent, AiIntent::ApplyDryRun) {
+        let mut reason_preview = prompt.chars().take(96).collect::<String>();
+        if prompt.chars().count() > 96 {
+            reason_preview.push_str("...");
+        }
+
+        let decision = request_approval(ApprovalRequest::file_write(
+            "workspace",
+            format!("ai apply request: {reason_preview}"),
+            dry_run,
+            explicit_write_approval,
+            "cli:/ai apply",
+        ));
+
+        match decision {
+            ApprovalDecision::Approved { reason } => {
+                update_ai_approval_metrics(&ai_metrics, true);
+                let _ = nettoolskit_ui::append_footer_log(&format!(
+                    "ai approval: action=file_write status=approved reason={reason}"
+                ));
+                if !dry_run {
+                    println!(
+                        "{}",
+                        "⚠ Explicit write approval acknowledged; current /ai apply flow remains advisory and does not mutate files directly."
+                            .color(Color::YELLOW)
+                    );
+                }
+            }
+            ApprovalDecision::Denied { reason } => {
+                update_ai_approval_metrics(&ai_metrics, false);
+                println!(
+                    "{} {}",
+                    "✗ AI apply blocked by approval gateway:"
+                        .color(Color::RED)
+                        .bold(),
+                    reason.color(Color::RED)
+                );
+                println!(
+                    "{}",
+                    "Use `--dry-run` (recommended) or `--approve-write` for explicit mutating approval."
+                        .color(Color::YELLOW)
+                );
+                let _ = nettoolskit_ui::append_footer_log(&format!(
+                    "ai approval: action=file_write status=denied reason={reason}"
+                ));
+                ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                update_ai_request_rate_gauges(&ai_metrics);
+                return ExitStatus::Error;
+            }
+        }
+    }
+
+    let provider = match ai_provider_from_env(intent, &prompt) {
+        Ok(provider) => provider,
+        Err(error) => {
+            ai_metrics.increment_counter("runtime_ai_requests_error_total");
+            ai_metrics.set_gauge("runtime_ai_provider_health", 0.0);
+            update_ai_request_rate_gauges(&ai_metrics);
+            println!(
+                "{} {}",
+                "✗ Failed to initialize AI provider:"
+                    .color(Color::RED)
+                    .bold(),
+                error.color(Color::RED)
+            );
+            return ExitStatus::Error;
+        }
+    };
+
+    let session_id = resolve_active_ai_session_id();
+    let active_session = load_or_initialize_ai_session(&session_id);
+    let mut request = build_ai_request(intent, &prompt);
+    inject_ai_session_context(&mut request, &active_session);
+    if let Some(context_message) = build_ai_context_system_message() {
+        request
+            .messages
+            .insert(1, AiMessage::new(AiRole::System, context_message));
+        let _ = nettoolskit_ui::append_footer_log("ai: context bundle attached");
+    }
+
+    println!(
+        "{}",
+        format!("🤖 AI {} (provider: {})", intent.as_label(), provider.id())
+            .color(Color::CYAN)
+            .bold()
+    );
+
+    let provider_id = provider.id();
+    let provider_metric = sanitize_metric_component(provider_id);
+    ai_metrics.increment_counter(format!(
+        "runtime_ai_provider_{}_requests_total",
+        provider_metric
+    ));
+    let retry_policy = ai_retry_policy_from_env();
+    let request_started = Instant::now();
+
+    let _ = nettoolskit_ui::append_footer_log(&format!(
+        "ai: mode={} provider={} stream=start",
+        intent.as_label(),
+        provider_id
+    ));
+    let _ = nettoolskit_ui::append_footer_log(&format!("ai: active_session={session_id}"));
+
+    match request_ai_stream_with_retry(
+        provider.as_ref(),
+        &request,
+        retry_policy,
+        &ai_metrics,
+        intent,
+    )
+    .await
+    {
+        Ok((chunks, retries)) => {
+            ai_metrics.record_timing("runtime_ai_request_latency", request_started.elapsed());
+            ai_metrics.set_gauge("runtime_ai_last_retry_count", retries as f64);
+            if chunks.is_empty() {
+                ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                ai_metrics.increment_counter("runtime_ai_requests_empty_stream_total");
+                set_ai_provider_health(&ai_metrics, provider_id, false);
+                update_ai_request_rate_gauges(&ai_metrics);
+                println!(
+                    "{}",
+                    "✗ AI provider returned an empty stream"
+                        .color(Color::RED)
+                        .bold()
+                );
+                let _ = nettoolskit_ui::append_footer_log("ai: empty stream");
+                return ExitStatus::Error;
+            }
+
+            let mut output = String::new();
+            for chunk in chunks {
+                if !chunk.content.is_empty() {
+                    print!("{}", chunk.content);
+                    let _ = io::stdout().flush();
+                    output.push_str(&chunk.content);
+                    let _ = nettoolskit_ui::append_footer_log(&format!(
+                        "ai: stream chunk ({} chars)",
+                        chunk.content.chars().count()
+                    ));
+                }
+                if chunk.done {
+                    break;
+                }
+            }
+
+            println!();
+            if output.trim().is_empty() {
+                ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                ai_metrics.increment_counter("runtime_ai_requests_empty_output_total");
+                set_ai_provider_health(&ai_metrics, provider_id, false);
+                update_ai_request_rate_gauges(&ai_metrics);
+                println!(
+                    "{}",
+                    "✗ AI provider returned empty output content"
+                        .color(Color::RED)
+                        .bold()
+                );
+                let _ = nettoolskit_ui::append_footer_log("ai: empty output content");
+                return ExitStatus::Error;
+            }
+
+            persist_ai_session_exchange(&session_id, intent, provider_id, &prompt, &output);
+            record_ai_usage_estimates(&ai_metrics, &request, &output);
+            ai_metrics.increment_counter("runtime_ai_requests_success_total");
+            ai_metrics.increment_counter(format!(
+                "runtime_ai_provider_{}_success_total",
+                provider_metric
+            ));
+            set_ai_provider_health(&ai_metrics, provider_id, true);
+            update_ai_request_rate_gauges(&ai_metrics);
+            let _ = nettoolskit_ui::append_footer_log("ai: stream completed");
+            ExitStatus::Success
+        }
+        Err(error) => {
+            ai_metrics.increment_counter("runtime_ai_requests_error_total");
+            ai_metrics.increment_counter(format!(
+                "runtime_ai_provider_{}_error_total",
+                provider_metric
+            ));
+            ai_metrics.record_timing("runtime_ai_request_latency", request_started.elapsed());
+            if matches!(error, AiProviderError::Timeout { .. }) {
+                ai_metrics.increment_counter("runtime_ai_requests_timeout_total");
+            }
+            set_ai_provider_health(&ai_metrics, provider_id, false);
+            update_ai_request_rate_gauges(&ai_metrics);
+            println!(
+                "{} {}",
+                "✗ AI request failed:".color(Color::RED).bold(),
+                error.to_string().color(Color::RED)
+            );
+            if let Some(guidance) = ai_error_guidance_message(&error) {
+                println!("{}", guidance.color(Color::YELLOW));
+            }
+            let _ = nettoolskit_ui::append_footer_log(&format!("ai: request failed - {error}"));
+            ExitStatus::Error
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AsyncManifestAlias {
+    New,
+    Render,
+    Apply,
+}
+
+fn detect_async_manifest_alias(
+    parsed: Option<MainAction>,
+    parts: &[&str],
+    subcommand: Option<&str>,
+) -> Option<AsyncManifestAlias> {
+    if matches!(parsed, Some(MainAction::Manifest)) {
+        return match subcommand {
+            Some("new-async") => Some(AsyncManifestAlias::New),
+            Some("render-async") => Some(AsyncManifestAlias::Render),
+            Some("apply-async") => Some(AsyncManifestAlias::Apply),
+            _ => None,
+        };
+    }
+
+    let top_level = parts
+        .first()
+        .copied()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches('/')
+        .to_ascii_lowercase();
+
+    match top_level.as_str() {
+        "new-async" => Some(AsyncManifestAlias::New),
+        "render-async" => Some(AsyncManifestAlias::Render),
+        "apply-async" => Some(AsyncManifestAlias::Apply),
+        _ => None,
+    }
+}
+
+fn async_alias_arg_start(parts: &[&str]) -> usize {
+    if parts.first().copied() == Some("/") {
+        if parts.get(1).copied() == Some("manifest") {
+            return 3;
+        }
+        return 2;
+    }
+
+    if matches!(parts.first().copied(), Some("/manifest" | "manifest")) {
+        2
+    } else {
+        1
+    }
+}
+
+fn encode_exit_status(status: ExitStatus) -> &'static str {
+    match status {
+        ExitStatus::Success => "success",
+        ExitStatus::Error => "error",
+        ExitStatus::Interrupted => "interrupted",
+    }
+}
+
+fn decode_exit_status(token: &str) -> ExitStatus {
+    match token {
+        "success" => ExitStatus::Success,
+        "interrupted" => ExitStatus::Interrupted,
+        _ => ExitStatus::Error,
+    }
+}
+
+fn format_async_progress(operation: &str, progress: &CommandProgress) -> String {
+    let mut segments = vec![format!("{operation}: {}", progress.message)];
+
+    if let Some(percent) = progress.percent {
+        segments.push(format!("{percent}%"));
+    }
+
+    if let (Some(completed), Some(total)) = (progress.completed, progress.total) {
+        segments.push(format!("{completed}/{total}"));
+    }
+
+    segments.join(" | ")
+}
+
+fn interrupt_requested(interrupted: Option<&AtomicBool>) -> bool {
+    interrupted.is_some_and(|flag| flag.load(Ordering::SeqCst))
+}
+
+async fn cancel_async_alias_execution(
+    operation: &str,
+    executor: &mut AsyncCommandExecutor,
+) -> ExitStatus {
+    let _ = nettoolskit_ui::append_footer_log(&format!(
+        "{operation}: Ctrl+C detected, cancelling async operation"
+    ));
+    executor.cancel_all().await;
+    let _ = nettoolskit_ui::append_footer_log(&format!("{operation}: async operation cancelled"));
+    ExitStatus::Interrupted
+}
+
+async fn run_async_alias_with_progress<F, Fut>(
+    operation: &str,
+    interrupted: Option<&AtomicBool>,
+    factory: F,
+) -> ExitStatus
+where
+    F: FnOnce(ProgressSender) -> Fut + Send + 'static,
+    Fut: Future<Output = ExitStatus> + Send + 'static,
+{
+    let mut executor = AsyncCommandExecutor::new();
+    let (handle, mut progress_rx) = executor.spawn_with_progress(move |progress_tx| async move {
+        let status = factory(progress_tx).await;
+        Ok(encode_exit_status(status).to_string())
+    });
+
+    if interrupt_requested(interrupted) {
+        return cancel_async_alias_execution(operation, &mut executor).await;
+    }
+
+    loop {
+        tokio::select! {
+            progress = progress_rx.recv() => {
+                match progress {
+                    Some(progress) => {
+                        let _ = nettoolskit_ui::append_footer_log(&format_async_progress(operation, &progress));
+                    }
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(25)), if interrupted.is_some() => {
+                if interrupt_requested(interrupted) {
+                    return cancel_async_alias_execution(operation, &mut executor).await;
+                }
+            }
+        }
+    }
+
+    if interrupt_requested(interrupted) {
+        return cancel_async_alias_execution(operation, &mut executor).await;
+    }
+
+    let status = match handle.wait().await {
+        Ok(Ok(token)) => decode_exit_status(&token),
+        Ok(Err(err)) => {
+            let _ = nettoolskit_ui::append_footer_log(&format!(
+                "{operation}: async worker error: {err}"
+            ));
+            ExitStatus::Error
+        }
+        Err(err) => {
+            let _ = nettoolskit_ui::append_footer_log(&format!(
+                "{operation}: async result channel failed: {err}"
+            ));
+            ExitStatus::Error
+        }
+    };
+
+    executor.wait_all().await;
+    status
+}
+
+async fn process_async_manifest_alias(
+    alias: AsyncManifestAlias,
+    parts: &[&str],
+    interrupted: Option<&AtomicBool>,
+) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    let arg_start = async_alias_arg_start(parts);
+    let output_override = parse_output_root(parts);
+    let dry_run = has_flag(parts, "--dry-run");
+
+    match alias {
+        AsyncManifestAlias::Render => {
+            let manifest_path = match resolve_manifest_target_path_from(parts, "render", arg_start)
+            {
+                Ok(path) => path,
+                Err(status) => return status,
+            };
+            let output_root =
+                output_override.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+            println!(
+                "{}",
+                "🎨 Rendering Preview (Async)".color(Color::CYAN).bold()
+            );
+            println!("Manifest: {}", manifest_path.display());
+            println!("Output root: {}", output_root.display());
+            println!(
+                "{}",
+                "DRY-RUN mode enabled (preview only)".color(Color::YELLOW)
+            );
+            println!();
+
+            run_async_alias_with_progress(
+                "render-async",
+                interrupted,
+                move |progress_tx| async move {
+                    let _ = progress_tx
+                        .send(CommandProgress::percent("Preparing manifest context", 15));
+                    let _ = progress_tx.send(CommandProgress::steps("Render stages", 1, 3));
+
+                    let config = nettoolskit_manifest::ExecutionConfig {
+                        manifest_path,
+                        output_root,
+                        dry_run: true,
+                    };
+
+                    let _ = progress_tx.send(CommandProgress::percent("Rendering preview", 60));
+                    let _ = progress_tx.send(CommandProgress::steps("Render stages", 2, 3));
+
+                    let executor = nettoolskit_manifest::ManifestExecutor::new();
+                    match executor.execute(config).await {
+                        Ok(summary) => {
+                            let _ = progress_tx.send(CommandProgress::percent("Completed", 100));
+                            let _ = progress_tx.send(CommandProgress::steps("Render stages", 3, 3));
+                            println!("{}", "✓ Render preview completed".color(Color::GREEN));
+                            println!();
+                            print_execution_summary(&summary);
+                            ExitStatus::Success
+                        }
+                        Err(err) => {
+                            let _ = progress_tx.send(CommandProgress::percent("Failed", 100));
+                            println!(
+                                "{} {err}",
+                                "✗ Render preview failed:".color(Color::RED).bold()
+                            );
+                            ExitStatus::Error
+                        }
+                    }
+                },
+            )
+            .await
+        }
+        AsyncManifestAlias::Apply | AsyncManifestAlias::New => {
+            let Some(manifest_path) = first_positional_path(parts, arg_start) else {
+                let command_name = if alias == AsyncManifestAlias::New {
+                    "/new-async"
+                } else {
+                    "/apply-async"
+                };
+                println!(
+                    "{} {}",
+                    "✗ Missing manifest path for".color(Color::RED).bold(),
+                    command_name.color(Color::CYAN)
+                );
+                println!(
+                    "{}",
+                    format!("Usage: {command_name} <manifest-file> [--dry-run] [--output <dir>]")
+                        .color(Color::YELLOW)
+                );
+                return ExitStatus::Error;
+            };
+
+            let operation = if alias == AsyncManifestAlias::New {
+                "new-async"
+            } else {
+                "apply-async"
+            };
+
+            run_async_alias_with_progress(operation, interrupted, move |progress_tx| async move {
+                let _ = progress_tx.send(CommandProgress::percent("Preparing apply plan", 20));
+                let _ = progress_tx.send(CommandProgress::steps("Apply stages", 1, 3));
+
+                let _ = progress_tx.send(CommandProgress::percent("Applying manifest", 65));
+                let _ = progress_tx.send(CommandProgress::steps("Apply stages", 2, 3));
+
+                let status =
+                    nettoolskit_manifest::execute_apply(manifest_path, output_override, dry_run)
+                        .await;
+
+                let completion = if matches!(status, ExitStatus::Success) {
+                    "Completed"
+                } else {
+                    "Finished with errors"
+                };
+                let _ = progress_tx.send(CommandProgress::percent(completion, 100));
+                let _ = progress_tx.send(CommandProgress::steps("Apply stages", 3, 3));
+                status
+            })
+            .await
+        }
+    }
+}
+
 /// Process slash commands from CLI and return appropriate status
 ///
 /// This function handles the mapping between CLI slash commands and the actual
@@ -412,6 +1838,17 @@ fn parse_translate_request(
 ///
 /// Returns `ExitStatus` indicating the result of command execution
 pub async fn process_command(cmd: &str) -> ExitStatus {
+    process_command_with_interrupt(cmd, None).await
+}
+
+/// Process slash commands from CLI and return appropriate status, with optional interrupt flag.
+///
+/// When `interrupted` is provided, long-running async aliases can react to Ctrl+C and
+/// return [`ExitStatus::Interrupted`] deterministically.
+pub async fn process_command_with_interrupt(
+    cmd: &str,
+    interrupted: Option<&AtomicBool>,
+) -> ExitStatus {
     let correlation_id = next_correlation_id("cmd");
     let execution_span =
         info_span!("orchestrator.command", correlation_id = %correlation_id, command = %cmd);
@@ -448,286 +1885,393 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
 
     metrics.increment_counter("runtime_commands_total");
     metrics.increment_counter(format!("runtime_command_{command_key}_total"));
+    metrics.set_gauge(
+        "runtime_command_plugins_enabled",
+        command_plugin_count() as f64,
+    );
 
-    let result = match parsed {
-        Some(MainAction::Help) => {
-            use nettoolskit_ui::Color;
-            println!("{}", "NetToolsKit CLI - Help".color(Color::CYAN).bold());
-            println!("\n{}", "Available Commands:".color(Color::WHITE).bold());
-            println!();
+    let before_hook_stats = run_before_command_plugins(&CommandHookContext {
+        correlation_id: correlation_id.clone(),
+        command: cmd.to_string(),
+        command_key: command_key.clone(),
+        status: None,
+    });
+    metrics.set_gauge(
+        "runtime_command_plugins_last_before_invoked",
+        before_hook_stats.invoked as f64,
+    );
+    metrics.set_gauge(
+        "runtime_command_plugins_last_before_failures",
+        before_hook_stats.failures as f64,
+    );
+    if before_hook_stats.failures > 0 {
+        metrics.increment_counter("runtime_command_plugins_hook_errors_total");
+    }
 
-            for command in MainAction::iter() {
-                println!(
-                    "  {} - {}",
-                    command.slash_static().color(Color::GREEN),
-                    command.description()
-                );
-            }
-
-            println!("\n{}", "Usage:".color(Color::WHITE).bold());
-            println!(
-                "  • Type {} to open the command palette",
-                "/".color(Color::GREEN)
-            );
-            println!(
-                "  • Type a command directly (e.g., {})",
-                "/help".color(Color::GREEN)
-            );
-            println!(
-                "  • Use {} to navigate in the palette",
-                "↑↓".color(Color::CYAN)
-            );
-            println!(
-                "  • Press {} to select a command",
-                "Enter".color(Color::CYAN)
-            );
-
-            println!("\n{}", "Examples:".color(Color::WHITE).bold());
-            println!("  {} - Show this help", "/help".color(Color::GREEN));
-            println!("  {} - Manage manifests", "/manifest".color(Color::GREEN));
-            println!(
-                "  {} - View or edit configuration",
-                "/config".color(Color::GREEN)
-            );
-            println!(
-                "  {} - Clear and redraw terminal layout",
-                "/clear".color(Color::GREEN)
-            );
-            println!("  {} - Exit the CLI", "/quit".color(Color::GREEN));
-
-            ExitStatus::Success
-        }
-        Some(MainAction::Manifest) => {
-            use nettoolskit_ui::Color;
-            match subcommand {
-                Some("list") => {
-                    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                    println!("{}", "📋 Manifest Discovery".color(Color::CYAN).bold());
-                    println!("Root: {}", cwd.display().to_string().color(Color::WHITE));
-                    println!();
-
-                    match discover_manifest_files(&cwd) {
-                        Ok(found) if found.is_empty() => {
-                            println!("{}", "No manifest files found.".color(Color::YELLOW));
-                            ExitStatus::Error
-                        }
-                        Ok(found) => {
-                            println!(
-                                "{}",
-                                format!("Found {} manifest file(s):", found.len())
-                                    .color(Color::GREEN)
-                            );
-                            for path in found {
-                                println!("  - {}", relative_path_for_display(&cwd, &path));
-                            }
-                            ExitStatus::Success
-                        }
-                        Err(err) => {
-                            println!("{} {err}", "✗ Discovery failed:".color(Color::RED).bold());
-                            ExitStatus::Error
-                        }
+    let result = if let Some(alias) = detect_async_manifest_alias(parsed, &parts, subcommand) {
+        process_async_manifest_alias(alias, &parts, interrupted).await
+    } else {
+        match parsed {
+            Some(MainAction::Help) => {
+                let help_key = CacheKey::help();
+                let help_markdown = match with_command_cache(|cache| cache.get(&help_key)) {
+                    Some(CacheValue::HelpMarkdown(markdown)) => {
+                        metrics.increment_counter("runtime_command_cache_hits_total");
+                        metrics.increment_counter("runtime_command_cache_help_hits_total");
+                        markdown
                     }
-                }
-                Some("check") => {
-                    let is_template = has_flag(&parts, "--template");
-                    if is_template && first_manifest_positional_path(&parts).is_none() {
-                        println!(
-                            "{}",
-                            "Template validation requires a file path: /manifest check <file> --template"
-                                .color(Color::RED)
-                                .bold()
+                    _ => {
+                        metrics.increment_counter("runtime_command_cache_misses_total");
+                        metrics.increment_counter("runtime_command_cache_help_misses_total");
+
+                        let mut commands_section = String::new();
+                        for command in MainAction::iter() {
+                            commands_section.push_str(&format!(
+                                "- `{}` - {}\n",
+                                command.slash_static(),
+                                command.description()
+                            ));
+                        }
+
+                        let generated = format!(
+                            "\
+# NetToolsKit CLI - Help
+
+## Available Commands
+{commands_section}
+## Usage
+- Type `/` to open the command palette
+- Type a command directly (for example `/help`)
+- Use `↑↓` to navigate in the palette
+- Press `Enter` to select a command
+
+## Examples
+- `/help` - Show this help
+- `/manifest` - Manage manifests
+- `/render-async <manifest>` - Run async render preview with progress
+- `/apply-async <manifest>` - Run async apply with progress
+- `/new-async <manifest>` - Run async scaffolding alias
+- `/config` - View or edit configuration
+- `/ai ask <prompt>` - Ask the AI assistant
+- `/ai plan <goal>` - Generate an implementation plan
+- `/ai explain <topic>` - Get a technical explanation
+- `/ai resume <session-id>` - Set active local AI session id for conversation continuity
+- `/ai apply --dry-run <instruction>` - Generate non-destructive patch guidance
+- `/ai apply --approve-write <instruction>` - Explicitly approve mutating apply intent
+- `/clear` - Clear and redraw terminal layout
+- `/quit` - Exit the CLI
+"
                         );
-                        ExitStatus::Error
-                    } else {
-                        match resolve_manifest_target_path(&parts, "check") {
-                            Ok(target_path) => {
-                                println!("{}", "✅ Validating Manifest".color(Color::CYAN).bold());
-                                println!("Target: {}", target_path.display());
-                                println!();
 
-                                match nettoolskit_manifest::handlers::check::check_file(
-                                    &target_path,
-                                    is_template,
-                                )
-                                .await
-                                {
-                                    Ok(validation) => {
-                                        print_manifest_validation(&target_path, &validation);
-                                        if validation.is_valid() {
-                                            ExitStatus::Success
-                                        } else {
-                                            ExitStatus::Error
-                                        }
-                                    }
-                                    Err(err) => {
-                                        println!(
-                                            "{} {err}",
-                                            "✗ Manifest validation failed:"
-                                                .color(Color::RED)
-                                                .bold()
-                                        );
-                                        ExitStatus::Error
-                                    }
-                                }
-                            }
-                            Err(status) => status,
-                        }
-                    }
-                }
-                Some("render") => match resolve_manifest_target_path(&parts, "render") {
-                    Ok(manifest_path) => {
-                        let output_root = parse_output_root(&parts).unwrap_or_else(|| {
-                            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                        let _ = with_command_cache(|cache| {
+                            cache.insert(help_key, CacheValue::HelpMarkdown(generated.clone()))
                         });
-                        let dry_run = true;
 
-                        println!("{}", "🎨 Rendering Preview".color(Color::CYAN).bold());
-                        println!("Manifest: {}", manifest_path.display());
-                        println!("Output root: {}", output_root.display());
-                        println!(
-                            "{}",
-                            "DRY-RUN mode enabled (preview only)".color(Color::YELLOW)
-                        );
+                        generated
+                    }
+                };
+
+                println!("{}", nettoolskit_ui::render_markdown(&help_markdown));
+
+                ExitStatus::Success
+            }
+            Some(MainAction::Manifest) => {
+                use nettoolskit_ui::Color;
+                match subcommand {
+                    Some("list") => {
+                        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                        println!("{}", "📋 Manifest Discovery".color(Color::CYAN).bold());
+                        println!("Root: {}", cwd.display().to_string().color(Color::WHITE));
                         println!();
 
-                        let config = nettoolskit_manifest::ExecutionConfig {
-                            manifest_path,
-                            output_root,
-                            dry_run,
+                        let cache_key = CacheKey::manifest_list(&cwd);
+                        let discovery = match with_command_cache(|cache| cache.get(&cache_key)) {
+                            Some(CacheValue::ManifestListEntries(entries)) => {
+                                metrics.increment_counter("runtime_command_cache_hits_total");
+                                metrics
+                                    .increment_counter("runtime_command_cache_manifest_hits_total");
+                                Ok(entries)
+                            }
+                            _ => {
+                                metrics.increment_counter("runtime_command_cache_misses_total");
+                                metrics.increment_counter(
+                                    "runtime_command_cache_manifest_misses_total",
+                                );
+                                match discover_manifest_files(&cwd) {
+                                    Ok(found) => {
+                                        let _ = with_command_cache(|cache| {
+                                            cache.insert(
+                                                cache_key,
+                                                CacheValue::ManifestListEntries(found.clone()),
+                                            )
+                                        });
+                                        Ok(found)
+                                    }
+                                    Err(err) => Err(err),
+                                }
+                            }
                         };
 
-                        let executor = nettoolskit_manifest::ManifestExecutor::new();
-                        match executor.execute(config).await {
-                            Ok(summary) => {
-                                println!("{}", "✓ Render preview completed".color(Color::GREEN));
-                                println!();
-                                print_execution_summary(&summary);
+                        match discovery {
+                            Ok(found) if found.is_empty() => {
+                                println!("{}", "No manifest files found.".color(Color::YELLOW));
+                                ExitStatus::Error
+                            }
+                            Ok(found) => {
+                                println!(
+                                    "{}",
+                                    format!("Found {} manifest file(s):", found.len())
+                                        .color(Color::GREEN)
+                                );
+                                for path in found {
+                                    println!("  - {}", relative_path_for_display(&cwd, &path));
+                                }
                                 ExitStatus::Success
                             }
                             Err(err) => {
                                 println!(
                                     "{} {err}",
-                                    "✗ Render preview failed:".color(Color::RED).bold()
+                                    "✗ Discovery failed:".color(Color::RED).bold()
                                 );
                                 ExitStatus::Error
                             }
                         }
                     }
-                    Err(status) => status,
-                },
-                Some("apply") => {
-                    // Parse apply command arguments
-                    // Format: /manifest apply <PATH> [--dry-run] [--output DIR]
+                    Some("check") => {
+                        let is_template = has_flag(&parts, "--template");
+                        if is_template && first_manifest_positional_path(&parts).is_none() {
+                            println!(
+                            "{}",
+                            "Template validation requires a file path: /manifest check <file> --template"
+                                .color(Color::RED)
+                                .bold()
+                        );
+                            ExitStatus::Error
+                        } else {
+                            match resolve_manifest_target_path(&parts, "check") {
+                                Ok(target_path) => {
+                                    println!(
+                                        "{}",
+                                        "✅ Validating Manifest".color(Color::CYAN).bold()
+                                    );
+                                    println!("Target: {}", target_path.display());
+                                    println!();
 
-                    let manifest_path = first_manifest_positional_path(&parts);
-                    let dry_run = has_flag(&parts, "--dry-run");
-                    let output_root = parse_output_root(&parts);
-
-                    match manifest_path {
-                        Some(path) => {
-                            // Execute apply handler
-                            nettoolskit_manifest::execute_apply(path, output_root, dry_run).await
-                        }
-                        None => {
-                            info!(
-                                "Manifest apply called without path; opening interactive apply flow"
-                            );
-                            nettoolskit_manifest::show_apply_menu().await
+                                    match nettoolskit_manifest::handlers::check::check_file(
+                                        &target_path,
+                                        is_template,
+                                    )
+                                    .await
+                                    {
+                                        Ok(validation) => {
+                                            print_manifest_validation(&target_path, &validation);
+                                            if validation.is_valid() {
+                                                ExitStatus::Success
+                                            } else {
+                                                ExitStatus::Error
+                                            }
+                                        }
+                                        Err(err) => {
+                                            println!(
+                                                "{} {err}",
+                                                "✗ Manifest validation failed:"
+                                                    .color(Color::RED)
+                                                    .bold()
+                                            );
+                                            ExitStatus::Error
+                                        }
+                                    }
+                                }
+                                Err(status) => status,
+                            }
                         }
                     }
-                }
-                None => {
-                    // No subcommand provided - show interactive menu from manifest crate
-                    info!("Opening manifest interactive menu (no subcommand)");
-                    nettoolskit_manifest::show_menu().await
-                }
-                _ => {
-                    println!("{}", "📋 Manifest Commands".color(Color::CYAN).bold());
-                    println!("\nAvailable subcommands:");
-                    println!(
-                        "  {} - Discover available manifests in the workspace",
-                        "/manifest list".color(Color::GREEN)
-                    );
-                    println!(
-                        "  {} - Validate manifest structure and dependencies",
-                        "/manifest check".color(Color::GREEN)
-                    );
-                    println!(
-                        "  {} - Preview generated files without creating them",
-                        "/manifest render".color(Color::GREEN)
-                    );
-                    println!(
-                        "  {} - Apply manifest to generate/update project files",
-                        "/manifest apply".color(Color::GREEN)
-                    );
-                    println!("\n{}", "💡 Type a subcommand to continue or just type /manifest for interactive menu".color(Color::YELLOW));
-                    ExitStatus::Success
+                    Some("render") => match resolve_manifest_target_path(&parts, "render") {
+                        Ok(manifest_path) => {
+                            let output_root = parse_output_root(&parts).unwrap_or_else(|| {
+                                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                            });
+                            let dry_run = true;
+
+                            println!("{}", "🎨 Rendering Preview".color(Color::CYAN).bold());
+                            println!("Manifest: {}", manifest_path.display());
+                            println!("Output root: {}", output_root.display());
+                            println!(
+                                "{}",
+                                "DRY-RUN mode enabled (preview only)".color(Color::YELLOW)
+                            );
+                            println!();
+
+                            let config = nettoolskit_manifest::ExecutionConfig {
+                                manifest_path,
+                                output_root,
+                                dry_run,
+                            };
+
+                            let executor = nettoolskit_manifest::ManifestExecutor::new();
+                            match executor.execute(config).await {
+                                Ok(summary) => {
+                                    println!(
+                                        "{}",
+                                        "✓ Render preview completed".color(Color::GREEN)
+                                    );
+                                    println!();
+                                    print_execution_summary(&summary);
+                                    ExitStatus::Success
+                                }
+                                Err(err) => {
+                                    println!(
+                                        "{} {err}",
+                                        "✗ Render preview failed:".color(Color::RED).bold()
+                                    );
+                                    ExitStatus::Error
+                                }
+                            }
+                        }
+                        Err(status) => status,
+                    },
+                    Some("apply") => {
+                        // Parse apply command arguments
+                        // Format: /manifest apply <PATH> [--dry-run] [--output DIR]
+
+                        let manifest_path = first_manifest_positional_path(&parts);
+                        let dry_run = has_flag(&parts, "--dry-run");
+                        let output_root = parse_output_root(&parts);
+
+                        match manifest_path {
+                            Some(path) => {
+                                // Execute apply handler
+                                nettoolskit_manifest::execute_apply(path, output_root, dry_run)
+                                    .await
+                            }
+                            None => {
+                                info!(
+                                "Manifest apply called without path; opening interactive apply flow"
+                            );
+                                nettoolskit_manifest::show_apply_menu().await
+                            }
+                        }
+                    }
+                    None => {
+                        // No subcommand provided - show interactive menu from manifest crate
+                        info!("Opening manifest interactive menu (no subcommand)");
+                        nettoolskit_manifest::show_menu().await
+                    }
+                    _ => {
+                        println!("{}", "📋 Manifest Commands".color(Color::CYAN).bold());
+                        println!("\nAvailable subcommands:");
+                        println!(
+                            "  {} - Discover available manifests in the workspace",
+                            "/manifest list".color(Color::GREEN)
+                        );
+                        println!(
+                            "  {} - Validate manifest structure and dependencies",
+                            "/manifest check".color(Color::GREEN)
+                        );
+                        println!(
+                            "  {} - Preview generated files without creating them",
+                            "/manifest render".color(Color::GREEN)
+                        );
+                        println!(
+                            "  {} - Async preview with progress updates",
+                            "/manifest render-async".color(Color::GREEN)
+                        );
+                        println!(
+                            "  {} - Apply manifest to generate/update project files",
+                            "/manifest apply".color(Color::GREEN)
+                        );
+                        println!(
+                            "  {} - Async apply with progress updates",
+                            "/manifest apply-async".color(Color::GREEN)
+                        );
+                        println!("\n{}", "💡 Type a subcommand to continue or just type /manifest for interactive menu".color(Color::YELLOW));
+                        ExitStatus::Success
+                    }
                 }
             }
-        }
-        Some(MainAction::Translate) => {
-            use nettoolskit_ui::Color;
-            match parse_translate_request(&parts) {
-                Ok(request) => nettoolskit_translate::handle_translate(request).await,
-                Err(reason) => {
-                    println!("{}", "🔄 Translate Command".color(Color::CYAN).bold());
-                    println!();
-                    println!(
-                        "{} {reason}",
-                        "✗ Invalid translate arguments:".color(Color::RED).bold()
-                    );
-                    println!();
-                    println!("{}", "Usage:".color(Color::WHITE).bold());
-                    println!(
-                        "  {} --from <language> --to <language> <template-path>",
-                        "/translate".color(Color::GREEN)
-                    );
-                    println!();
-                    println!("{}", "Examples:".color(Color::WHITE).bold());
-                    println!(
-                        "  {} --from dotnet --to rust ./templates/entity.cs.hbs",
-                        "/translate".color(Color::GREEN)
-                    );
-                    println!(
-                        "  {} --from python --to java ./templates/service.py.hbs",
-                        "/translate".color(Color::GREEN)
-                    );
-                    println!();
-                    println!(
+            Some(MainAction::Translate) => {
+                use nettoolskit_ui::Color;
+                match parse_translate_request(&parts) {
+                    Ok(request) => nettoolskit_translate::handle_translate(request).await,
+                    Err(reason) => {
+                        println!("{}", "🔄 Translate Command".color(Color::CYAN).bold());
+                        println!();
+                        println!(
+                            "{} {reason}",
+                            "✗ Invalid translate arguments:".color(Color::RED).bold()
+                        );
+                        println!();
+                        println!("{}", "Usage:".color(Color::WHITE).bold());
+                        println!(
+                            "  {} --from <language> --to <language> <template-path>",
+                            "/translate".color(Color::GREEN)
+                        );
+                        println!();
+                        println!("{}", "Examples:".color(Color::WHITE).bold());
+                        println!(
+                            "  {} --from dotnet --to rust ./templates/entity.cs.hbs",
+                            "/translate".color(Color::GREEN)
+                        );
+                        println!(
+                            "  {} --from python --to java ./templates/service.py.hbs",
+                            "/translate".color(Color::GREEN)
+                        );
+                        println!();
+                        println!(
                         "{}",
                         "Supported languages: dotnet, java, go, python, rust, clojure, typescript"
                             .color(Color::YELLOW)
                     );
+                        println!(
+                            "{}",
+                            "Note: clojure/typescript currently use baseline convention mapping."
+                                .color(Color::YELLOW)
+                        );
+                        ExitStatus::Error
+                    }
+                }
+            }
+            Some(MainAction::Ai) => process_ai_command(&parts, subcommand).await,
+            Some(MainAction::Config) => process_config_command(&parts),
+            Some(MainAction::Clear) => match nettoolskit_ui::reset_layout() {
+                Ok(()) => ExitStatus::Success,
+                Err(err) => {
+                    use nettoolskit_ui::Color;
                     println!(
-                        "{}",
-                        "Note: targets clojure/typescript are currently beta-limited."
-                            .color(Color::YELLOW)
+                        "{}: {err}",
+                        "Failed to reset terminal layout".color(Color::RED).bold()
                     );
                     ExitStatus::Error
                 }
-            }
-        }
-        Some(MainAction::Config) => process_config_command(&parts),
-        Some(MainAction::Clear) => match nettoolskit_ui::reset_layout() {
-            Ok(()) => ExitStatus::Success,
-            Err(err) => {
+            },
+            Some(MainAction::Quit) => ExitStatus::Success, // Handled by CLI loop
+            None => {
                 use nettoolskit_ui::Color;
-                println!(
-                    "{}: {err}",
-                    "Failed to reset terminal layout".color(Color::RED).bold()
-                );
+                tracing::warn!("Unknown command attempted: {}", cmd);
+                metrics.increment_counter("unknown_command_attempts");
+                println!("{}: {}", "Unknown command".color(Color::RED), cmd);
                 ExitStatus::Error
             }
-        },
-        Some(MainAction::Quit) => ExitStatus::Success, // Handled by CLI loop
-        None => {
-            use nettoolskit_ui::Color;
-            tracing::warn!("Unknown command attempted: {}", cmd);
-            metrics.increment_counter("unknown_command_attempts");
-            println!("{}: {}", "Unknown command".color(Color::RED), cmd);
-            ExitStatus::Error
         }
     };
+
+    let after_hook_stats = run_after_command_plugins(&CommandHookContext {
+        correlation_id: correlation_id.clone(),
+        command: cmd.to_string(),
+        command_key: command_key.clone(),
+        status: Some(result),
+    });
+    metrics.set_gauge(
+        "runtime_command_plugins_last_after_invoked",
+        after_hook_stats.invoked as f64,
+    );
+    metrics.set_gauge(
+        "runtime_command_plugins_last_after_failures",
+        after_hook_stats.failures as f64,
+    );
+    if after_hook_stats.failures > 0 {
+        metrics.increment_counter("runtime_command_plugins_hook_errors_total");
+    }
 
     // Stop timer and log result with structured data
     let duration = timer.stop();
@@ -741,6 +2285,8 @@ pub async fn process_command(cmd: &str) -> ExitStatus {
     };
     let status_str = record_command_outcome_metrics(&metrics, &command_key, result);
     update_runtime_rate_gauges(&metrics);
+    let cache_stats = with_command_cache(|cache| cache.stats());
+    maybe_log_command_cache_stats(cache_stats, &metrics);
 
     info!(
         correlation_id = %correlation_id,
@@ -838,6 +2384,9 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
                 Ok(()) => match config.save_to(&config_path) {
                     Ok(()) => {
                         apply_runtime_ui_config(&config);
+                        if is_ai_session_retention_key(key) {
+                            apply_ai_session_retention_policy(config.general.ai_session_retention);
+                        }
                         println!(
                             "{} {}={}",
                             "✅ Updated".color(Color::GREEN).bold(),
@@ -872,6 +2421,9 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
                 Ok(()) => match config.save_to(&config_path) {
                     Ok(()) => {
                         apply_runtime_ui_config(&config);
+                        if is_ai_session_retention_key(key) {
+                            apply_ai_session_retention_policy(config.general.ai_session_retention);
+                        }
                         println!(
                             "{} {}",
                             "✅ Reset".color(Color::GREEN).bold(),
@@ -897,6 +2449,7 @@ fn process_config_command(parts: &[&str]) -> ExitStatus {
             match config.save_to(&config_path) {
                 Ok(()) => {
                     apply_runtime_ui_config(&config);
+                    apply_ai_session_retention_policy(config.general.ai_session_retention);
                     println!(
                         "{}",
                         "✅ Configuration reset to defaults"
@@ -946,6 +2499,23 @@ fn print_effective_config(config_path: &Path) {
     println!("  verbose = {}", effective.general.verbose);
     println!("  log_level = {}", effective.general.log_level);
     println!("  footer_output = {}", effective.general.footer_output);
+    println!("  attention_bell = {}", effective.general.attention_bell);
+    println!(
+        "  attention_desktop_notification = {}",
+        effective.general.attention_desktop_notification
+    );
+    println!(
+        "  attention_unfocused_only = {}",
+        effective.general.attention_unfocused_only
+    );
+    println!(
+        "  predictive_input = {}",
+        effective.general.predictive_input
+    );
+    println!(
+        "  ai_session_retention = {}",
+        effective.general.ai_session_retention
+    );
     println!("{}", "[display]".color(Color::WHITE).bold());
     println!("  color = {}", effective.display.color);
     println!("  unicode = {}", effective.display.unicode);
@@ -973,6 +2543,11 @@ fn print_supported_config_keys() {
     println!("  {}", "verbose".color(Color::CYAN));
     println!("  {}", "log_level".color(Color::CYAN));
     println!("  {}", "footer_output".color(Color::CYAN));
+    println!("  {}", "attention_bell".color(Color::CYAN));
+    println!("  {}", "attention_desktop_notification".color(Color::CYAN));
+    println!("  {}", "attention_unfocused_only".color(Color::CYAN));
+    println!("  {}", "predictive_input".color(Color::CYAN));
+    println!("  {}", "ai_session_retention".color(Color::CYAN));
     println!("  {}", "color".color(Color::CYAN));
     println!("  {}", "unicode".color(Color::CYAN));
     println!("  {}", "template_dir".color(Color::CYAN));
@@ -1004,6 +2579,38 @@ fn apply_runtime_ui_config(config: &AppConfig) {
     nettoolskit_ui::set_footer_output_enabled(config.general.footer_output);
 }
 
+fn is_ai_session_retention_key(key: &str) -> bool {
+    matches!(
+        key.trim().to_ascii_lowercase().as_str(),
+        "ai_session_retention"
+            | "ai-session-retention"
+            | "general.ai_session_retention"
+            | "general.ai-session-retention"
+    )
+}
+
+fn apply_ai_session_retention_policy(retention: usize) {
+    let keep_latest = retention.max(1);
+    match prune_local_ai_session_snapshots(keep_latest) {
+        Ok(Some(removed)) if removed > 0 => {
+            println!(
+                "  {}",
+                format!("Pruned {removed} old local AI session snapshot(s)")
+                    .color(nettoolskit_ui::Color::YELLOW)
+            );
+        }
+        Ok(Some(_)) | Ok(None) => {}
+        Err(err) => {
+            warn!(error = %err, "Failed to apply AI session retention policy");
+            println!(
+                "  {}",
+                format!("Warning: failed to prune local AI sessions: {err}")
+                    .color(nettoolskit_ui::Color::YELLOW)
+            );
+        }
+    }
+}
+
 fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<(), String> {
     let normalized = key.trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -1023,6 +2630,58 @@ fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<()
                 "footer_output must be one of: true, false, 1, 0, yes, no, on, off".to_string()
             })?;
             config.general.footer_output = parsed;
+            Ok(())
+        }
+        "attention_bell"
+        | "attention-bell"
+        | "general.attention_bell"
+        | "general.attention-bell" => {
+            let parsed = parse_bool(value).ok_or_else(|| {
+                "attention_bell must be one of: true, false, 1, 0, yes, no, on, off".to_string()
+            })?;
+            config.general.attention_bell = parsed;
+            Ok(())
+        }
+        "attention_desktop_notification"
+        | "attention-desktop-notification"
+        | "general.attention_desktop_notification"
+        | "general.attention-desktop-notification" => {
+            let parsed = parse_bool(value).ok_or_else(|| {
+                "attention_desktop_notification must be one of: true, false, 1, 0, yes, no, on, off"
+                    .to_string()
+            })?;
+            config.general.attention_desktop_notification = parsed;
+            Ok(())
+        }
+        "attention_unfocused_only"
+        | "attention-unfocused-only"
+        | "general.attention_unfocused_only"
+        | "general.attention-unfocused-only" => {
+            let parsed = parse_bool(value).ok_or_else(|| {
+                "attention_unfocused_only must be one of: true, false, 1, 0, yes, no, on, off"
+                    .to_string()
+            })?;
+            config.general.attention_unfocused_only = parsed;
+            Ok(())
+        }
+        "predictive_input"
+        | "predictive-input"
+        | "general.predictive_input"
+        | "general.predictive-input" => {
+            let parsed = parse_bool(value).ok_or_else(|| {
+                "predictive_input must be one of: true, false, 1, 0, yes, no, on, off".to_string()
+            })?;
+            config.general.predictive_input = parsed;
+            Ok(())
+        }
+        "ai_session_retention"
+        | "ai-session-retention"
+        | "general.ai_session_retention"
+        | "general.ai-session-retention" => {
+            let parsed = parse_positive_usize(value).ok_or_else(|| {
+                "ai_session_retention must be a positive integer (>= 1)".to_string()
+            })?;
+            config.general.ai_session_retention = parsed;
             Ok(())
         }
         "color" | "display.color" => {
@@ -1062,6 +2721,41 @@ fn unset_config_value(config: &mut AppConfig, key: &str) -> Result<(), String> {
             config.general.footer_output = true;
             Ok(())
         }
+        "attention_bell"
+        | "attention-bell"
+        | "general.attention_bell"
+        | "general.attention-bell" => {
+            config.general.attention_bell = false;
+            Ok(())
+        }
+        "attention_desktop_notification"
+        | "attention-desktop-notification"
+        | "general.attention_desktop_notification"
+        | "general.attention-desktop-notification" => {
+            config.general.attention_desktop_notification = false;
+            Ok(())
+        }
+        "attention_unfocused_only"
+        | "attention-unfocused-only"
+        | "general.attention_unfocused_only"
+        | "general.attention-unfocused-only" => {
+            config.general.attention_unfocused_only = false;
+            Ok(())
+        }
+        "predictive_input"
+        | "predictive-input"
+        | "general.predictive_input"
+        | "general.predictive-input" => {
+            config.general.predictive_input = true;
+            Ok(())
+        }
+        "ai_session_retention"
+        | "ai-session-retention"
+        | "general.ai_session_retention"
+        | "general.ai-session-retention" => {
+            config.general.ai_session_retention = default_ai_session_retention();
+            Ok(())
+        }
         "color" | "display.color" => {
             config.display.color = ColorMode::Auto;
             Ok(())
@@ -1088,6 +2782,11 @@ fn parse_bool(value: &str) -> Option<bool> {
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
     }
+}
+
+fn parse_positive_usize(value: &str) -> Option<usize> {
+    let parsed = value.trim().parse::<usize>().ok()?;
+    (parsed > 0).then_some(parsed)
 }
 
 fn parse_log_level(value: &str) -> Result<String, String> {
@@ -1144,12 +2843,41 @@ fn infer_command_from_text(text: &str) -> Option<String> {
         "help" | "ajuda" => Some("/help".to_string()),
         "manifest" | "manifests" => Some(format!("/{}", trimmed)),
         "translate" => Some(format!("/{}", trimmed)),
+        "ai" => Some(format!("/{}", trimmed)),
+        "assistant" | "copilot" => {
+            if tokens.len() > 1 {
+                Some(format!("/ai {}", tokens[1..].join(" ")))
+            } else {
+                Some("/ai".to_string())
+            }
+        }
         "clear" | "cls" | "limpar" => Some("/clear".to_string()),
         "traduzir" => {
             if tokens.len() > 1 {
                 Some(format!("/translate {}", tokens[1..].join(" ")))
             } else {
                 Some("/translate".to_string())
+            }
+        }
+        "perguntar" | "ask" => {
+            if tokens.len() > 1 {
+                Some(format!("/ai ask {}", tokens[1..].join(" ")))
+            } else {
+                Some("/ai ask".to_string())
+            }
+        }
+        "explain" | "explicar" | "explique" => {
+            if tokens.len() > 1 {
+                Some(format!("/ai explain {}", tokens[1..].join(" ")))
+            } else {
+                Some("/ai explain".to_string())
+            }
+        }
+        "plan" | "planejar" | "planeje" => {
+            if tokens.len() > 1 {
+                Some(format!("/ai plan {}", tokens[1..].join(" ")))
+            } else {
+                Some("/ai plan".to_string())
             }
         }
         "config" | "configuracao" | "configuração" | "settings" => Some(format!("/{}", trimmed)),
@@ -1172,6 +2900,16 @@ fn infer_command_from_text(text: &str) -> Option<String> {
             } else if has("config") || has("configuracao") || has("configuração") || has("settings")
             {
                 Some("/config".to_string())
+            } else if has("ai") || has("assistant") || has("copilot") {
+                if has("plan") || has("planejar") || has("planeje") {
+                    Some("/ai plan".to_string())
+                } else if has("explain") || has("explicar") || has("explique") {
+                    Some("/ai explain".to_string())
+                } else if has("apply") || has("aplicar") {
+                    Some("/ai apply --dry-run".to_string())
+                } else {
+                    Some("/ai ask".to_string())
+                }
             } else if has("clear") || has("limpar") || has("cls") {
                 Some("/clear".to_string())
             } else {
@@ -1243,6 +2981,8 @@ pub async fn process_text(text: &str) -> ExitStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn sanitize_metric_component_normalizes_symbols() {
@@ -1271,6 +3011,272 @@ mod tests {
     fn command_metric_key_resolves_unknown_commands() {
         let key = command_metric_key(None, None, "/custom-op --x");
         assert_eq!(key, "unknown_custom_op");
+    }
+
+    #[test]
+    fn detect_async_manifest_alias_matches_top_level_commands() {
+        let parts = vec!["/render-async", "sample.manifest.yaml"];
+        let alias = detect_async_manifest_alias(None, &parts, None);
+        assert_eq!(alias, Some(AsyncManifestAlias::Render));
+
+        let parts = vec!["/apply-async", "sample.manifest.yaml"];
+        let alias = detect_async_manifest_alias(None, &parts, None);
+        assert_eq!(alias, Some(AsyncManifestAlias::Apply));
+
+        let parts = vec!["/new-async", "sample.manifest.yaml"];
+        let alias = detect_async_manifest_alias(None, &parts, None);
+        assert_eq!(alias, Some(AsyncManifestAlias::New));
+    }
+
+    #[test]
+    fn detect_async_manifest_alias_matches_manifest_subcommands() {
+        let parts = vec!["/manifest", "render-async", "sample.manifest.yaml"];
+        let alias =
+            detect_async_manifest_alias(Some(MainAction::Manifest), &parts, Some("render-async"));
+        assert_eq!(alias, Some(AsyncManifestAlias::Render));
+
+        let parts = vec!["/manifest", "apply-async", "sample.manifest.yaml"];
+        let alias =
+            detect_async_manifest_alias(Some(MainAction::Manifest), &parts, Some("apply-async"));
+        assert_eq!(alias, Some(AsyncManifestAlias::Apply));
+    }
+
+    #[test]
+    fn first_positional_path_respects_start_index() {
+        let parts = vec!["/render-async", "sample.manifest.yaml", "--output", "./out"];
+        let path = first_positional_path(&parts, 1);
+        assert_eq!(
+            path.as_deref(),
+            Some(std::path::Path::new("sample.manifest.yaml"))
+        );
+
+        let path = first_positional_path(&parts, 2);
+        assert_eq!(path.as_deref(), Some(std::path::Path::new("./out")));
+    }
+
+    #[test]
+    fn format_async_progress_includes_percent_and_steps() {
+        let progress = CommandProgress::steps("Applying files", 2, 5);
+        let message = format_async_progress("apply-async", &progress);
+        assert!(message.contains("apply-async"));
+        assert!(message.contains("Applying files"));
+        assert!(message.contains("40%"));
+        assert!(message.contains("2/5"));
+    }
+
+    #[test]
+    fn ai_intent_from_subcommand_maps_known_values() {
+        assert_eq!(AiIntent::from_subcommand("ask"), Some(AiIntent::Ask));
+        assert_eq!(AiIntent::from_subcommand("PLAN"), Some(AiIntent::Plan));
+        assert_eq!(
+            AiIntent::from_subcommand("explain"),
+            Some(AiIntent::Explain)
+        );
+        assert_eq!(
+            AiIntent::from_subcommand("apply"),
+            Some(AiIntent::ApplyDryRun)
+        );
+        assert_eq!(AiIntent::from_subcommand("unknown"), None);
+    }
+
+    #[test]
+    fn collect_ai_prompt_skips_flags_and_joins_prompt_tokens() {
+        let parts = vec!["/ai", "apply", "--dry-run", "create", "service", "layer"];
+        let prompt = collect_ai_prompt(&parts, 2);
+        assert_eq!(prompt, "create service layer");
+    }
+
+    #[test]
+    fn parse_ai_context_paths_supports_comma_and_semicolon() {
+        let paths = parse_ai_context_paths(
+            "Cargo.toml, README.md; .temp/planning/enterprise-progress-tracker.md",
+        );
+        assert_eq!(paths.len(), 3);
+        assert_eq!(paths[0], PathBuf::from("Cargo.toml"));
+        assert_eq!(paths[1], PathBuf::from("README.md"));
+        assert_eq!(
+            paths[2],
+            PathBuf::from(".temp/planning/enterprise-progress-tracker.md")
+        );
+    }
+
+    #[test]
+    fn parse_nonzero_usize_rejects_zero_and_invalid_values() {
+        assert_eq!(parse_nonzero_usize("64"), Some(64));
+        assert_eq!(parse_nonzero_usize("0"), None);
+        assert_eq!(parse_nonzero_usize("-1"), None);
+        assert_eq!(parse_nonzero_usize("abc"), None);
+    }
+
+    #[test]
+    fn build_ai_request_includes_system_message_and_stream_mode() {
+        let request = build_ai_request(AiIntent::Plan, "prepare migration plan");
+        assert!(request.stream);
+        assert!(request.max_output_tokens.is_some());
+        assert!(request.temperature.is_some());
+        assert_eq!(
+            request.messages.first().map(|message| message.role),
+            Some(AiRole::System)
+        );
+        assert_eq!(
+            request.messages.get(1).map(|message| message.role),
+            Some(AiRole::User)
+        );
+    }
+
+    #[test]
+    fn is_retriable_ai_error_matches_transient_variants() {
+        assert!(is_retriable_ai_error(&AiProviderError::Timeout {
+            timeout: Duration::from_secs(1)
+        }));
+        assert!(is_retriable_ai_error(&AiProviderError::Unavailable(
+            "maintenance".to_string()
+        )));
+        assert!(is_retriable_ai_error(&AiProviderError::Transport(
+            "socket".to_string()
+        )));
+        assert!(!is_retriable_ai_error(&AiProviderError::InvalidRequest(
+            "bad".to_string()
+        )));
+    }
+
+    #[test]
+    fn ai_retry_delay_is_exponential_and_bounded() {
+        let policy = AiRetryPolicy {
+            max_retries: 3,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_millis(250),
+            request_timeout: Duration::from_secs(1),
+        };
+
+        assert_eq!(ai_retry_delay(policy, 1), Duration::from_millis(100));
+        assert_eq!(ai_retry_delay(policy, 2), Duration::from_millis(200));
+        assert_eq!(ai_retry_delay(policy, 3), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn evaluate_ai_rate_limit_enforces_budget_and_resets_after_window() {
+        let start = Instant::now();
+        let mut state = AiRateLimitState {
+            window_started_at: start,
+            used_requests: 0,
+        };
+        let policy = AiRateLimitPolicy {
+            max_requests: 2,
+            window: Duration::from_secs(60),
+        };
+
+        assert_eq!(evaluate_ai_rate_limit(&mut state, policy, start), Ok(1));
+        assert_eq!(evaluate_ai_rate_limit(&mut state, policy, start), Ok(0));
+        assert!(evaluate_ai_rate_limit(&mut state, policy, start).is_err());
+
+        let after_window = start + Duration::from_secs(61);
+        assert_eq!(
+            evaluate_ai_rate_limit(&mut state, policy, after_window),
+            Ok(1)
+        );
+    }
+
+    #[test]
+    fn update_ai_approval_metrics_updates_ratio_gauge() {
+        let metrics = Metrics::new();
+        update_ai_approval_metrics(&metrics, true);
+        update_ai_approval_metrics(&metrics, false);
+
+        assert_eq!(metrics.get_counter("runtime_ai_approvals_total"), 2);
+        assert_eq!(
+            metrics.get_counter("runtime_ai_approvals_approved_total"),
+            1
+        );
+        assert_eq!(metrics.get_counter("runtime_ai_approvals_denied_total"), 1);
+        assert_eq!(
+            metrics.get_gauge("runtime_ai_approval_ratio_pct"),
+            Some(50.0)
+        );
+    }
+
+    #[test]
+    fn record_ai_usage_estimates_updates_token_gauges() {
+        let metrics = Metrics::new();
+        let request = build_ai_request(AiIntent::Ask, "explain cache warming strategy");
+        record_ai_usage_estimates(&metrics, &request, "Use staged rollout and telemetry.");
+
+        assert!(metrics
+            .get_gauge("runtime_ai_last_input_tokens_estimate")
+            .is_some());
+        assert!(metrics
+            .get_gauge("runtime_ai_last_output_tokens_estimate")
+            .is_some());
+        assert!(metrics
+            .get_gauge("runtime_ai_tokens_estimated_total")
+            .is_some());
+    }
+
+    #[test]
+    fn ai_error_guidance_message_is_available_for_transient_failures() {
+        let timeout = AiProviderError::Timeout {
+            timeout: Duration::from_secs(1),
+        };
+        let unavailable = AiProviderError::Unavailable("outage".to_string());
+        assert!(ai_error_guidance_message(&timeout).is_some());
+        assert!(ai_error_guidance_message(&unavailable).is_some());
+    }
+
+    #[tokio::test]
+    async fn request_ai_stream_with_retry_retries_transient_errors() {
+        let provider = MockAiProvider::with_scripted(
+            mocked_ai_response(AiIntent::Ask, "hello"),
+            vec![
+                crate::execution::ai::MockAiOutcome::Error(AiProviderError::Timeout {
+                    timeout: Duration::from_millis(5),
+                }),
+                crate::execution::ai::MockAiOutcome::Complete(AiResponse::new("mock", "ok")),
+            ],
+        );
+        let request = build_ai_request(AiIntent::Ask, "hello");
+        let policy = AiRetryPolicy {
+            max_retries: 1,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+            request_timeout: Duration::from_secs(1),
+        };
+        let metrics = Metrics::new();
+
+        let (chunks, retries) =
+            request_ai_stream_with_retry(&provider, &request, policy, &metrics, AiIntent::Ask)
+                .await
+                .expect("retry should recover");
+
+        assert_eq!(retries, 1);
+        assert_eq!(metrics.get_counter("runtime_ai_retries_total"), 1);
+        assert_eq!(chunks.last().map(|item| item.content.as_str()), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn run_async_alias_with_progress_returns_interrupted_when_flag_is_set() {
+        let interrupted = AtomicBool::new(true);
+        let status = run_async_alias_with_progress(
+            "apply-async",
+            Some(&interrupted),
+            |_progress_tx| async move { ExitStatus::Success },
+        )
+        .await;
+        assert_eq!(status, ExitStatus::Interrupted);
+    }
+
+    #[tokio::test]
+    async fn run_async_alias_with_progress_returns_success_when_not_interrupted() {
+        let interrupted = AtomicBool::new(false);
+        let status = run_async_alias_with_progress(
+            "apply-async",
+            Some(&interrupted),
+            |progress_tx| async move {
+                let _ = progress_tx.send(CommandProgress::percent("Completed", 100));
+                ExitStatus::Success
+            },
+        )
+        .await;
+        assert_eq!(status, ExitStatus::Success);
     }
 
     #[test]
@@ -1322,6 +3328,21 @@ mod tests {
         assert!(set_config_value(&mut config, "footer_output", "false").is_ok());
         assert!(!config.general.footer_output);
 
+        assert!(set_config_value(&mut config, "attention_bell", "true").is_ok());
+        assert!(config.general.attention_bell);
+
+        assert!(set_config_value(&mut config, "attention_desktop_notification", "true").is_ok());
+        assert!(config.general.attention_desktop_notification);
+
+        assert!(set_config_value(&mut config, "attention_unfocused_only", "true").is_ok());
+        assert!(config.general.attention_unfocused_only);
+
+        assert!(set_config_value(&mut config, "predictive_input", "false").is_ok());
+        assert!(!config.general.predictive_input);
+
+        assert!(set_config_value(&mut config, "ai_session_retention", "12").is_ok());
+        assert_eq!(config.general.ai_session_retention, 12);
+
         assert!(set_config_value(&mut config, "color", "never").is_ok());
         assert_eq!(config.display.color, ColorMode::Never);
 
@@ -1342,18 +3363,36 @@ mod tests {
         config.general.verbose = true;
         config.general.log_level = "debug".to_string();
         config.general.footer_output = false;
+        config.general.attention_bell = true;
+        config.general.attention_desktop_notification = true;
+        config.general.attention_unfocused_only = true;
+        config.general.predictive_input = false;
+        config.general.ai_session_retention = 3;
         config.display.color = ColorMode::Always;
         config.templates.directory = Some("/tmp/x".to_string());
 
         assert!(unset_config_value(&mut config, "verbose").is_ok());
         assert!(unset_config_value(&mut config, "log_level").is_ok());
         assert!(unset_config_value(&mut config, "footer_output").is_ok());
+        assert!(unset_config_value(&mut config, "attention_bell").is_ok());
+        assert!(unset_config_value(&mut config, "attention_desktop_notification").is_ok());
+        assert!(unset_config_value(&mut config, "attention_unfocused_only").is_ok());
+        assert!(unset_config_value(&mut config, "predictive_input").is_ok());
+        assert!(unset_config_value(&mut config, "ai_session_retention").is_ok());
         assert!(unset_config_value(&mut config, "color").is_ok());
         assert!(unset_config_value(&mut config, "template_dir").is_ok());
 
         assert!(!config.general.verbose);
         assert_eq!(config.general.log_level, "info");
         assert!(config.general.footer_output);
+        assert!(!config.general.attention_bell);
+        assert!(!config.general.attention_desktop_notification);
+        assert!(!config.general.attention_unfocused_only);
+        assert!(config.general.predictive_input);
+        assert_eq!(
+            config.general.ai_session_retention,
+            default_ai_session_retention()
+        );
         assert_eq!(config.display.color, ColorMode::Auto);
         assert_eq!(config.templates.directory, None);
     }
@@ -1367,6 +3406,15 @@ mod tests {
         assert_eq!(parse_bool("0"), Some(false));
         assert_eq!(parse_bool("off"), Some(false));
         assert_eq!(parse_bool("maybe"), None);
+    }
+
+    #[test]
+    fn parse_positive_usize_accepts_nonzero_values_only() {
+        assert_eq!(parse_positive_usize("1"), Some(1));
+        assert_eq!(parse_positive_usize("40"), Some(40));
+        assert_eq!(parse_positive_usize("0"), None);
+        assert_eq!(parse_positive_usize("-1"), None);
+        assert_eq!(parse_positive_usize("x"), None);
     }
 
     #[test]
@@ -1385,6 +3433,14 @@ mod tests {
     fn infer_command_from_text_routes_direct_aliases() {
         assert_eq!(infer_command_from_text("help").as_deref(), Some("/help"));
         assert_eq!(infer_command_from_text("ajuda").as_deref(), Some("/help"));
+        assert_eq!(
+            infer_command_from_text("ai ask explain caching").as_deref(),
+            Some("/ai ask explain caching")
+        );
+        assert_eq!(
+            infer_command_from_text("planejar migracao").as_deref(),
+            Some("/ai plan migracao")
+        );
         assert_eq!(infer_command_from_text("clear").as_deref(), Some("/clear"));
         assert_eq!(infer_command_from_text("limpar").as_deref(), Some("/clear"));
         assert_eq!(
@@ -1414,6 +3470,10 @@ mod tests {
         assert_eq!(
             infer_command_from_text("open settings").as_deref(),
             Some("/config")
+        );
+        assert_eq!(
+            infer_command_from_text("assistant explain retry policy").as_deref(),
+            Some("/ai explain retry policy")
         );
         assert_eq!(
             infer_command_from_text("pode limpar a tela?").as_deref(),
@@ -1449,5 +3509,33 @@ mod tests {
         ];
         let output = parse_output_root(&parts);
         assert_eq!(output.as_deref(), Some(std::path::Path::new("./src")));
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_apply_without_dry_run_returns_error() {
+        let parts = vec!["/ai", "apply", "update", "service"];
+        let status = process_ai_command(&parts, Some("apply")).await;
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_apply_with_explicit_write_approval_succeeds() {
+        let parts = vec!["/ai", "apply", "--approve-write", "update", "service"];
+        let status = process_ai_command(&parts, Some("apply")).await;
+        assert_eq!(status, ExitStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_resume_without_session_id_returns_error() {
+        let parts = vec!["/ai", "resume"];
+        let status = process_ai_command(&parts, Some("resume")).await;
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_resume_with_session_id_succeeds() {
+        let parts = vec!["/ai", "resume", "session-dev"];
+        let status = process_ai_command(&parts, Some("resume")).await;
+        assert_eq!(status, ExitStatus::Success);
     }
 }
