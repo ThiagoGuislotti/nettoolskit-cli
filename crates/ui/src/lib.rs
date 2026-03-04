@@ -29,8 +29,10 @@ pub use core::capabilities::{
 pub use core::colors::*;
 pub use core::style;
 // Re-export components
+pub use interaction::clipboard::{copy_to_clipboard, paste_from_clipboard};
 pub use interaction::file_picker::FilePicker;
 pub use interaction::history_viewer::HistoryViewer;
+pub use interaction::notification::emit_desktop_attention_notification;
 pub use interaction::palette::CommandPalette;
 pub use interaction::prompt::*;
 pub use interaction::status_bar::{StatusBar, StatusBarMode, StatusNotificationLevel};
@@ -39,4 +41,5 @@ pub use rendering::components::{
     format_menu_item, render_box, render_command, render_enum_menu, render_interactive_menu,
     render_menu_instructions, render_section_title, BoxConfig, EnumMenuConfig, MenuConfig,
 };
+pub use rendering::markdown::render_markdown;
 pub use rendering::writer::UiWriter;

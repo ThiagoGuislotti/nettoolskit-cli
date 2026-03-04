@@ -34,3 +34,7 @@ harness = false
 [[bench]]
 name = "file_search"
 harness = false
+
+[[bench]]
+name = "command_cache"
+harness = false

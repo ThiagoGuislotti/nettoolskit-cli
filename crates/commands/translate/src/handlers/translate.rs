@@ -214,21 +214,37 @@ pub async fn handle_translate(request: TranslateRequest) -> ExitStatus {
                 }
             }
         }
-        Language::Clojure | Language::TypeScript => {
-            error!(
-                "Translation to {} not yet implemented",
-                target_strategy.language_id()
-            );
-            println!(
-                "{}",
-                format!(
-                    "❌ Translation to {} not yet implemented",
-                    target_strategy.language_id()
-                )
-                .red()
-            );
-            metrics.increment_counter("translate_not_implemented");
-            ExitStatus::Error
+        Language::Clojure => {
+            match translate_to_clojure(&request.path, &source_strategy, &target_strategy).await {
+                Ok(output_path) => {
+                    println!("Created: {}", output_path.green());
+                    metrics.increment_counter("translate_success");
+                    info!("Translation completed: {}", output_path);
+                    ExitStatus::Success
+                }
+                Err(e) => {
+                    error!("Translation failed: {}", e);
+                    println!("{}", format!("Error: {}", e).red());
+                    metrics.increment_counter("translate_error");
+                    ExitStatus::Error
+                }
+            }
+        }
+        Language::TypeScript => {
+            match translate_to_typescript(&request.path, &source_strategy, &target_strategy).await {
+                Ok(output_path) => {
+                    println!("Created: {}", output_path.green());
+                    metrics.increment_counter("translate_success");
+                    info!("Translation completed: {}", output_path);
+                    ExitStatus::Success
+                }
+                Err(e) => {
+                    error!("Translation failed: {}", e);
+                    println!("{}", format!("Error: {}", e).red());
+                    metrics.increment_counter("translate_error");
+                    ExitStatus::Error
+                }
+            }
         }
     }
 }
@@ -304,6 +320,36 @@ async fn translate_to_rust(
         source_strategy,
         target_strategy,
         convert_to_rust_conventions,
+    )
+    .await
+}
+
+/// Translate template to Clojure format
+async fn translate_to_clojure(
+    template_path: &str,
+    source_strategy: &Arc<dyn LanguageStrategy>,
+    target_strategy: &Arc<dyn LanguageStrategy>,
+) -> Result<String, String> {
+    translate_pipeline(
+        template_path,
+        source_strategy,
+        target_strategy,
+        convert_to_clojure_conventions,
+    )
+    .await
+}
+
+/// Translate template to TypeScript format
+async fn translate_to_typescript(
+    template_path: &str,
+    source_strategy: &Arc<dyn LanguageStrategy>,
+    target_strategy: &Arc<dyn LanguageStrategy>,
+) -> Result<String, String> {
+    translate_pipeline(
+        template_path,
+        source_strategy,
+        target_strategy,
+        convert_to_typescript_conventions,
     )
     .await
 }
@@ -586,6 +632,97 @@ fn convert_to_rust_conventions(content: &str) -> String {
         .replace("{{handlerName}}", "{{handler_name}}")
         .replace("{{ControllerName}}", "{{controller_name}}")
         .replace("{{controllerName}}", "{{controller_name}}");
+
+    result
+}
+
+/// Convert placeholders to Clojure naming conventions (kebab-case symbols)
+fn convert_to_clojure_conventions(content: &str) -> String {
+    let mut result = content.to_string();
+
+    result = result
+        .replace("{{ClassName}}", "{{class-name}}")
+        .replace("{{className}}", "{{class-name}}")
+        .replace("{{class_name}}", "{{class-name}}")
+        .replace("{{Namespace}}", "{{namespace}}")
+        .replace("{{PropertyName}}", "{{property-name}}")
+        .replace("{{propertyName}}", "{{property-name}}")
+        .replace("{{property_name}}", "{{property-name}}")
+        .replace("{{MethodName}}", "{{method-name}}")
+        .replace("{{methodName}}", "{{method-name}}")
+        .replace("{{method_name}}", "{{method-name}}")
+        .replace("{{InterfaceName}}", "{{protocol-name}}")
+        .replace("{{interfaceName}}", "{{protocol-name}}")
+        .replace("{{interface_name}}", "{{protocol-name}}")
+        .replace("{{BaseClass}}", "{{base-type}}")
+        .replace("{{baseClass}}", "{{base-type}}")
+        .replace("{{base_class}}", "{{base-type}}")
+        .replace("{{EntityName}}", "{{entity-name}}")
+        .replace("{{entityName}}", "{{entity-name}}")
+        .replace("{{entity_name}}", "{{entity-name}}")
+        .replace("{{ServiceName}}", "{{service-name}}")
+        .replace("{{serviceName}}", "{{service-name}}")
+        .replace("{{service_name}}", "{{service-name}}")
+        .replace("{{RepositoryName}}", "{{repository-name}}")
+        .replace("{{repositoryName}}", "{{repository-name}}")
+        .replace("{{repository_name}}", "{{repository-name}}")
+        .replace("{{DtoName}}", "{{dto-name}}")
+        .replace("{{dtoName}}", "{{dto-name}}")
+        .replace("{{dto_name}}", "{{dto-name}}")
+        .replace("{{CommandName}}", "{{command-name}}")
+        .replace("{{commandName}}", "{{command-name}}")
+        .replace("{{command_name}}", "{{command-name}}")
+        .replace("{{QueryName}}", "{{query-name}}")
+        .replace("{{queryName}}", "{{query-name}}")
+        .replace("{{query_name}}", "{{query-name}}")
+        .replace("{{ValidatorName}}", "{{validator-name}}")
+        .replace("{{validatorName}}", "{{validator-name}}")
+        .replace("{{validator_name}}", "{{validator-name}}")
+        .replace("{{HandlerName}}", "{{handler-name}}")
+        .replace("{{handlerName}}", "{{handler-name}}")
+        .replace("{{handler_name}}", "{{handler-name}}")
+        .replace("{{ControllerName}}", "{{controller-name}}")
+        .replace("{{controllerName}}", "{{controller-name}}")
+        .replace("{{controller_name}}", "{{controller-name}}");
+
+    result
+}
+
+/// Convert placeholders to TypeScript naming conventions (camelCase names)
+fn convert_to_typescript_conventions(content: &str) -> String {
+    let mut result = content.to_string();
+
+    result = result
+        .replace("{{ClassName}}", "{{className}}")
+        .replace("{{class_name}}", "{{className}}")
+        .replace("{{Namespace}}", "{{moduleName}}")
+        .replace("{{namespace}}", "{{moduleName}}")
+        .replace("{{PropertyName}}", "{{propertyName}}")
+        .replace("{{property_name}}", "{{propertyName}}")
+        .replace("{{MethodName}}", "{{methodName}}")
+        .replace("{{method_name}}", "{{methodName}}")
+        .replace("{{InterfaceName}}", "{{interfaceName}}")
+        .replace("{{interface_name}}", "{{interfaceName}}")
+        .replace("{{BaseClass}}", "{{baseType}}")
+        .replace("{{base_class}}", "{{baseType}}")
+        .replace("{{EntityName}}", "{{entityName}}")
+        .replace("{{entity_name}}", "{{entityName}}")
+        .replace("{{ServiceName}}", "{{serviceName}}")
+        .replace("{{service_name}}", "{{serviceName}}")
+        .replace("{{RepositoryName}}", "{{repositoryName}}")
+        .replace("{{repository_name}}", "{{repositoryName}}")
+        .replace("{{DtoName}}", "{{dtoName}}")
+        .replace("{{dto_name}}", "{{dtoName}}")
+        .replace("{{CommandName}}", "{{commandName}}")
+        .replace("{{command_name}}", "{{commandName}}")
+        .replace("{{QueryName}}", "{{queryName}}")
+        .replace("{{query_name}}", "{{queryName}}")
+        .replace("{{ValidatorName}}", "{{validatorName}}")
+        .replace("{{validator_name}}", "{{validatorName}}")
+        .replace("{{HandlerName}}", "{{handlerName}}")
+        .replace("{{handler_name}}", "{{handlerName}}")
+        .replace("{{ControllerName}}", "{{controllerName}}")
+        .replace("{{controller_name}}", "{{controllerName}}");
 
     result
 }

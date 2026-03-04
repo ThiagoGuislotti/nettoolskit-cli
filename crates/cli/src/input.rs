@@ -4,7 +4,9 @@ use crossterm::event::{
 use nettoolskit_core::async_utils::with_timeout;
 use nettoolskit_core::AppConfig;
 use nettoolskit_ui::{
-    append_footer_log, handle_resize, prepare_prompt_line, process_pending_resize,
+    append_footer_log, copy_to_clipboard, handle_resize, paste_from_clipboard, prepare_prompt_line,
+    process_pending_resize, request_terminal_frame, scheduled_frame_poll_timeout,
+    set_terminal_focused,
 };
 use owo_colors::OwoColorize;
 use rustyline::completion::{Completer, Pair};
@@ -23,7 +25,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use supports_color::Stream;
 use tree_sitter::{Node, Parser};
 
@@ -46,8 +48,20 @@ const COMPLETION_COMMANDS: &[&str] = &[
     "/manifest list",
     "/manifest check",
     "/manifest render",
+    "/manifest render-async",
     "/manifest apply",
+    "/manifest apply-async",
+    "/render-async",
+    "/apply-async",
+    "/new-async",
     "/translate",
+    "/ai",
+    "/ai ask",
+    "/ai plan",
+    "/ai explain",
+    "/ai resume",
+    "/ai apply --dry-run",
+    "/ai apply --approve-write",
     "/history",
     "/config",
     "/clear",
@@ -284,16 +298,38 @@ fn normalize_multiline_submission(input: &str) -> String {
     normalized
 }
 
+fn normalize_clipboard_text_for_input(input: &str) -> String {
+    let unix_newlines = input.replace("\r\n", "\n").replace('\r', "\n");
+    unix_newlines
+        .split('\n')
+        .map(str::trim_end)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[derive(Debug, Clone)]
 struct CliCompleter {
     colors_enabled: bool,
     theme: SyntaxTheme,
     show_menu_requested: Arc<AtomicBool>,
+    clipboard_status: Arc<Mutex<Option<String>>>,
+    predictive_input_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
 struct SlashCommandPaletteHandler {
     show_menu_requested: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone)]
+struct ClipboardPasteHandler {
+    clipboard_status: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Debug, Clone)]
+struct ClipboardCopyHandler {
+    clipboard_status: Arc<Mutex<Option<String>>>,
 }
 
 impl ConditionalEventHandler for SlashCommandPaletteHandler {
@@ -313,12 +349,98 @@ impl ConditionalEventHandler for SlashCommandPaletteHandler {
     }
 }
 
+impl ConditionalEventHandler for ClipboardPasteHandler {
+    fn handle(
+        &self,
+        _evt: &RustylineEvent,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        _ctx: &EventContext,
+    ) -> Option<Cmd> {
+        match paste_from_clipboard() {
+            Ok(text) => {
+                let normalized = normalize_clipboard_text_for_input(&text);
+                if normalized.is_empty() {
+                    set_clipboard_status(
+                        &self.clipboard_status,
+                        "Clipboard paste skipped: clipboard is empty".to_string(),
+                    );
+                    Some(Cmd::Noop)
+                } else {
+                    set_clipboard_status(
+                        &self.clipboard_status,
+                        format!(
+                            "Clipboard paste inserted {} chars",
+                            normalized.chars().count()
+                        ),
+                    );
+                    Some(Cmd::Insert(1, normalized))
+                }
+            }
+            Err(err) => {
+                set_clipboard_status(
+                    &self.clipboard_status,
+                    format!("Clipboard paste failed: {err}"),
+                );
+                Some(Cmd::Noop)
+            }
+        }
+    }
+}
+
+impl ConditionalEventHandler for ClipboardCopyHandler {
+    fn handle(
+        &self,
+        _evt: &RustylineEvent,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        let line = ctx.line();
+        if line.trim().is_empty() {
+            set_clipboard_status(
+                &self.clipboard_status,
+                "Clipboard copy skipped: current input is empty".to_string(),
+            );
+            return Some(Cmd::Noop);
+        }
+
+        match copy_to_clipboard(line) {
+            Ok(()) => {
+                set_clipboard_status(
+                    &self.clipboard_status,
+                    format!("Clipboard copy captured {} chars", line.chars().count()),
+                );
+            }
+            Err(err) => {
+                set_clipboard_status(
+                    &self.clipboard_status,
+                    format!("Clipboard copy failed: {err}"),
+                );
+            }
+        }
+
+        Some(Cmd::Noop)
+    }
+}
+
+fn set_clipboard_status(status: &Arc<Mutex<Option<String>>>, message: String) {
+    let mut slot = status.lock().unwrap_or_else(|error| error.into_inner());
+    *slot = Some(message);
+}
+
 impl CliCompleter {
     fn new() -> Self {
+        Self::with_predictive_input(true)
+    }
+
+    fn with_predictive_input(predictive_input_enabled: bool) -> Self {
         Self {
             colors_enabled: supports_color::on(Stream::Stdout).is_some(),
             theme: SyntaxTheme::default(),
             show_menu_requested: Arc::new(AtomicBool::new(false)),
+            clipboard_status: Arc::new(Mutex::new(None)),
+            predictive_input_enabled,
         }
     }
 
@@ -328,8 +450,28 @@ impl CliCompleter {
         }
     }
 
+    fn clipboard_paste_handler(&self) -> ClipboardPasteHandler {
+        ClipboardPasteHandler {
+            clipboard_status: Arc::clone(&self.clipboard_status),
+        }
+    }
+
+    fn clipboard_copy_handler(&self) -> ClipboardCopyHandler {
+        ClipboardCopyHandler {
+            clipboard_status: Arc::clone(&self.clipboard_status),
+        }
+    }
+
     fn take_show_menu_requested(&self) -> bool {
         self.show_menu_requested.swap(false, Ordering::SeqCst)
+    }
+
+    fn take_clipboard_status(&self) -> Option<String> {
+        let mut slot = self
+            .clipboard_status
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        slot.take()
     }
 }
 
@@ -342,6 +484,14 @@ impl Default for CliCompleter {
 impl Helper for CliCompleter {}
 impl Hinter for CliCompleter {
     type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<Self::Hint> {
+        if pos != line.len() {
+            return None;
+        }
+
+        predict_command_hint(line, self.predictive_input_enabled)
+    }
 }
 impl Highlighter for CliCompleter {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
@@ -779,6 +929,29 @@ fn completion_candidates(prefix: &str) -> Vec<&'static str> {
         .collect()
 }
 
+fn predict_command_hint(prefix: &str, enabled: bool) -> Option<String> {
+    if !enabled || prefix.is_empty() || !prefix.starts_with('/') || prefix.ends_with(' ') {
+        return None;
+    }
+
+    let mut candidates: Vec<&str> = COMPLETION_COMMANDS
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.starts_with(prefix) && candidate.len() > prefix.len())
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    candidates
+        .sort_unstable_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)));
+
+    candidates
+        .first()
+        .map(|candidate| candidate[prefix.len()..].to_string())
+}
+
 fn default_history_path() -> Option<PathBuf> {
     AppConfig::default_data_dir().map(|dir| dir.join("history").join("ntk.history"))
 }
@@ -796,6 +969,15 @@ impl RustylineInput {
     ///
     /// Returns an error when terminal editor initialization fails.
     pub fn new() -> io::Result<Self> {
+        Self::new_with_predictive_input(true)
+    }
+
+    /// Create a new Rustyline input reader with explicit predictive input behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when terminal editor initialization fails.
+    pub fn new_with_predictive_input(predictive_input: bool) -> io::Result<Self> {
         let config = RustylineConfig::builder()
             .completion_type(CompletionType::List)
             .history_ignore_dups(true)
@@ -805,10 +987,22 @@ impl RustylineInput {
 
         let mut editor = Editor::<CliCompleter, DefaultHistory>::with_config(config)
             .map_err(io::Error::other)?;
-        let helper = CliCompleter::new();
+        let helper = CliCompleter::with_predictive_input(predictive_input);
         editor.bind_sequence(
             RustylineEvent::from(RustylineKeyEvent::from('/')),
             EventHandler::Conditional(Box::new(helper.slash_menu_handler())),
+        );
+        editor.bind_sequence(
+            RustylineEvent::from(RustylineKeyEvent::ctrl('V')),
+            EventHandler::Conditional(Box::new(helper.clipboard_paste_handler())),
+        );
+        editor.bind_sequence(
+            RustylineEvent::from(RustylineKeyEvent::alt('v')),
+            EventHandler::Conditional(Box::new(helper.clipboard_paste_handler())),
+        );
+        editor.bind_sequence(
+            RustylineEvent::from(RustylineKeyEvent::alt('c')),
+            EventHandler::Conditional(Box::new(helper.clipboard_copy_handler())),
         );
         editor.set_helper(Some(helper));
 
@@ -840,6 +1034,7 @@ impl RustylineInput {
 
         match self.editor.readline(PRIMARY_PROMPT) {
             Ok(raw_line) => {
+                self.flush_clipboard_status();
                 let line = normalize_multiline_submission(&raw_line);
                 if line.trim() == "/" {
                     return Ok(InputResult::ShowMenu);
@@ -857,13 +1052,17 @@ impl RustylineInput {
                 }
             }
             Err(ReadlineError::Interrupted) => {
+                self.flush_clipboard_status();
                 if self.take_show_menu_requested() {
                     return Ok(InputResult::ShowMenu);
                 }
                 interrupted.store(true, Ordering::SeqCst);
                 Ok(InputResult::Exit)
             }
-            Err(ReadlineError::Eof) => Ok(InputResult::Exit),
+            Err(ReadlineError::Eof) => {
+                self.flush_clipboard_status();
+                Ok(InputResult::Exit)
+            }
             Err(err) => Err(io::Error::other(format!("Rustyline input failed: {err}"))),
         }
     }
@@ -878,6 +1077,16 @@ impl RustylineInput {
         self.editor
             .helper()
             .is_some_and(CliCompleter::take_show_menu_requested)
+    }
+
+    fn flush_clipboard_status(&self) {
+        let status = self
+            .editor
+            .helper()
+            .and_then(CliCompleter::take_clipboard_status);
+        if let Some(message) = status {
+            let _ = append_footer_log(&message);
+        }
     }
 }
 
@@ -897,7 +1106,7 @@ pub async fn read_line(
         }
 
         // Use async-utils timeout for consistent timeout handling
-        let poll_timeout = std::time::Duration::from_millis(50);
+        let poll_timeout = scheduled_frame_poll_timeout(std::time::Duration::from_millis(50));
 
         match with_timeout(poll_timeout, async {
             while !event::poll(std::time::Duration::from_millis(1))? {
@@ -917,6 +1126,13 @@ pub async fn read_line(
                         let _ =
                             append_footer_log(&format!("Warning: failed to handle resize: {err}"));
                     }
+                    request_terminal_frame();
+                }
+                Event::FocusGained => {
+                    set_terminal_focused(true);
+                }
+                Event::FocusLost => {
+                    set_terminal_focused(false);
                 }
                 _ => {}
             },
@@ -942,7 +1158,57 @@ fn handle_key_event(
     }
 
     match key.code {
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Char('v' | 'V')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            match paste_from_clipboard() {
+                Ok(text) => {
+                    let normalized = normalize_clipboard_text_for_input(&text);
+                    if normalized.is_empty() {
+                        let _ = append_footer_log("Clipboard paste skipped: clipboard is empty");
+                        return Ok(None);
+                    }
+
+                    buffer.push_str(&normalized);
+                    print!("{}", normalized.white());
+                    io::stdout().flush()?;
+                    let _ = append_footer_log(&format!(
+                        "Clipboard paste inserted {} chars",
+                        normalized.chars().count()
+                    ));
+                    return Ok(None);
+                }
+                Err(err) => {
+                    let _ = append_footer_log(&format!("Clipboard paste failed: {err}"));
+                    return Ok(None);
+                }
+            }
+        }
+        KeyCode::Char('c' | 'C')
+            if key.modifiers.contains(KeyModifiers::ALT)
+                || (key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.modifiers.contains(KeyModifiers::SHIFT)) =>
+        {
+            if buffer.trim().is_empty() {
+                let _ = append_footer_log("Clipboard copy skipped: current input is empty");
+                return Ok(None);
+            }
+
+            match copy_to_clipboard(buffer) {
+                Ok(()) => {
+                    let _ = append_footer_log(&format!(
+                        "Clipboard copy captured {} chars",
+                        buffer.chars().count()
+                    ));
+                }
+                Err(err) => {
+                    let _ = append_footer_log(&format!("Clipboard copy failed: {err}"));
+                }
+            }
+            return Ok(None);
+        }
+        KeyCode::Char('c' | 'C') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             // Set the interrupted flag and return Exit
             interrupted.store(true, Ordering::SeqCst);
             return Ok(Some(InputResult::Exit));
@@ -1197,12 +1463,43 @@ mod tests {
         let candidates = completion_candidates("/man");
         assert!(candidates.contains(&"/manifest"));
         assert!(candidates.contains(&"/manifest list"));
+
+        let ai_candidates = completion_candidates("/ai");
+        assert!(ai_candidates.contains(&"/ai ask"));
+        assert!(ai_candidates.contains(&"/ai plan"));
+        assert!(ai_candidates.contains(&"/ai resume"));
+        assert!(ai_candidates.contains(&"/ai apply --approve-write"));
     }
 
     #[test]
     fn completion_candidates_empty_for_unknown_prefix() {
         let candidates = completion_candidates("/does-not-exist");
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn predict_command_hint_returns_suffix_for_partial_command() {
+        let hint = predict_command_hint("/man", true);
+        assert_eq!(hint.as_deref(), Some("ifest"));
+
+        let hint = predict_command_hint("/manifest re", true);
+        assert_eq!(hint.as_deref(), Some("nder"));
+
+        let hint = predict_command_hint("/ai pl", true);
+        assert_eq!(hint.as_deref(), Some("an"));
+    }
+
+    #[test]
+    fn predict_command_hint_returns_none_for_non_command_or_complete_command() {
+        assert!(predict_command_hint("manifest", true).is_none());
+        assert!(predict_command_hint("/help", true).is_none());
+        assert!(predict_command_hint("/manifest ", true).is_none());
+        assert!(predict_command_hint("/does-not-exist", true).is_none());
+    }
+
+    #[test]
+    fn predict_command_hint_respects_runtime_toggle() {
+        assert_eq!(predict_command_hint("/man", false), None);
     }
 
     #[test]
@@ -1234,6 +1531,47 @@ mod tests {
         let input = "/manifest apply \\\n--output out \\\nmanifest.yaml";
         let normalized = normalize_multiline_submission(input);
         assert_eq!(normalized, "/manifest apply \n--output out \nmanifest.yaml");
+    }
+
+    #[test]
+    fn normalize_clipboard_text_for_input_flattens_newlines() {
+        let normalized = normalize_clipboard_text_for_input("line 1\r\nline 2\n\nline 3");
+        assert_eq!(normalized, "line 1 line 2 line 3");
+    }
+
+    #[test]
+    fn alt_c_with_empty_buffer_is_noop_not_exit() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+
+        let result = handle_key_event(
+            press(KeyCode::Char('c'), KeyModifiers::ALT),
+            &mut buffer,
+            &interrupted,
+        )
+        .expect("should not error");
+
+        assert!(result.is_none());
+        assert!(!interrupted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn ctrl_shift_c_with_empty_buffer_is_noop_not_exit() {
+        let mut buffer = String::new();
+        let interrupted = Arc::new(AtomicBool::new(false));
+
+        let result = handle_key_event(
+            press(
+                KeyCode::Char('c'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+            &mut buffer,
+            &interrupted,
+        )
+        .expect("should not error");
+
+        assert!(result.is_none());
+        assert!(!interrupted.load(Ordering::SeqCst));
     }
 
     #[test]

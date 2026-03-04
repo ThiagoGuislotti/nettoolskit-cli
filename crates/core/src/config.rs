@@ -19,6 +19,11 @@
 //! verbose = false
 //! log_level = "info"
 //! footer_output = true
+//! attention_bell = false
+//! attention_desktop_notification = false
+//! attention_unfocused_only = false
+//! predictive_input = true
+//! ai_session_retention = 20
 //!
 //! [display]
 //! color = "auto"          # "auto", "always", "never"
@@ -67,6 +72,21 @@ pub struct GeneralConfig {
 
     /// Enable interactive footer output stream
     pub footer_output: bool,
+
+    /// Emit terminal attention bell on command failures in interactive mode
+    pub attention_bell: bool,
+
+    /// Emit desktop notifications on command failures in interactive mode
+    pub attention_desktop_notification: bool,
+
+    /// Only emit attention bell when terminal focus is lost
+    pub attention_unfocused_only: bool,
+
+    /// Enable predictive slash-command hints in interactive input
+    pub predictive_input: bool,
+
+    /// Number of local AI session snapshots retained on disk
+    pub ai_session_retention: usize,
 }
 
 /// Display and rendering settings
@@ -130,6 +150,11 @@ impl Default for GeneralConfig {
             verbose: false,
             log_level: "info".to_string(),
             footer_output: true,
+            attention_bell: false,
+            attention_desktop_notification: false,
+            attention_unfocused_only: false,
+            predictive_input: true,
+            ai_session_retention: 20,
         }
     }
 }
@@ -228,6 +253,36 @@ impl AppConfig {
         if let Ok(val) = env::var("NTK_FOOTER_OUTPUT") {
             if let Some(parsed) = parse_bool_value(&val) {
                 self.general.footer_output = parsed;
+            }
+        }
+
+        if let Ok(val) = env::var("NTK_ATTENTION_BELL") {
+            if let Some(parsed) = parse_bool_value(&val) {
+                self.general.attention_bell = parsed;
+            }
+        }
+
+        if let Ok(val) = env::var("NTK_ATTENTION_DESKTOP_NOTIFICATION") {
+            if let Some(parsed) = parse_bool_value(&val) {
+                self.general.attention_desktop_notification = parsed;
+            }
+        }
+
+        if let Ok(val) = env::var("NTK_ATTENTION_UNFOCUSED_ONLY") {
+            if let Some(parsed) = parse_bool_value(&val) {
+                self.general.attention_unfocused_only = parsed;
+            }
+        }
+
+        if let Ok(val) = env::var("NTK_PREDICTIVE_INPUT") {
+            if let Some(parsed) = parse_bool_value(&val) {
+                self.general.predictive_input = parsed;
+            }
+        }
+
+        if let Ok(val) = env::var("NTK_AI_SESSION_RETENTION") {
+            if let Some(parsed) = parse_positive_usize(&val) {
+                self.general.ai_session_retention = parsed;
             }
         }
 
@@ -435,6 +490,11 @@ fn parse_bool_value(val: &str) -> Option<bool> {
     }
 }
 
+fn parse_positive_usize(val: &str) -> Option<usize> {
+    let parsed = val.trim().parse::<usize>().ok()?;
+    (parsed > 0).then_some(parsed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +506,11 @@ mod tests {
         assert!(!config.general.verbose);
         assert_eq!(config.general.log_level, "info");
         assert!(config.general.footer_output);
+        assert!(!config.general.attention_bell);
+        assert!(!config.general.attention_desktop_notification);
+        assert!(!config.general.attention_unfocused_only);
+        assert!(config.general.predictive_input);
+        assert_eq!(config.general.ai_session_retention, 20);
         assert_eq!(config.display.color, ColorMode::Auto);
         assert_eq!(config.display.unicode, UnicodeMode::Auto);
         assert!(config.templates.directory.is_none());
@@ -459,6 +524,11 @@ mod tests {
                 verbose: true,
                 log_level: "debug".to_string(),
                 footer_output: false,
+                attention_bell: true,
+                attention_desktop_notification: true,
+                attention_unfocused_only: true,
+                predictive_input: false,
+                ai_session_retention: 5,
             },
             display: DisplayConfig {
                 color: ColorMode::Always,
@@ -487,6 +557,11 @@ mod tests {
 verbose = true
 log_level = "debug"
 footer_output = false
+attention_bell = true
+attention_desktop_notification = true
+attention_unfocused_only = true
+predictive_input = false
+ai_session_retention = 7
 
 [display]
 color = "never"
@@ -505,6 +580,11 @@ default_shell = "fish"
         assert!(config.general.verbose);
         assert_eq!(config.general.log_level, "debug");
         assert!(!config.general.footer_output);
+        assert!(config.general.attention_bell);
+        assert!(config.general.attention_desktop_notification);
+        assert!(config.general.attention_unfocused_only);
+        assert!(!config.general.predictive_input);
+        assert_eq!(config.general.ai_session_retention, 7);
         assert_eq!(config.display.color, ColorMode::Never);
         assert_eq!(config.display.unicode, UnicodeMode::Always);
         assert_eq!(
@@ -524,6 +604,11 @@ default_shell = "fish"
                 verbose: true,
                 log_level: "warn".to_string(),
                 footer_output: false,
+                attention_bell: true,
+                attention_desktop_notification: true,
+                attention_unfocused_only: true,
+                predictive_input: false,
+                ai_session_retention: 9,
             },
             ..AppConfig::default()
         };
@@ -545,6 +630,11 @@ verbose = true
         assert!(config.general.verbose);
         assert_eq!(config.general.log_level, "info"); // default
         assert!(config.general.footer_output); // default
+        assert!(!config.general.attention_bell); // default
+        assert!(!config.general.attention_desktop_notification); // default
+        assert!(!config.general.attention_unfocused_only); // default
+        assert!(config.general.predictive_input); // default
+        assert_eq!(config.general.ai_session_retention, 20); // default
         assert_eq!(config.display.color, ColorMode::Auto); // default
     }
 
@@ -594,6 +684,15 @@ verbose = true
         assert_eq!(parse_bool_value("no"), Some(false));
         assert_eq!(parse_bool_value(""), None);
         assert_eq!(parse_bool_value("maybe"), None);
+    }
+
+    #[test]
+    fn parse_positive_usize_accepts_only_nonzero_values() {
+        assert_eq!(parse_positive_usize("1"), Some(1));
+        assert_eq!(parse_positive_usize("20"), Some(20));
+        assert_eq!(parse_positive_usize("0"), None);
+        assert_eq!(parse_positive_usize("-1"), None);
+        assert_eq!(parse_positive_usize("invalid"), None);
     }
 
     #[test]

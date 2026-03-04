@@ -123,6 +123,36 @@ async fn test_process_translate_with_valid_args_executes_handler() {
     );
 }
 
+#[tokio::test]
+async fn test_process_ai_ask_with_mock_provider_succeeds() {
+    let result = process_command("/ai ask explain command cache").await;
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "AI ask should succeed with default mock provider"
+    );
+}
+
+#[tokio::test]
+async fn test_process_ai_apply_requires_dry_run() {
+    let result = process_command("/ai apply create service").await;
+    assert_eq!(
+        result,
+        ExitStatus::Error,
+        "AI apply must require --dry-run or explicit write approval"
+    );
+}
+
+#[tokio::test]
+async fn test_process_ai_apply_with_explicit_write_approval_succeeds() {
+    let result = process_command("/ai apply --approve-write create service").await;
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "AI apply with explicit write approval should pass approval gateway"
+    );
+}
+
 // ─── Text Processing Tests ────────────────────────────────────────────────
 
 #[tokio::test]

@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added interactive `HistoryViewer` component with pagination, indexed entry rendering, and case-insensitive filtering.
 - Added interactive input syntax highlighting in `rustyline` for commands/flags plus lexical styles for Rust, C#, JavaScript, and TypeScript lines.
 - Added `tree-sitter` parser integration for Rust, C#, JavaScript, and TypeScript token-aware interactive highlighting.
+- Added cross-platform desktop attention notifications in interactive mode with configurable runtime toggle (`attention_desktop_notification`).
+- Added async manifest aliases (`/new-async`, `/render-async`, `/apply-async`) with progress streaming in command execution.
+- Added orchestrator runtime command cache module with LRU ordering, per-command TTL, and memory-budget eviction controls.
+- Added dedicated Criterion benchmark target (`command_cache`) covering runtime cache insert/hit/miss/eviction paths.
+- Added predictive slash-command hints in interactive `rustyline` input for faster command completion guidance.
+- Added runtime configuration support for predictive input hints (`predictive_input`) with file/env and `/config` command integration.
+- Added orchestrator plugin foundation with in-process registry and safe before/after command hook pipeline.
+- Added bounded interactive error-recovery flow for input backends with retry budget and backoff before failing session startup/loop.
+- Added panic-safe async task wrapper in CLI interactive runtime to recover from command/text task panics without crashing the full session.
+- Added rich CLI state module (`cli::state`) with serializable `CliState`, typed history entries, and shared `Arc<RwLock<_>>` handle for session-scoped state coordination.
+- Added local-only interactive session persistence with JSON snapshots (save/load/list/prune) under the OS app data directory and latest-session auto-resume support.
+- Added startup local session resume picker (when multiple local snapshots exist), built on `CommandPalette`.
+- Added terminal frame scheduler runtime with coalesced frame requests, 60 FPS rate limiting, and async poll-timeout adaptation helpers.
+- Added language-aware fenced code block highlighting in Markdown renderer (Rust, C#, JavaScript, TypeScript, JSON, TOML, Bash, PowerShell).
+- Added dedicated AI E2E integration tests in orchestrator for `/ai plan`, `/ai apply --dry-run`, safety blocking of mutating apply without approval, and free-text alias routing to AI flows.
+- Added explicit CI `AI Gate` job to enforce AI-specific E2E/safety/resilience test slices.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
@@ -93,6 +109,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive CLI now handles local `/history` command to open session history viewer without delegating to orchestrator command routing.
 - Interactive `rustyline` helper now applies lightweight ANSI-based highlighting with language detection and keyword/string/comment styling.
 - Interactive syntax highlighting now uses parser reuse + thread-local cache and a bounded large-line fast-path for lower input latency.
+- Interactive command outcome signaling now supports optional desktop notifications (Windows toast / macOS `osascript` / Linux `notify-send`) and respects focus-based gating when enabled.
+- Orchestrator command routing now recognizes async manifest aliases (top-level and `/manifest *-async` forms) and emits standardized progress messages with percent/step context.
+- Interactive CLI loops now route interruption state into orchestrator command execution, enabling runtime-aware command cancellation checks.
+- `/help` and `/manifest list` command paths now use bounded runtime cache lookups with cache hit/miss metrics and stale-entry pruning.
+- Interactive input startup now wires `predictive_input` from resolved config into `RustylineInput`, allowing runtime enable/disable without code changes.
+- Command processor now executes plugin before/after hooks with non-blocking error isolation and plugin observability gauges.
+- Interactive loops now apply deterministic recovery policy for `rustyline` and legacy read failures (`3` consecutive failures max) with warning notifications and footer diagnostics.
+- Interactive loops now mirror command/text history into shared typed state (`CliState`) while preserving existing history viewer behavior.
+- Interactive runtime now seeds in-memory history from resumed local state and persists snapshots on shutdown paths (including interrupted/error exits), with bounded local snapshot retention.
+- Interactive startup flow now prompts for local snapshot selection only when multiple session snapshots are available, with fallback to latest snapshot on cancel/error.
+- Interactive status bar rendering now goes through frame scheduling (coalesced/rate-limited), and legacy async input polling now uses scheduler-aware timeouts for smoother frame cadence.
+- Markdown rendering now applies token-level ANSI styling for fenced code blocks (keywords/strings/numbers/comments) while preserving non-color fallback output.
+- Enterprise roadmap Phase 8 (AI Assistant Integration) is now fully delivered, including operational controls and AI-specific release gating.
 
 ### Fixed
 - Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.
@@ -101,6 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environment-variable race flake fixed in feature-detection tests by synchronizing tests that mutate `NTK_USE_*`.
 - OpenTelemetry subscriber layering/type mismatch fixed in `otel` tracing setup (paths with/without OTLP now compile and initialize correctly).
 - Non-interactive CLI now calls telemetry shutdown before `process::exit`, preventing loss of buffered OTLP data.
+- Async manifest aliases now honor `Ctrl+C` cancellation by aborting in-flight async executor tasks and returning `Interrupted` status.
+- Interactive runtime now avoids immediate session termination on transient input backend failures and recovers command/text panics as controlled `Error` outcomes.
 
 ### Security
 - Dependency hardening and audit cleanups (`cargo audit` baseline cleaned for current lockfile updates).
@@ -116,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cargo test -p nettoolskit-otel --all-targets`
 - Added release gate validation for compatibility lifecycle semantics in GitHub Actions.
 - Added coverage sweep validation with `cargo llvm-cov` and report exports (line coverage baseline around `68.2%`, functions around `72.5%`).
+- Added AI gate validation slices in CI: `e2e_ai_*`, `process_ai_command_*`, and retry/rate-limit resilience tests.
 
 ## [1.0.0] - 2025-01-04
 

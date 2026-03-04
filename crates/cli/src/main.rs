@@ -259,6 +259,11 @@ async fn main() {
                 verbose,
                 log_level: configured_log_level,
                 footer_output: config.general.footer_output,
+                attention_bell: config.general.attention_bell,
+                attention_desktop_notification: config.general.attention_desktop_notification,
+                attention_unfocused_only: config.general.attention_unfocused_only,
+                predictive_input: config.general.predictive_input,
+                ai_session_retention: config.general.ai_session_retention,
             };
             interactive_mode(options).await
         }

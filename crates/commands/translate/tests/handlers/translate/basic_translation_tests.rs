@@ -66,8 +66,8 @@ async fn test_translate_go_to_clojure() {
     // Act
     let result = handle_translate(request).await;
 
-    // Assert — Clojure translation is NOT implemented (returns Error)
-    assert_eq!(result, ExitStatus::Error);
+    // Assert — Clojure translation is implemented
+    assert_eq!(result, ExitStatus::Success);
 }
 
 #[tokio::test]
@@ -117,8 +117,8 @@ async fn test_translate_to_typescript() {
     // Act
     let result = handle_translate(request).await;
 
-    // Assert — TypeScript translation is NOT implemented (returns Error)
-    assert_eq!(result, ExitStatus::Error);
+    // Assert — TypeScript translation is implemented
+    assert_eq!(result, ExitStatus::Success);
 }
 
 #[tokio::test]
@@ -134,6 +134,6 @@ async fn test_translate_ts_alias() {
     // Act
     let result = handle_translate(request).await;
 
-    // Assert — TypeScript translation is NOT implemented (returns Error)
-    assert_eq!(result, ExitStatus::Error);
+    // Assert — TypeScript translation via alias is implemented
+    assert_eq!(result, ExitStatus::Success);
 }
