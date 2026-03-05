@@ -196,7 +196,7 @@ pub async fn show_apply_menu() -> ExitStatus {
     let dry_run_selection = render_interactive_menu(dry_run_menu);
 
     let dry_run = match dry_run_selection {
-        Ok(option) => option.starts_with("Yes"),
+        Ok(option) => should_enable_dry_run(option),
         Err(_) => {
             println!("{}", "Apply cancelled".color(Color::YELLOW));
             return ExitStatus::Success;
@@ -209,10 +209,7 @@ pub async fn show_apply_menu() -> ExitStatus {
         .with_placeholder("./src")
         .prompt();
 
-    let output_root = match output_dir {
-        Ok(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
-        _ => None,
-    };
+    let output_root = parse_output_directory_input(output_dir);
 
     println!();
     println!("{}", "Executing manifest apply...".color(Color::CYAN));
@@ -269,9 +266,23 @@ fn parse_manifest_input(raw: &str) -> Option<PathBuf> {
     }
 }
 
+fn should_enable_dry_run(selected_option: &str) -> bool {
+    selected_option.trim_start().starts_with("Yes")
+}
+
+fn parse_output_directory_input(
+    output_dir: Result<String, inquire::InquireError>,
+) -> Option<PathBuf> {
+    match output_dir {
+        Ok(dir) => parse_manifest_input(&dir),
+        Err(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_manifest_input;
+    use super::{parse_manifest_input, parse_output_directory_input, should_enable_dry_run};
+    use inquire::InquireError;
     use std::path::PathBuf;
 
     #[test]
@@ -285,6 +296,30 @@ mod tests {
         assert_eq!(
             parse_manifest_input("  ./ntk-manifest.yml  "),
             Some(PathBuf::from("./ntk-manifest.yml"))
+        );
+    }
+
+    #[test]
+    fn should_enable_dry_run_matches_yes_option_prefix() {
+        assert!(should_enable_dry_run("Yes - Dry-run (preview only)"));
+        assert!(should_enable_dry_run("   Yes - anything"));
+        assert!(!should_enable_dry_run("No - Apply changes"));
+    }
+
+    #[test]
+    fn parse_output_directory_input_parses_non_empty_path() {
+        assert_eq!(
+            parse_output_directory_input(Ok(" ./src ".to_string())),
+            Some(PathBuf::from("./src"))
+        );
+    }
+
+    #[test]
+    fn parse_output_directory_input_returns_none_for_blank_or_error() {
+        assert_eq!(parse_output_directory_input(Ok("   ".to_string())), None);
+        assert_eq!(
+            parse_output_directory_input(Err(InquireError::OperationCanceled)),
+            None
         );
     }
 }

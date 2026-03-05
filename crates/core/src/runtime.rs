@@ -79,6 +79,8 @@ pub enum TaskIntentKind {
     AiExplain,
     /// AI dry-run apply task (`/ai apply --dry-run` equivalent).
     AiApplyDryRun,
+    /// Repository workflow task (`clone -> branch -> execute -> commit/push/pr`).
+    RepoWorkflow,
 }
 
 /// Shared task intent payload contract.

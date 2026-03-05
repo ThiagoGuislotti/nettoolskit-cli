@@ -5,6 +5,7 @@ members = [
     "crates/ui",
     "crates/otel",
     "crates/orchestrator",
+    "crates/task-worker",
     "crates/commands",
     "crates/commands/templating",
     "crates/commands/manifest",
@@ -77,6 +78,8 @@ globset = "0.4"
 
 # HTTP client
 reqwest = { version = "0.11", features = ["json"] }
+ed25519-dalek = "2.1"
+hex = "0.4"
 
 # Template engine
 handlebars = "6.2"

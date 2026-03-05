@@ -2,6 +2,7 @@
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use nettoolskit_cli::{interactive_mode, InteractiveOptions};
 use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
 use nettoolskit_orchestrator::ExitStatus;
@@ -10,9 +11,26 @@ use nettoolskit_otel::{
 };
 use nettoolskit_ui::{set_color_override, set_unicode_override, ColorLevel};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{info, info_span};
+
+const NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN_ENV: &str =
+    "NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN";
+const NTK_CHATOPS_DISCORD_INTERACTIONS_PUBLIC_KEY_ENV: &str =
+    "NTK_CHATOPS_DISCORD_INTERACTIONS_PUBLIC_KEY";
+const NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS_ENV: &str =
+    "NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS";
+const NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES";
+const NTK_CHATOPS_INGRESS_REPLAY_BACKEND_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_BACKEND";
+const NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH";
+const DEFAULT_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS: u64 = 300;
+const DEFAULT_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES: usize = 4_096;
+const DEFAULT_CHATOPS_INGRESS_REPLAY_FILE_LOCK_WAIT_MS: u64 = 1_000;
+const DEFAULT_CHATOPS_INGRESS_REPLAY_FILE_LOCK_STALE_SECONDS: u64 = 30;
 
 /// Global arguments available across all commands
 #[derive(Debug, Clone, Parser)]
@@ -86,11 +104,89 @@ struct ServiceTaskSubmitResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct ServiceTelegramWebhookResponse {
+    accepted: bool,
+    queued: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceDiscordInteractionData {
+    content: String,
+    flags: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceDiscordInteractionResponse {
+    #[serde(rename = "type")]
+    response_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<ServiceDiscordInteractionData>,
+}
+
+#[derive(Debug, Serialize)]
 struct ServiceHealthResponse {
     status: String,
     runtime_mode: String,
     uptime_seconds: u64,
     version: String,
+}
+
+#[derive(Clone)]
+struct ServiceRuntimeState {
+    started_at: std::time::Instant,
+    chatops_runtime: Option<Arc<nettoolskit_orchestrator::ChatOpsRuntime>>,
+    ingress_security: Arc<ServiceIngressSecurityConfig>,
+    replay_guard: Arc<IngressReplayGuard>,
+}
+
+#[derive(Debug)]
+struct ServiceIngressSecurityConfig {
+    telegram_secret_token: Option<String>,
+    discord_verifying_key: Option<VerifyingKey>,
+    replay_window: std::time::Duration,
+    replay_max_entries: usize,
+    replay_backend: IngressReplayBackendConfig,
+}
+
+#[derive(Debug)]
+struct IngressReplayGuard {
+    replay_window_ms: u64,
+    max_entries: usize,
+    backend: IngressReplayBackend,
+}
+
+#[derive(Debug)]
+enum IngressReplayBackend {
+    Memory {
+        entries: Mutex<HashMap<String, u64>>,
+    },
+    File {
+        path: std::path::PathBuf,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum IngressReplayBackendConfig {
+    Memory,
+    File { path: std::path::PathBuf },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IngressReplayRecord {
+    key: String,
+    seen_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IngressSecurityError {
+    Unauthorized,
+    Replay,
+    Unavailable,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramUpdateReplayEnvelope {
+    update_id: Option<i64>,
 }
 
 /// Non-interactive manifest subcommands.
@@ -192,6 +288,396 @@ impl Commands {
     }
 }
 
+impl ServiceIngressSecurityConfig {
+    fn from_env() -> Result<Self, String> {
+        let telegram_secret_token = std::env::var(NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN_ENV)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        let discord_verifying_key =
+            match std::env::var(NTK_CHATOPS_DISCORD_INTERACTIONS_PUBLIC_KEY_ENV) {
+                Ok(value) if !value.trim().is_empty() => {
+                    Some(parse_discord_public_key(value.trim())?)
+                }
+                _ => None,
+            };
+
+        let replay_window = std::env::var(NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS_ENV)
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map(|seconds| std::time::Duration::from_secs(seconds.max(1)))
+            .unwrap_or_else(|| {
+                std::time::Duration::from_secs(DEFAULT_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS)
+            });
+        let replay_max_entries = std::env::var(NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES_ENV)
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .map(|entries| entries.max(128))
+            .unwrap_or(DEFAULT_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES);
+        let replay_backend = resolve_replay_backend_from_env()?;
+
+        Ok(Self {
+            telegram_secret_token,
+            discord_verifying_key,
+            replay_window,
+            replay_max_entries,
+            replay_backend,
+        })
+    }
+
+    const fn has_telegram_signature_validation(&self) -> bool {
+        self.telegram_secret_token.is_some()
+    }
+
+    const fn has_discord_signature_validation(&self) -> bool {
+        self.discord_verifying_key.is_some()
+    }
+
+    fn replay_backend_description(&self) -> String {
+        match &self.replay_backend {
+            IngressReplayBackendConfig::Memory => "memory".to_string(),
+            IngressReplayBackendConfig::File { path } => format!("file ({})", path.display()),
+        }
+    }
+}
+
+fn resolve_replay_backend_from_env() -> Result<IngressReplayBackendConfig, String> {
+    let backend_value = std::env::var(NTK_CHATOPS_INGRESS_REPLAY_BACKEND_ENV)
+        .unwrap_or_else(|_| "memory".to_string());
+    match backend_value.trim().to_ascii_lowercase().as_str() {
+        "" | "memory" | "in_memory" | "in-memory" => Ok(IngressReplayBackendConfig::Memory),
+        "file" => {
+            let configured_path = std::env::var(NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH_ENV)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let path = configured_path
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(default_replay_file_path);
+            Ok(IngressReplayBackendConfig::File { path })
+        }
+        other => Err(format!(
+            "unsupported replay backend `{other}` (expected `memory` or `file`)"
+        )),
+    }
+}
+
+fn default_replay_file_path() -> std::path::PathBuf {
+    AppConfig::default_data_dir()
+        .map(|base| base.join("chatops").join("ingress-replay-cache.json"))
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(".temp")
+                .join("chatops")
+                .join("ingress-replay-cache.json")
+        })
+}
+
+impl IngressReplayGuard {
+    fn with_backend(
+        window: std::time::Duration,
+        max_entries: usize,
+        backend: IngressReplayBackendConfig,
+    ) -> Self {
+        Self {
+            replay_window_ms: u64::try_from(window.as_millis()).unwrap_or(u64::MAX).max(1),
+            max_entries: max_entries.max(128),
+            backend: match backend {
+                IngressReplayBackendConfig::Memory => IngressReplayBackend::Memory {
+                    entries: Mutex::new(HashMap::new()),
+                },
+                IngressReplayBackendConfig::File { path } => IngressReplayBackend::File { path },
+            },
+        }
+    }
+
+    fn check_and_record(
+        &self,
+        replay_key: &str,
+        now_unix_ms: u64,
+    ) -> Result<(), IngressSecurityError> {
+        match &self.backend {
+            IngressReplayBackend::Memory { entries } => {
+                let mut entries = entries
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                entries.retain(|_, seen_at| {
+                    now_unix_ms.saturating_sub(*seen_at) <= self.replay_window_ms
+                });
+                if entries.contains_key(replay_key) {
+                    return Err(IngressSecurityError::Replay);
+                }
+                entries.insert(replay_key.to_string(), now_unix_ms);
+                trim_replay_entries(&mut entries, self.max_entries);
+                Ok(())
+            }
+            IngressReplayBackend::File { path } => {
+                self.check_and_record_file(path, replay_key, now_unix_ms)
+            }
+        }
+    }
+
+    fn check_and_record_file(
+        &self,
+        path: &std::path::Path,
+        replay_key: &str,
+        now_unix_ms: u64,
+    ) -> Result<(), IngressSecurityError> {
+        let lock_path = replay_lock_path(path);
+        let _lock = acquire_replay_file_lock(
+            &lock_path,
+            std::time::Duration::from_millis(DEFAULT_CHATOPS_INGRESS_REPLAY_FILE_LOCK_WAIT_MS),
+            std::time::Duration::from_secs(DEFAULT_CHATOPS_INGRESS_REPLAY_FILE_LOCK_STALE_SECONDS),
+        )?;
+
+        let mut entries = load_replay_entries_from_file(path)?;
+        entries.retain(|_, seen_at| now_unix_ms.saturating_sub(*seen_at) <= self.replay_window_ms);
+        if entries.contains_key(replay_key) {
+            return Err(IngressSecurityError::Replay);
+        }
+        entries.insert(replay_key.to_string(), now_unix_ms);
+        trim_replay_entries(&mut entries, self.max_entries);
+        save_replay_entries_to_file(path, &entries)
+    }
+}
+
+fn trim_replay_entries(entries: &mut HashMap<String, u64>, max_entries: usize) {
+    while entries.len() > max_entries {
+        let Some(oldest_key) = entries
+            .iter()
+            .min_by_key(|(_, seen_at)| **seen_at)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        entries.remove(&oldest_key);
+    }
+}
+
+fn replay_lock_path(path: &std::path::Path) -> std::path::PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("ingress-replay-cache.json");
+    path.with_file_name(format!("{file_name}.lock"))
+}
+
+#[derive(Debug)]
+struct ReplayFileLockGuard {
+    lock_path: std::path::PathBuf,
+}
+
+impl Drop for ReplayFileLockGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
+fn acquire_replay_file_lock(
+    lock_path: &std::path::Path,
+    wait_timeout: std::time::Duration,
+    stale_after: std::time::Duration,
+) -> Result<ReplayFileLockGuard, IngressSecurityError> {
+    let started_at = std::time::Instant::now();
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock_path)
+        {
+            Ok(mut file) => {
+                let _ = std::io::Write::write_all(&mut file, b"lock");
+                return Ok(ReplayFileLockGuard {
+                    lock_path: lock_path.to_path_buf(),
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if is_stale_lock(lock_path, stale_after) {
+                    let _ = std::fs::remove_file(lock_path);
+                    continue;
+                }
+                if started_at.elapsed() >= wait_timeout {
+                    return Err(IngressSecurityError::Unavailable);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            Err(_) => return Err(IngressSecurityError::Unavailable),
+        }
+    }
+}
+
+fn is_stale_lock(path: &std::path::Path, stale_after: std::time::Duration) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return false;
+    };
+    let Ok(elapsed) = modified.elapsed() else {
+        return false;
+    };
+    elapsed >= stale_after
+}
+
+fn load_replay_entries_from_file(
+    path: &std::path::Path,
+) -> Result<HashMap<String, u64>, IngressSecurityError> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let content = std::fs::read_to_string(path).map_err(|_| IngressSecurityError::Unavailable)?;
+    if content.trim().is_empty() {
+        return Ok(HashMap::new());
+    }
+    let records: Vec<IngressReplayRecord> =
+        serde_json::from_str(&content).map_err(|_| IngressSecurityError::Unavailable)?;
+    let mut entries = HashMap::new();
+    for record in records {
+        if !record.key.trim().is_empty() {
+            entries.insert(record.key, record.seen_at_unix_ms);
+        }
+    }
+    Ok(entries)
+}
+
+fn save_replay_entries_to_file(
+    path: &std::path::Path,
+    entries: &HashMap<String, u64>,
+) -> Result<(), IngressSecurityError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| IngressSecurityError::Unavailable)?;
+    }
+    let mut records: Vec<IngressReplayRecord> = entries
+        .iter()
+        .map(|(key, seen_at_unix_ms)| IngressReplayRecord {
+            key: key.clone(),
+            seen_at_unix_ms: *seen_at_unix_ms,
+        })
+        .collect();
+    records.sort_by_key(|record| record.seen_at_unix_ms);
+    let serialized =
+        serde_json::to_string(&records).map_err(|_| IngressSecurityError::Unavailable)?;
+    std::fs::write(path, serialized).map_err(|_| IngressSecurityError::Unavailable)
+}
+
+fn parse_discord_public_key(value: &str) -> Result<VerifyingKey, String> {
+    let decoded =
+        hex::decode(value).map_err(|error| format!("invalid Discord public key hex: {error}"))?;
+    let key_bytes: [u8; 32] = decoded
+        .try_into()
+        .map_err(|_| "Discord public key must be 32 bytes (64 hex chars)".to_string())?;
+    VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|error| format!("invalid Discord public key bytes: {error}"))
+}
+
+fn parse_http_headers(request: &str) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    for line in request.lines().skip(1) {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+        }
+    }
+    headers
+}
+
+fn request_header<'a>(headers: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    headers
+        .get(&key.to_ascii_lowercase())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn current_unix_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+fn current_unix_timestamp_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn telegram_replay_key(body: &str) -> String {
+    if let Ok(payload) = serde_json::from_str::<TelegramUpdateReplayEnvelope>(body) {
+        if let Some(update_id) = payload.update_id {
+            return format!("telegram:update:{update_id}");
+        }
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    format!("telegram:body:{:016x}", hasher.finish())
+}
+
+fn verify_telegram_ingress_security(
+    state: &ServiceRuntimeState,
+    headers: &HashMap<String, String>,
+    body: &str,
+) -> Result<(), IngressSecurityError> {
+    if let Some(expected_secret) = &state.ingress_security.telegram_secret_token {
+        let Some(header_secret) = request_header(headers, "x-telegram-bot-api-secret-token") else {
+            return Err(IngressSecurityError::Unauthorized);
+        };
+        if header_secret != expected_secret {
+            return Err(IngressSecurityError::Unauthorized);
+        }
+    }
+
+    let replay_key = telegram_replay_key(body);
+    state
+        .replay_guard
+        .check_and_record(&replay_key, current_unix_timestamp_ms())
+}
+
+fn verify_discord_interaction_ingress_security(
+    state: &ServiceRuntimeState,
+    headers: &HashMap<String, String>,
+    body: &str,
+) -> Result<(), IngressSecurityError> {
+    if let Some(verifying_key) = &state.ingress_security.discord_verifying_key {
+        let Some(signature_hex) = request_header(headers, "x-signature-ed25519") else {
+            return Err(IngressSecurityError::Unauthorized);
+        };
+        let Some(timestamp) = request_header(headers, "x-signature-timestamp") else {
+            return Err(IngressSecurityError::Unauthorized);
+        };
+        let signature_bytes =
+            hex::decode(signature_hex).map_err(|_| IngressSecurityError::Unauthorized)?;
+        let signature = Signature::try_from(signature_bytes.as_slice())
+            .map_err(|_| IngressSecurityError::Unauthorized)?;
+
+        let mut signed_message = timestamp.as_bytes().to_vec();
+        signed_message.extend_from_slice(body.as_bytes());
+        verifying_key
+            .verify(&signed_message, &signature)
+            .map_err(|_| IngressSecurityError::Unauthorized)?;
+
+        let timestamp_secs = timestamp
+            .parse::<u64>()
+            .map_err(|_| IngressSecurityError::Unauthorized)?;
+        let now_secs = current_unix_timestamp_seconds();
+        let allowed_drift = state.ingress_security.replay_window.as_secs().max(1);
+        if now_secs.abs_diff(timestamp_secs) > allowed_drift {
+            return Err(IngressSecurityError::Unauthorized);
+        }
+
+        let replay_key = format!("discord:{timestamp}:{signature_hex}");
+        state
+            .replay_guard
+            .check_and_record(&replay_key, current_unix_timestamp_ms())?;
+    }
+
+    Ok(())
+}
+
 fn parse_http_request_line(request: &str) -> Option<(&str, &str)> {
     let line = request.lines().next()?.trim();
     let mut parts = line.split_whitespace();
@@ -201,9 +687,7 @@ fn parse_http_request_line(request: &str) -> Option<(&str, &str)> {
 }
 
 fn request_body(request: &str) -> &str {
-    request
-        .split_once("\r\n\r\n")
-        .map_or("", |(_, body)| body.trim())
+    request.split_once("\r\n\r\n").map_or("", |(_, body)| body)
 }
 
 fn build_http_response(status: &str, content_type: &str, body: &str) -> String {
@@ -246,7 +730,7 @@ async fn write_plain_response(
 
 async fn handle_service_connection(
     mut stream: TcpStream,
-    started_at: std::time::Instant,
+    state: Arc<ServiceRuntimeState>,
 ) -> std::io::Result<()> {
     let mut buffer = vec![0_u8; 32 * 1024];
     let bytes_read = stream.read(&mut buffer).await?;
@@ -259,6 +743,7 @@ async fn handle_service_connection(
         write_plain_response(&mut stream, "400 Bad Request", "invalid request line").await?;
         return Ok(());
     };
+    let headers = parse_http_headers(&request);
 
     match (method, path) {
         ("GET", "/") => {
@@ -273,7 +758,7 @@ async fn handle_service_connection(
             let payload = ServiceHealthResponse {
                 status: "ok".to_string(),
                 runtime_mode: AppConfig::load().general.runtime_mode.to_string(),
-                uptime_seconds: started_at.elapsed().as_secs(),
+                uptime_seconds: state.started_at.elapsed().as_secs(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             };
             write_json_response(&mut stream, "200 OK", &payload).await?;
@@ -318,6 +803,154 @@ async fn handle_service_connection(
             };
             write_json_response(&mut stream, status_line, &response_payload).await?;
         }
+        ("POST", "/chatops/telegram/webhook") => {
+            let Some(runtime) = state.chatops_runtime.as_ref() else {
+                write_plain_response(
+                    &mut stream,
+                    "404 Not Found",
+                    "chatops runtime is not enabled",
+                )
+                .await?;
+                return Ok(());
+            };
+
+            if !runtime.is_telegram_webhook_enabled() {
+                write_plain_response(
+                    &mut stream,
+                    "409 Conflict",
+                    "telegram webhook mode is disabled",
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let body = request_body(&request);
+            match verify_telegram_ingress_security(state.as_ref(), &headers, body) {
+                Ok(()) => {}
+                Err(IngressSecurityError::Unauthorized) => {
+                    write_plain_response(
+                        &mut stream,
+                        "401 Unauthorized",
+                        "telegram webhook signature/token validation failed",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(IngressSecurityError::Replay) => {
+                    write_plain_response(
+                        &mut stream,
+                        "409 Conflict",
+                        "telegram webhook replay detected",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(IngressSecurityError::Unavailable) => {
+                    write_plain_response(
+                        &mut stream,
+                        "503 Service Unavailable",
+                        "telegram webhook replay backend unavailable",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+
+            match runtime.enqueue_telegram_webhook_payload(body) {
+                Ok(queued) => {
+                    let response_payload = ServiceTelegramWebhookResponse {
+                        accepted: true,
+                        queued,
+                    };
+                    write_json_response(&mut stream, "202 Accepted", &response_payload).await?;
+                }
+                Err(error) => {
+                    let message = format!("invalid Telegram webhook payload: {error}");
+                    write_plain_response(&mut stream, "400 Bad Request", &message).await?;
+                }
+            }
+        }
+        ("POST", "/chatops/discord/interactions") => {
+            let Some(runtime) = state.chatops_runtime.as_ref() else {
+                write_plain_response(
+                    &mut stream,
+                    "404 Not Found",
+                    "chatops runtime is not enabled",
+                )
+                .await?;
+                return Ok(());
+            };
+
+            if !runtime.is_discord_interactions_enabled() {
+                write_plain_response(
+                    &mut stream,
+                    "409 Conflict",
+                    "discord interaction mode is disabled",
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let body = request_body(&request);
+            match verify_discord_interaction_ingress_security(state.as_ref(), &headers, body) {
+                Ok(()) => {}
+                Err(IngressSecurityError::Unauthorized) => {
+                    write_plain_response(
+                        &mut stream,
+                        "401 Unauthorized",
+                        "discord interaction signature validation failed",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(IngressSecurityError::Replay) => {
+                    write_plain_response(
+                        &mut stream,
+                        "409 Conflict",
+                        "discord interaction replay detected",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(IngressSecurityError::Unavailable) => {
+                    write_plain_response(
+                        &mut stream,
+                        "503 Service Unavailable",
+                        "discord interaction replay backend unavailable",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+
+            match runtime.enqueue_discord_interaction_payload(body) {
+                Ok(outcome) if outcome.ping => {
+                    let response_payload = ServiceDiscordInteractionResponse {
+                        response_type: 1,
+                        data: None,
+                    };
+                    write_json_response(&mut stream, "200 OK", &response_payload).await?;
+                }
+                Ok(outcome) => {
+                    let response_payload = ServiceDiscordInteractionResponse {
+                        response_type: 4,
+                        data: Some(ServiceDiscordInteractionData {
+                            content: format!(
+                                "Command accepted for async execution (queued: {}).",
+                                outcome.queued
+                            ),
+                            // 64 => ephemeral response in Discord interactions.
+                            flags: 64,
+                        }),
+                    };
+                    write_json_response(&mut stream, "200 OK", &response_payload).await?;
+                }
+                Err(error) => {
+                    let message = format!("invalid Discord interaction payload: {error}");
+                    write_plain_response(&mut stream, "400 Bad Request", &message).await?;
+                }
+            }
+        }
         _ => {
             write_plain_response(&mut stream, "404 Not Found", "not found").await?;
         }
@@ -339,13 +972,52 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
     println!("NetToolsKit service mode listening on http://{bind_addr}");
     println!("Health endpoint: GET /health");
     println!("Task submit endpoint: POST /task/submit");
+    println!("Readiness endpoint: GET /ready");
 
-    let started_at = std::time::Instant::now();
+    let ingress_security = match ServiceIngressSecurityConfig::from_env() {
+        Ok(config) => Arc::new(config),
+        Err(error) => {
+            eprintln!("Failed to load ChatOps ingress security config: {error}");
+            return ExitStatus::Error;
+        }
+    };
+    if ingress_security.has_telegram_signature_validation() {
+        println!("Telegram webhook signature/token validation: enabled");
+    }
+    if ingress_security.has_discord_signature_validation() {
+        println!("Discord interaction signature validation: enabled");
+    }
+    println!(
+        "Ingress replay backend: {}",
+        ingress_security.replay_backend_description()
+    );
+
+    let chatops_runtime = initialize_chatops_runtime();
+    if let Some(runtime) = &chatops_runtime {
+        if runtime.is_telegram_webhook_enabled() {
+            println!("Telegram webhook endpoint: POST /chatops/telegram/webhook");
+        }
+        if runtime.is_discord_interactions_enabled() {
+            println!("Discord interactions endpoint: POST /chatops/discord/interactions");
+        }
+    }
+    let service_state = Arc::new(ServiceRuntimeState {
+        started_at: std::time::Instant::now(),
+        chatops_runtime,
+        replay_guard: Arc::new(IngressReplayGuard::with_backend(
+            ingress_security.replay_window,
+            ingress_security.replay_max_entries,
+            ingress_security.replay_backend.clone(),
+        )),
+        ingress_security,
+    });
+
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
+                let state = service_state.clone();
                 tokio::spawn(async move {
-                    if let Err(error) = handle_service_connection(stream, started_at).await {
+                    if let Err(error) = handle_service_connection(stream, state).await {
                         tracing::warn!(%error, "service connection handling failed");
                     }
                 });
@@ -355,6 +1027,61 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
             }
         }
     }
+}
+
+fn initialize_chatops_runtime() -> Option<Arc<nettoolskit_orchestrator::ChatOpsRuntime>> {
+    match nettoolskit_orchestrator::build_chatops_runtime_from_env() {
+        Ok(Some(runtime)) => {
+            let runtime = Arc::new(runtime);
+            let poll_interval = runtime.poll_interval();
+            let enabled_platforms = runtime
+                .enabled_platforms()
+                .into_iter()
+                .map(|platform| platform.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            println!(
+                "ChatOps runtime enabled for platforms: {enabled_platforms} (poll {}ms)",
+                poll_interval.as_millis()
+            );
+            spawn_chatops_runtime_loop(runtime.clone());
+            Some(runtime)
+        }
+        Ok(None) => None,
+        Err(error) => {
+            eprintln!("Warning: ChatOps runtime is enabled but could not start: {error}");
+            None
+        }
+    }
+}
+
+fn spawn_chatops_runtime_loop(runtime: Arc<nettoolskit_orchestrator::ChatOpsRuntime>) {
+    let poll_interval = runtime.poll_interval();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(poll_interval);
+        // Skip immediate tick to keep startup logs deterministic.
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            let summary = runtime.tick().await;
+            if summary.envelopes_received > 0
+                || summary.ingress_errors > 0
+                || summary.notification_errors > 0
+            {
+                tracing::info!(
+                    envelopes_received = summary.envelopes_received,
+                    executed_success = summary.executed_success,
+                    executed_failed = summary.executed_failed,
+                    rate_limited = summary.rate_limited,
+                    ingress_errors = summary.ingress_errors,
+                    notification_errors = summary.notification_errors,
+                    "chatops runtime tick summary"
+                );
+            }
+        }
+    });
 }
 
 /// NetToolsKit CLI
@@ -478,6 +1205,8 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use nettoolskit_orchestrator::{build_chatops_runtime, ChatOpsRuntime, ChatOpsRuntimeConfig};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
@@ -501,7 +1230,79 @@ mod tests {
         assert!(response.ends_with("\r\n\r\nok"));
     }
 
-    async fn execute_service_request(request: &str) -> String {
+    fn default_test_ingress_security() -> Arc<ServiceIngressSecurityConfig> {
+        Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: None,
+            discord_verifying_key: None,
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::Memory,
+        })
+    }
+
+    fn test_service_state_with_security(
+        chatops_runtime: Option<Arc<ChatOpsRuntime>>,
+        ingress_security: Arc<ServiceIngressSecurityConfig>,
+    ) -> Arc<ServiceRuntimeState> {
+        Arc::new(ServiceRuntimeState {
+            started_at: std::time::Instant::now(),
+            chatops_runtime,
+            replay_guard: Arc::new(IngressReplayGuard::with_backend(
+                ingress_security.replay_window,
+                ingress_security.replay_max_entries,
+                ingress_security.replay_backend.clone(),
+            )),
+            ingress_security,
+        })
+    }
+
+    fn test_service_state(
+        chatops_runtime: Option<Arc<ChatOpsRuntime>>,
+    ) -> Arc<ServiceRuntimeState> {
+        test_service_state_with_security(chatops_runtime, default_test_ingress_security())
+    }
+
+    fn test_telegram_webhook_runtime(webhook_enabled: bool) -> Arc<ChatOpsRuntime> {
+        let runtime = build_chatops_runtime(ChatOpsRuntimeConfig {
+            enabled: true,
+            allowed_user_ids: vec!["777".to_string()],
+            allowed_channel_ids: vec!["555".to_string()],
+            allowed_command_scopes: vec!["list".to_string(), "help".to_string()],
+            telegram_bot_token: Some("test-token".to_string()),
+            telegram_api_base: "http://127.0.0.1".to_string(),
+            telegram_webhook_enabled: webhook_enabled,
+            ..ChatOpsRuntimeConfig::default()
+        })
+        .expect("runtime should build")
+        .expect("enabled runtime should be present");
+        Arc::new(runtime)
+    }
+
+    fn test_discord_interactions_runtime(interactions_enabled: bool) -> Arc<ChatOpsRuntime> {
+        let runtime = build_chatops_runtime(ChatOpsRuntimeConfig {
+            enabled: true,
+            allowed_user_ids: vec!["777".to_string()],
+            allowed_channel_ids: vec!["555".to_string()],
+            allowed_command_scopes: vec!["list".to_string(), "submit".to_string()],
+            discord_bot_token: Some("test-token".to_string()),
+            discord_api_base: "http://127.0.0.1".to_string(),
+            discord_interactions_enabled: interactions_enabled,
+            discord_channel_ids: if interactions_enabled {
+                Vec::new()
+            } else {
+                vec!["555".to_string()]
+            },
+            ..ChatOpsRuntimeConfig::default()
+        })
+        .expect("runtime should build")
+        .expect("enabled runtime should be present");
+        Arc::new(runtime)
+    }
+
+    async fn execute_service_request_with_state(
+        request: &str,
+        state: Arc<ServiceRuntimeState>,
+    ) -> String {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("test listener should bind");
@@ -535,13 +1336,17 @@ mod tests {
             .accept()
             .await
             .expect("server should accept client");
-        handle_service_connection(server_stream, std::time::Instant::now())
+        handle_service_connection(server_stream, state)
             .await
             .expect("service handler should process request");
 
         client
             .await
             .expect("client task should complete without panic")
+    }
+
+    async fn execute_service_request(request: &str) -> String {
+        execute_service_request_with_state(request, test_service_state(None)).await
     }
 
     #[tokio::test]
@@ -591,6 +1396,362 @@ mod tests {
         assert!(
             response.contains("\"accepted\":true"),
             "accepted response should be true"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_accepts_valid_payload_when_enabled() {
+        let runtime = test_telegram_webhook_runtime(true);
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 202 Accepted"),
+            "valid webhook payload should be accepted"
+        );
+        assert!(
+            response.contains("\"queued\":1"),
+            "webhook response should report one queued envelope"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_rejects_invalid_payload() {
+        let runtime = test_telegram_webhook_runtime(true);
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{invalid"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 400 Bad Request"),
+            "invalid webhook payload should be rejected"
+        );
+        assert!(
+            response.contains("invalid Telegram webhook payload"),
+            "response should explain invalid webhook payload"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_returns_conflict_when_disabled() {
+        let runtime = test_telegram_webhook_runtime(false);
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 409 Conflict"),
+            "webhook endpoint should reject requests when webhook mode is disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_rejects_invalid_secret_token() {
+        let runtime = test_telegram_webhook_runtime(true);
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: Some("expected-token".to_string()),
+            discord_verifying_key: None,
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::Memory,
+        });
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "X-Telegram-Bot-Api-Secret-Token: wrong-token\r\n",
+            "\r\n",
+            "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
+        );
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(Some(runtime), security),
+        )
+        .await;
+        assert!(
+            response.starts_with("HTTP/1.1 401 Unauthorized"),
+            "telegram webhook must reject mismatched secret token"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_rejects_replay_for_same_payload() {
+        let runtime = test_telegram_webhook_runtime(true);
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: Some("expected-token".to_string()),
+            discord_verifying_key: None,
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::Memory,
+        });
+        let state = test_service_state_with_security(Some(runtime), security);
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "X-Telegram-Bot-Api-Secret-Token: expected-token\r\n",
+            "\r\n",
+            "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
+        );
+
+        let first = execute_service_request_with_state(request, state.clone()).await;
+        assert!(
+            first.starts_with("HTTP/1.1 202 Accepted"),
+            "first telegram webhook request should be accepted"
+        );
+
+        let replay = execute_service_request_with_state(request, state).await;
+        assert!(
+            replay.starts_with("HTTP/1.1 409 Conflict"),
+            "replayed telegram webhook request should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_replay_is_shared_for_file_backend() {
+        let runtime = test_telegram_webhook_runtime(true);
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let replay_path = temp_dir.path().join("ingress-replay-cache.json");
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: Some("expected-token".to_string()),
+            discord_verifying_key: None,
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::File {
+                path: replay_path.clone(),
+            },
+        });
+        let state_one = test_service_state_with_security(Some(runtime.clone()), security.clone());
+        let state_two = test_service_state_with_security(Some(runtime), security);
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "X-Telegram-Bot-Api-Secret-Token: expected-token\r\n",
+            "\r\n",
+            "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
+        );
+
+        let first = execute_service_request_with_state(request, state_one).await;
+        assert!(
+            first.starts_with("HTTP/1.1 202 Accepted"),
+            "first telegram webhook request should be accepted"
+        );
+
+        let replay = execute_service_request_with_state(request, state_two).await;
+        assert!(
+            replay.starts_with("HTTP/1.1 409 Conflict"),
+            "replay must be detected across independent states when file backend is shared"
+        );
+
+        assert!(
+            replay_path.exists(),
+            "file replay backend should persist cache file"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_telegram_webhook_returns_unavailable_for_broken_file_backend() {
+        let runtime = test_telegram_webhook_runtime(true);
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: Some("expected-token".to_string()),
+            discord_verifying_key: None,
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            // Directory path causes write failure for file-backed replay cache.
+            replay_backend: IngressReplayBackendConfig::File {
+                path: temp_dir.path().to_path_buf(),
+            },
+        });
+        let state = test_service_state_with_security(Some(runtime), security);
+        let request = concat!(
+            "POST /chatops/telegram/webhook HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "X-Telegram-Bot-Api-Secret-Token: expected-token\r\n",
+            "\r\n",
+            "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
+        );
+
+        let response = execute_service_request_with_state(request, state).await;
+        assert!(
+            response.starts_with("HTTP/1.1 503 Service Unavailable"),
+            "broken replay backend should return service unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_discord_interactions_returns_pong_for_ping() {
+        let runtime = test_discord_interactions_runtime(true);
+        let request = concat!(
+            "POST /chatops/discord/interactions HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"type\":1}"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "ping interaction should return 200"
+        );
+        assert!(
+            response.contains("\"type\":1"),
+            "ping interaction should return Discord pong payload"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_discord_interactions_accepts_command_payload() {
+        let runtime = test_discord_interactions_runtime(true);
+        let request = concat!(
+            "POST /chatops/discord/interactions HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "command interaction should return 200"
+        );
+        assert!(
+            response.contains("\"type\":4"),
+            "command interaction should return deferred message response"
+        );
+        assert!(
+            response.contains("\"flags\":64"),
+            "command interaction response should be ephemeral"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_discord_interactions_rejects_invalid_payload() {
+        let runtime = test_discord_interactions_runtime(true);
+        let request = concat!(
+            "POST /chatops/discord/interactions HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{invalid"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 400 Bad Request"),
+            "invalid interaction payload should be rejected"
+        );
+        assert!(
+            response.contains("invalid Discord interaction payload"),
+            "response should explain invalid interaction payload"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_discord_interactions_returns_conflict_when_disabled() {
+        let runtime = test_discord_interactions_runtime(false);
+        let request = concat!(
+            "POST /chatops/discord/interactions HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}"
+        );
+        let response =
+            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        assert!(
+            response.starts_with("HTTP/1.1 409 Conflict"),
+            "interaction endpoint should reject requests when mode is disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_discord_interactions_rejects_missing_signature_when_key_configured() {
+        let runtime = test_discord_interactions_runtime(true);
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: None,
+            discord_verifying_key: Some(signing_key.verifying_key()),
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::Memory,
+        });
+        let request = concat!(
+            "POST /chatops/discord/interactions HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}"
+        );
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(Some(runtime), security),
+        )
+        .await;
+        assert!(
+            response.starts_with("HTTP/1.1 401 Unauthorized"),
+            "discord interaction must reject missing signature when public key is configured"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_discord_interactions_accepts_valid_signed_request_and_rejects_replay() {
+        let runtime = test_discord_interactions_runtime(true);
+        let signing_key = SigningKey::from_bytes(&[11_u8; 32]);
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: None,
+            discord_verifying_key: Some(signing_key.verifying_key()),
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::Memory,
+        });
+        let state = test_service_state_with_security(Some(runtime), security);
+        let body =
+            "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}";
+        let timestamp = current_unix_timestamp_seconds().to_string();
+        let mut message = timestamp.as_bytes().to_vec();
+        message.extend_from_slice(body.as_bytes());
+        let signature = signing_key.sign(&message);
+        let signature_hex = hex::encode(signature.to_bytes());
+
+        let request = format!(
+            "POST /chatops/discord/interactions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nX-Signature-Ed25519: {signature_hex}\r\nX-Signature-Timestamp: {timestamp}\r\n\r\n{body}"
+        );
+
+        let first = execute_service_request_with_state(&request, state.clone()).await;
+        assert!(
+            first.starts_with("HTTP/1.1 200 OK"),
+            "first signed interaction should be accepted"
+        );
+        assert!(
+            first.contains("\"type\":4"),
+            "accepted signed interaction should return command acknowledgement"
+        );
+
+        let replay = execute_service_request_with_state(&request, state).await;
+        assert!(
+            replay.starts_with("HTTP/1.1 409 Conflict"),
+            "replayed signed interaction should be rejected"
         );
     }
 }

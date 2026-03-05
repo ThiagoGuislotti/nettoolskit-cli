@@ -1,0 +1,21 @@
+[package]
+name = "nettoolskit-task-worker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared background task worker runtime for NetToolsKit"
+repository = "https://github.com/ThiagoGuislotti/NetToolsKit"
+readme = "README.md"
+keywords = ["worker", "queue", "runtime"]
+categories = ["asynchronous", "command-line-utilities"]
+
+[lib]
+name = "nettoolskit_task_worker"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true
