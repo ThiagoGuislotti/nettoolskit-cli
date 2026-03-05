@@ -10,12 +10,18 @@ pub mod ai_session;
 pub mod approval;
 /// Internal command cache primitives used by processor runtime.
 mod cache;
+/// ChatOps contracts and execution pipeline for Telegram/Discord adapters.
+pub mod chatops;
+/// ChatOps runtime adapters and service-loop orchestration.
+pub mod chatops_runtime;
 /// Async command executor with progress tracking.
 pub mod executor;
 /// Plugin foundation for command pre/post hooks.
 pub mod plugins;
 /// Command dispatch and text processing routines.
 pub mod processor;
+/// Repository workflow automation with explicit policy gates.
+pub mod repo_workflow;
 
 // Re-export commonly used types
 pub use ai::{
@@ -30,6 +36,17 @@ pub use ai_session::{
 pub use approval::{
     evaluate_approval, request_approval, ApprovalActionKind, ApprovalDecision, ApprovalRequest,
 };
+pub use chatops::{
+    execute_chatops_envelope, parse_chatops_intent, process_chatops_inbox, ChatOpsAdapterError,
+    ChatOpsAuditEntry, ChatOpsAuditKind, ChatOpsAuthorizationError, ChatOpsAuthorizationPolicy,
+    ChatOpsCommandEnvelope, ChatOpsExecutionError, ChatOpsIngress, ChatOpsIntent,
+    ChatOpsLocalAuditStore, ChatOpsNotification, ChatOpsNotificationSeverity, ChatOpsNotifier,
+    ChatOpsPlatform, MockChatOpsIngress, RecordingChatOpsNotifier,
+};
+pub use chatops_runtime::{
+    build_chatops_runtime, build_chatops_runtime_from_env, ChatOpsRuntime, ChatOpsRuntimeConfig,
+    ChatOpsTickSummary, DiscordInteractionIngressOutcome,
+};
 pub use executor::{
     AsyncCommandExecutor, CommandHandle, CommandProgress, CommandResult, ProgressSender,
 };
@@ -39,3 +56,11 @@ pub use plugins::{
     PluginMetadata, PluginRegistryError,
 };
 pub use processor::{process_command, process_command_with_interrupt, process_text};
+pub use repo_workflow::{
+    execute_repo_workflow, parse_repo_workflow_payload, validate_repo_workflow_request,
+    RepoWorkflowError, RepoWorkflowPlan, RepoWorkflowPolicy, RepoWorkflowRequest,
+    RepoWorkflowResult, NTK_REPO_WORKFLOW_ALLOWED_COMMANDS_ENV,
+    NTK_REPO_WORKFLOW_ALLOWED_HOSTS_ENV, NTK_REPO_WORKFLOW_ALLOW_PR_ENV,
+    NTK_REPO_WORKFLOW_ALLOW_PUSH_ENV, NTK_REPO_WORKFLOW_BASE_DIR_ENV,
+    NTK_REPO_WORKFLOW_ENABLED_ENV,
+};

@@ -190,6 +190,33 @@ async fn test_process_task_submit_ai_plan_in_service_mode_queues_successfully() 
 }
 
 #[tokio::test]
+async fn test_process_task_submit_repo_workflow_dry_run_with_policy_succeeds() {
+    let _guard = env_test_guard().await;
+    std::env::set_var("NTK_REPO_WORKFLOW_ENABLED", "true");
+    std::env::set_var("NTK_REPO_WORKFLOW_ALLOWED_HOSTS", "github.com");
+    std::env::set_var("NTK_REPO_WORKFLOW_ALLOWED_COMMANDS", "cargo test,cargo fmt");
+    std::env::set_var("NTK_REPO_WORKFLOW_ALLOW_PUSH", "false");
+    std::env::set_var("NTK_REPO_WORKFLOW_ALLOW_PR", "false");
+
+    let result = process_command(
+        "/task submit repo-workflow repo=https://github.com/acme/demo.git;branch=feature/chatops;command=cargo test;dry_run=true",
+    )
+    .await;
+
+    std::env::remove_var("NTK_REPO_WORKFLOW_ALLOW_PR");
+    std::env::remove_var("NTK_REPO_WORKFLOW_ALLOW_PUSH");
+    std::env::remove_var("NTK_REPO_WORKFLOW_ALLOWED_COMMANDS");
+    std::env::remove_var("NTK_REPO_WORKFLOW_ALLOWED_HOSTS");
+    std::env::remove_var("NTK_REPO_WORKFLOW_ENABLED");
+
+    assert_eq!(
+        result,
+        ExitStatus::Success,
+        "Repo workflow dry-run should succeed when policy is explicitly configured"
+    );
+}
+
+#[tokio::test]
 async fn test_process_task_submit_without_payload_fails() {
     let result = process_command("/task submit ai-plan").await;
     assert_eq!(

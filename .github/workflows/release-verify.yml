@@ -152,6 +152,26 @@ jobs:
           "./$base/${BINARY_NAME}" --version
           "./$base/${BINARY_NAME}" --help >/dev/null
           "./$base/${BINARY_NAME}" manifest --help >/dev/null
+          "./$base/${BINARY_NAME}" service --help >/dev/null
+
+          service_port=18080
+          NTK_RUNTIME_MODE=service NTK_CHATOPS_ENABLED=false "./$base/${BINARY_NAME}" service --host 127.0.0.1 --port "$service_port" >/tmp/ntk-release-service.log 2>&1 &
+          service_pid=$!
+          trap 'kill "$service_pid" >/dev/null 2>&1 || true' EXIT
+
+          for i in {1..20}; do
+            if curl -fsS "http://127.0.0.1:${service_port}/health" | grep -q '"status":"ok"'; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS "http://127.0.0.1:${service_port}/health" | tee /tmp/ntk-release-service-health.json
+          grep -q '"runtime_mode":"service"' /tmp/ntk-release-service-health.json
+
+          kill "$service_pid" >/dev/null 2>&1 || true
+          wait "$service_pid" >/dev/null 2>&1 || true
+          trap - EXIT
 
       - name: Verify published release assets (windows)
         if: runner.os == 'Windows'
@@ -243,3 +263,40 @@ jobs:
           & $binaryPath --version
           & $binaryPath --help | Out-Null
           & $binaryPath manifest --help | Out-Null
+          & $binaryPath service --help | Out-Null
+
+          $servicePort = 18080
+          $env:NTK_RUNTIME_MODE = "service"
+          $env:NTK_CHATOPS_ENABLED = "false"
+          $serviceOut = Join-Path (Get-Location) "ntk-release-service.out.log"
+          $serviceErr = Join-Path (Get-Location) "ntk-release-service.err.log"
+          $service = Start-Process -FilePath $binaryPath -ArgumentList @("service","--host","127.0.0.1","--port","$servicePort") -PassThru -RedirectStandardOutput $serviceOut -RedirectStandardError $serviceErr
+
+          try {
+            $healthy = $false
+            for ($i = 0; $i -lt 20; $i++) {
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:$servicePort/health" -Method Get -TimeoutSec 2
+                if ($health.status -eq "ok") {
+                  $healthy = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+
+            if (-not $healthy) {
+              throw "Service health endpoint did not become ready on port $servicePort"
+            }
+
+            if ($health.runtime_mode -ne "service") {
+              throw "Unexpected runtime_mode '$($health.runtime_mode)' in service health response"
+            }
+          } finally {
+            if ($service -and -not $service.HasExited) {
+              Stop-Process -Id $service.Id -Force
+            }
+            Remove-Item Env:NTK_RUNTIME_MODE -ErrorAction SilentlyContinue
+            Remove-Item Env:NTK_CHATOPS_ENABLED -ErrorAction SilentlyContinue
+          }

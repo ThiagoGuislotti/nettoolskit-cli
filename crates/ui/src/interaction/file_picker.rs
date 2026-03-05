@@ -362,6 +362,33 @@ fn fuzzy_score(pattern: &str, candidate: &str, idx_score: i64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0);
+            let path = std::env::temp_dir().join(format!(
+                "ntk-file-picker-tests-{prefix}-{}-{nanos}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("temp directory should be created");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn parse_filter_mode_detects_prefixes() {
@@ -403,5 +430,81 @@ mod tests {
     fn fuzzy_score_matches_subsequence() {
         assert!(fuzzy_score("mnfst", "ntk-manifest.yaml", 0).is_some());
         assert!(fuzzy_score("zzz", "ntk-manifest.yaml", 0).is_none());
+    }
+
+    #[test]
+    fn picker_builder_enforces_minimum_page_size() {
+        let picker = FilePicker::new(".").with_page_size(0);
+        assert_eq!(picker.page_size, 1);
+    }
+
+    #[test]
+    fn with_include_patterns_keeps_default_when_empty() {
+        let picker = FilePicker::new(".").with_include_patterns(Vec::new());
+        assert_eq!(picker.include_patterns, vec!["*".to_string()]);
+    }
+
+    #[test]
+    fn discover_files_for_manifest_picker_respects_patterns() {
+        let temp = TempDirGuard::new("discover-manifests");
+        let manifest_path = temp.path.join("ntk-demo.yml");
+        let other_path = temp.path.join("readme.txt");
+        fs::write(&manifest_path, "manifest: true\n").expect("manifest file should be written");
+        fs::write(&other_path, "plain text\n").expect("non-manifest file should be written");
+
+        let picker = FilePicker::for_manifests(&temp.path);
+        let files = picker.discover_files().expect("discovery should succeed");
+
+        assert!(files.contains(&manifest_path));
+        assert!(!files.contains(&other_path));
+    }
+
+    #[test]
+    fn discover_files_can_include_hidden_files_when_enabled() {
+        let temp = TempDirGuard::new("discover-hidden");
+        let hidden_path = temp.path.join(".secret.yml");
+        fs::write(&hidden_path, "x: 1\n").expect("hidden file should be written");
+
+        let picker = FilePicker::new(&temp.path)
+            .with_include_patterns(vec!["*.yml".to_string()])
+            .with_include_hidden(true);
+        let files = picker.discover_files().expect("discovery should succeed");
+
+        assert!(files.contains(&hidden_path));
+    }
+
+    #[test]
+    fn build_entries_keeps_full_path_when_outside_root() {
+        let root = PathBuf::from("repo");
+        let outside = PathBuf::from("external").join("file.txt");
+        let entries = build_entries(&root, vec![outside.clone()]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].display, outside.display().to_string());
+        assert_eq!(entries[0].path, outside);
+    }
+
+    #[test]
+    fn regex_score_empty_pattern_prefers_earlier_index() {
+        let score_a = regex_score("", "src/main.rs", 0).expect("score should exist");
+        let score_b = regex_score("", "src/main.rs", 10).expect("score should exist");
+        assert!(score_a > score_b);
+    }
+
+    #[test]
+    fn literal_score_empty_pattern_prefers_earlier_index() {
+        let score_a = literal_score("", "src/main.rs", 1).expect("score should exist");
+        let score_b = literal_score("", "src/main.rs", 2).expect("score should exist");
+        assert!(score_a > score_b);
+    }
+
+    #[test]
+    fn file_picker_scorer_supports_filter_modes() {
+        let option = FilePickerEntry {
+            display: "src/main.rs".to_string(),
+            path: PathBuf::from("src/main.rs"),
+        };
+        assert!(file_picker_scorer("re:.*main.*", &option, "src/main.rs", 0).is_some());
+        assert!(file_picker_scorer("lit:MAIN", &option, "src/main.rs", 0).is_some());
+        assert!(file_picker_scorer("smn", &option, "src/main.rs", 0).is_some());
     }
 }

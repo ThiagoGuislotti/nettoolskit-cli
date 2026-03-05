@@ -680,6 +680,44 @@ fn sanitize_otlp_metric_name(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_env_vars<F>(entries: &[(&str, Option<&str>)], f: F)
+    where
+        F: FnOnce(),
+    {
+        let _guard = env_lock().lock().unwrap_or_else(|error| error.into_inner());
+        let previous: Vec<(&str, Option<String>)> = entries
+            .iter()
+            .map(|(key, _)| (*key, std::env::var(key).ok()))
+            .collect();
+
+        for (key, value) in entries {
+            match value {
+                Some(raw) => std::env::set_var(key, raw),
+                None => std::env::remove_var(key),
+            }
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+
+        for (key, value) in previous {
+            if let Some(raw) = value {
+                std::env::set_var(key, raw);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
+    }
 
     #[test]
     fn parse_otlp_protocol_supports_grpc_and_http() {
@@ -700,6 +738,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_otlp_protocol_supports_http_aliases() {
+        assert_eq!(
+            parse_otlp_protocol("httpbinary"),
+            OtlpProtocolKind::HttpBinary
+        );
+        assert_eq!(
+            parse_otlp_protocol("http-protobuf"),
+            OtlpProtocolKind::HttpBinary
+        );
+    }
+
+    #[test]
     fn parse_otlp_timeout_uses_default_when_invalid() {
         assert_eq!(parse_otlp_timeout_ms("invalid"), DEFAULT_OTLP_TIMEOUT_MS);
         assert_eq!(parse_otlp_timeout_ms("0"), DEFAULT_OTLP_TIMEOUT_MS);
@@ -708,6 +758,155 @@ mod tests {
     #[test]
     fn parse_otlp_timeout_parses_positive_values() {
         assert_eq!(parse_otlp_timeout_ms("15000"), 15_000);
+        assert_eq!(parse_otlp_timeout_ms(" 250 "), 250);
+    }
+
+    #[test]
+    fn default_filter_for_level_maps_known_values() {
+        assert_eq!(default_filter_for_level("off", false), "off");
+        assert_eq!(
+            default_filter_for_level("warn", false),
+            "nettoolskit=warn,warn"
+        );
+        assert_eq!(
+            default_filter_for_level("info", false),
+            "nettoolskit=info,warn"
+        );
+        assert!(default_filter_for_level("debug", false).contains("nettoolskit=debug"));
+        assert!(default_filter_for_level("trace", false).contains("nettoolskit=trace"));
+    }
+
+    #[test]
+    fn default_filter_for_level_uses_verbose_fallback_when_unknown() {
+        assert!(default_filter_for_level("custom", true).contains("nettoolskit=debug"));
+        assert_eq!(
+            default_filter_for_level("custom", false),
+            "nettoolskit=info,warn"
+        );
+    }
+
+    #[test]
+    fn first_non_empty_env_returns_first_non_blank_entry() {
+        with_env_vars(
+            &[
+                ("NTK_TEST_ENV_A", Some("  ")),
+                ("NTK_TEST_ENV_B", Some("value-b")),
+            ],
+            || {
+                let value = first_non_empty_env(&["NTK_TEST_ENV_A", "NTK_TEST_ENV_B"]);
+                assert_eq!(value, Some("value-b".to_string()));
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_otlp_export_config_returns_none_without_endpoint() {
+        with_env_vars(
+            &[
+                ("NTK_TEST_OTLP_ENDPOINT", None),
+                ("NTK_TEST_OTLP_PROTOCOL", Some("http")),
+                ("NTK_TEST_OTLP_TIMEOUT", Some("5000")),
+            ],
+            || {
+                let config = resolve_otlp_export_config(
+                    &["NTK_TEST_OTLP_ENDPOINT"],
+                    &["NTK_TEST_OTLP_PROTOCOL"],
+                    &["NTK_TEST_OTLP_TIMEOUT"],
+                );
+                assert!(config.is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_otlp_export_config_uses_defaults_for_missing_optional_fields() {
+        with_env_vars(
+            &[
+                ("NTK_TEST_OTLP_ENDPOINT", Some("http://localhost:4317")),
+                ("NTK_TEST_OTLP_PROTOCOL", None),
+                ("NTK_TEST_OTLP_TIMEOUT", None),
+            ],
+            || {
+                let config = resolve_otlp_export_config(
+                    &["NTK_TEST_OTLP_ENDPOINT"],
+                    &["NTK_TEST_OTLP_PROTOCOL"],
+                    &["NTK_TEST_OTLP_TIMEOUT"],
+                )
+                .expect("endpoint should enable OTLP config");
+                assert_eq!(config.endpoint, "http://localhost:4317");
+                assert_eq!(config.protocol, OtlpProtocolKind::Grpc);
+                assert_eq!(config.timeout_ms, DEFAULT_OTLP_TIMEOUT_MS);
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_otlp_trace_export_config_uses_priority_order() {
+        with_env_vars(
+            &[
+                (
+                    "NTK_OTLP_TRACES_ENDPOINT",
+                    Some("http://localhost:4318/v1/traces"),
+                ),
+                ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", Some("http://ignored")),
+                ("NTK_OTLP_TRACES_PROTOCOL", Some("http/protobuf")),
+                ("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", Some("9000")),
+            ],
+            || {
+                let config =
+                    resolve_otlp_trace_export_config().expect("trace config should resolve");
+                assert_eq!(config.endpoint, "http://localhost:4318/v1/traces");
+                assert_eq!(config.protocol, OtlpProtocolKind::HttpBinary);
+                assert_eq!(config.timeout_ms, 9000);
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_otlp_metric_export_config_uses_priority_order() {
+        with_env_vars(
+            &[
+                (
+                    "NTK_OTLP_METRICS_ENDPOINT",
+                    Some("http://localhost:4318/v1/metrics"),
+                ),
+                (
+                    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+                    Some("http://ignored"),
+                ),
+                ("NTK_OTLP_METRICS_PROTOCOL", Some("grpc")),
+                ("NTK_OTLP_METRICS_TIMEOUT_MS", Some("7000")),
+            ],
+            || {
+                let config =
+                    resolve_otlp_metric_export_config().expect("metric config should resolve");
+                assert_eq!(config.endpoint, "http://localhost:4318/v1/metrics");
+                assert_eq!(config.protocol, OtlpProtocolKind::Grpc);
+                assert_eq!(config.timeout_ms, 7000);
+            },
+        );
+    }
+
+    #[test]
+    fn create_env_filter_prefers_rust_log_environment() {
+        with_env_vars(&[("RUST_LOG", Some("nettoolskit=trace"))], || {
+            let filter = create_env_filter(&TracingConfig::default())
+                .expect("RUST_LOG should create a valid filter");
+            assert!(format!("{filter}").contains("nettoolskit=trace"));
+        });
+    }
+
+    #[test]
+    fn create_env_filter_uses_default_when_rust_log_not_set() {
+        with_env_vars(&[("RUST_LOG", None)], || {
+            let config = TracingConfig {
+                verbose: false,
+                log_level: "warn".to_string(),
+                ..Default::default()
+            };
+            let filter = create_env_filter(&config).expect("default filter should be valid");
+            assert!(format!("{filter}").contains("nettoolskit=warn"));
+        });
     }
 
     #[test]
@@ -727,5 +926,67 @@ mod tests {
         assert_eq!(sanitize_otlp_metric_name(""), None);
         assert_eq!(sanitize_otlp_metric_name("   "), None);
         assert_eq!(sanitize_otlp_metric_name("___"), None);
+    }
+
+    #[test]
+    fn sanitize_otlp_metric_name_collapses_repeated_separators() {
+        assert_eq!(
+            sanitize_otlp_metric_name(" latency//////p95 "),
+            Some("latency_p95".to_string())
+        );
+    }
+
+    #[test]
+    fn otlp_metric_exporter_records_counter_gauge_and_timing() {
+        shutdown_meter_provider();
+        install_metric_exporter_state();
+
+        record_otlp_counter("runtime/command count", 1);
+        record_otlp_gauge("runtime/queue depth", 3.0);
+        record_otlp_timing("runtime/latency", Duration::from_millis(15));
+        record_otlp_gauge("runtime/invalid", f64::NAN);
+
+        let storage = OTEL_METRIC_EXPORTER
+            .get()
+            .expect("metric exporter storage should exist");
+        let guard = storage.lock().unwrap_or_else(|error| error.into_inner());
+        let exporter = guard.as_ref().expect("metric exporter should be installed");
+        assert!(!exporter.counters.is_empty());
+        assert!(!exporter.gauges.is_empty());
+        assert!(!exporter.timings_ms.is_empty());
+
+        drop(guard);
+        shutdown_meter_provider();
+    }
+
+    #[test]
+    fn shutdown_meter_provider_clears_exporter_state() {
+        install_metric_exporter_state();
+        shutdown_meter_provider();
+        let storage = OTEL_METRIC_EXPORTER
+            .get()
+            .expect("metric exporter storage should exist");
+        let guard = storage.lock().unwrap_or_else(|error| error.into_inner());
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn build_resource_includes_service_identity_attributes() {
+        let config = TracingConfig {
+            service_name: "ntk-tests".to_string(),
+            service_version: "9.9.9".to_string(),
+            ..Default::default()
+        };
+        let resource = build_resource(&config);
+        let attrs: Vec<(String, String)> = resource
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        assert!(attrs
+            .iter()
+            .any(|(key, value)| key == "service.name" && value.contains("ntk-tests")));
+        assert!(attrs
+            .iter()
+            .any(|(key, value)| key == "service.version" && value.contains("9.9.9")));
     }
 }

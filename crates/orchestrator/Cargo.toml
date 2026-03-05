@@ -19,6 +19,7 @@ path = "src/lib.rs"
 nettoolskit-core = { path = "../core" }
 nettoolskit-ui = { path = "../ui" }
 nettoolskit-otel = { path = "../otel" }
+nettoolskit-task-worker = { path = "../task-worker" }
 
 # Command implementations
 nettoolskit-manifest = { path = "../commands/manifest" }

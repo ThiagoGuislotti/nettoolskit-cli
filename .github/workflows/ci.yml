@@ -103,6 +103,8 @@ jobs:
         run: cargo test -p nettoolskit-core runtime_mode_
       - name: Task service orchestration tests
         run: cargo test -p nettoolskit-orchestrator --test test_suite test_process_task_
+      - name: ChatOps VPS smoke profile tests
+        run: cargo test -p nettoolskit-orchestrator --test test_suite chatops_vps_smoke_profile_
       - name: Service endpoint tests
         run: cargo test -p nettoolskit-cli --bin ntk service_mode_
       - name: Docker compose profile validation

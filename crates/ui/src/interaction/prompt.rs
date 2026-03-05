@@ -95,3 +95,26 @@ fn force_blinking_cursor() -> io::Result<()> {
     execute!(stdout, cursor::Show, cursor::SetCursorStyle::BlinkingBlock)?;
     stdout.flush()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_prompt_smoke_returns_ok() {
+        let result = render_prompt();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn render_prompt_with_command_smoke_returns_ok() {
+        let result = render_prompt_with_command("/help");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn force_blinking_cursor_smoke_returns_ok() {
+        let result = force_blinking_cursor();
+        assert!(result.is_ok());
+    }
+}

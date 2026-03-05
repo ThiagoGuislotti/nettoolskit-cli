@@ -45,6 +45,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added local Docker service baseline assets: `deployments/Dockerfile.service`, `deployments/docker-compose.local.yml`, and `deployments/service.local.env.example`.
 - Added local service-mode operations runbook: `docs/operations/service-mode-local-runbook.md`.
 - Added CI `Dual Runtime Gate` job validating runtime-mode contracts, service orchestration tests, service endpoint tests, and Docker compose smoke checks.
+- Added ChatOps orchestration foundation in orchestrator (`execution::chatops`) with Telegram/Discord-neutral ingress/notifier contracts, authorization policy, local JSONL audit store, and deterministic mock adapters.
+- Added ChatOps VPS operations profile runbook: `docs/operations/chatops-agent-vps-profile.md`.
+- Added ChatOps runtime module (`execution::chatops_runtime`) with environment-driven policy/config loader and asynchronous Telegram/Discord adapters for polling and notification dispatch.
+- Added Telegram webhook ingress queue mode for ChatOps (`NTK_CHATOPS_TELEGRAM_WEBHOOK_ENABLED`) with service endpoint ingestion (`POST /chatops/telegram/webhook`).
+- Added Discord interaction ingress queue mode for ChatOps (`NTK_CHATOPS_DISCORD_INTERACTIONS_ENABLED`) with service endpoint ingestion (`POST /chatops/discord/interactions`).
+- Added optional ChatOps ingress security controls for internet exposure: Telegram webhook secret-token validation (`NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN`), Discord interaction signature validation (`NTK_CHATOPS_DISCORD_INTERACTIONS_PUBLIC_KEY`), and bounded replay protection (`NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS`, `NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES`).
+- Added ChatOps rate-limit strategy controls with `NTK_CHATOPS_RATE_LIMIT_STRATEGY` (`fixed_window`/`token_bucket`) and optional token-bucket burst budgets (`NTK_CHATOPS_RATE_LIMIT_BURST_PER_USER`, `NTK_CHATOPS_RATE_LIMIT_BURST_PER_CHANNEL`).
+- Added ChatOps adaptive throttling profile (`NTK_CHATOPS_RATE_LIMIT_AUTOTUNE_PROFILE`) with ingress-driven strategy switching (`conservative`/`balanced`/`aggressive`/`disabled`).
+- Added ChatOps replay-cache backend selection (`NTK_CHATOPS_INGRESS_REPLAY_BACKEND=memory|file`) with optional shared file path (`NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH`) for multi-process replay detection.
+- Added reverse-proxy reference profiles for ChatOps ingress hardening on VPS:
+  - `deployments/reverse-proxy/nginx/ntk-chatops.conf.example`
+  - `deployments/reverse-proxy/caddy/Caddyfile.example`
+  - `docs/operations/chatops-reverse-proxy-profiles.md`
+- Added repository workflow module (`execution::repo_workflow`) with explicit policy gates (host allowlist, command allowlist, push/PR switches), JSON/key-value payload parsing, and deterministic dry-run planning.
+- Added scoped ChatOps command authorization (`NTK_CHATOPS_ALLOWED_COMMANDS`) and per-user/per-channel rate-limit controls with auditable throttle notifications.
+- Added deterministic ChatOps VPS smoke profile coverage in CI using a local Telegram-compatible mock server (`chatops_vps_smoke_profile_*`).
+- Added service automation policy profiles (`strict`/`balanced`/`open`) with explicit allowed-intent controls and queue-admission budgets (`NTK_SERVICE_*`) for `runtime_mode=service`.
+- Added dedicated worker runtime crate (`nettoolskit-task-worker`) and migrated orchestrator queue/dispatch/retry execution to callback-based integration.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
@@ -130,8 +148,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enterprise roadmap Phase 8 (AI Assistant Integration) is now fully delivered, including operational controls and AI-specific release gating.
 - Configuration now supports deterministic runtime mode selection (`general.runtime_mode`) with environment override (`NTK_RUNTIME_MODE`), and `/config` supports showing/updating runtime mode.
 - `/task submit` now uses runtime-aware execution: immediate local execution in `cli` mode, and asynchronous queued background-worker dispatch in `service` mode.
+- `/task submit` now supports `repo-workflow` intent for policy-gated repository automation (`clone -> branch -> execute -> commit -> optional push/PR`) with dry-run default behavior.
 - `/task list` and `/task watch` now include retry-attempt metadata and recent audit event history for task lifecycle transparency.
 - Non-interactive CLI now supports a long-running service runtime profile via `ntk service --host <host> --port <port>`.
+- Service runtime now optionally starts a background ChatOps polling loop when `NTK_CHATOPS_ENABLED=true`, routing remote commands through existing `/task` safety path.
+- Service runtime now keeps shared ChatOps runtime state for HTTP handlers and can enqueue Telegram webhook updates directly into local ChatOps ingress queue.
+- Service runtime now supports Discord interaction HTTP ingress (`type=1` ping and `type=2` command) with local queue enqueue and deferred interaction acknowledgements.
+- Service runtime now validates configured Telegram/Discord ingress security headers/signatures before queue admission and rejects replayed webhook/interaction payloads within configurable window.
+- ChatOps ingress throttling now supports burst-aware token-bucket mode while preserving fixed-window as backward-compatible default.
+- ChatOps ingress throttling now optionally auto-switches strategy under sustained traffic changes when auto-tuning profile is enabled.
+- Service ingress replay protection now supports process-local memory backend and shared file backend for horizontally scaled local/VPS replicas.
+- Service/chatops runbooks now include concrete Nginx/Caddy reverse-proxy references for secure internet exposure of ingress endpoints.
+- Manual release verification now starts packaged `ntk service` binaries and validates `/health` in `service` runtime mode on Linux, Windows, and macOS.
 
 ### Fixed
 - Terminal resize stability improvements to avoid duplicated/overlapped UI content on rapid terminal/font-size changes.
@@ -161,6 +189,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added dual-runtime service-mode task tests validating queue submission behavior and worker retry-delay policy semantics.
 - Added service CLI tests covering `service --help` command surface and HTTP helper parsing/response routines.
 - Added service endpoint handler tests for `GET /health`, invalid JSON rejection on `POST /task/submit`, and accepted task submission responses.
+- Added ChatOps unit/integration tests covering remote command parsing, allowlist authorization, local audit persistence, inbox processing, and command execution through `/task` routing.
+- Added ChatOps runtime tests for environment configuration parsing and startup gating (disabled mode, missing token validation, list parsing).
+- Added ChatOps runtime tests for Telegram webhook payload parsing, queue drain order, and runtime webhook-mode enqueue gating.
+- Added service endpoint tests for `POST /chatops/telegram/webhook` covering valid payload enqueue, invalid payload rejection, and disabled-mode conflict response.
+- Added ChatOps runtime tests for Discord interaction payload parsing (`ping` + command), queue draining, and runtime interaction-mode enqueue gating.
+- Added service endpoint tests for `POST /chatops/discord/interactions` covering ping handshake, command acknowledgement, invalid payload rejection, and disabled-mode conflict response.
+- Added service endpoint tests for ingress hardening paths: Telegram secret-token rejection, Discord signature rejection, and replay rejection for duplicate webhook/interaction payloads.
+- Added ChatOps rate-limit tests for strategy parsing and token-bucket burst/refill behavior.
+- Added ChatOps rate-limit auto-tuning tests for profile parsing and deterministic strategy switching under high/low ingress windows.
+- Added service endpoint tests for file-backed replay cache behavior across independent runtime states and backend-unavailable (`503`) path coverage.
+- Added ChatOps VPS smoke test slice covering Telegram polling ingress, notification dispatch, and local audit persistence under CI dual-runtime gate.
 
 ## [1.0.0] - 2025-01-04
 

@@ -14,6 +14,9 @@ use crate::execution::executor::{AsyncCommandExecutor, CommandProgress, Progress
 use crate::execution::plugins::{
     command_plugin_count, run_after_command_plugins, run_before_command_plugins, CommandHookContext,
 };
+use crate::execution::repo_workflow::{
+    execute_repo_workflow, parse_repo_workflow_payload, RepoWorkflowPolicy,
+};
 use crate::models::{ExitStatus, MainAction};
 use nettoolskit_core::ai_context::{
     collect_workspace_context, render_context_system_message, AiContextBudget,
@@ -24,6 +27,10 @@ use nettoolskit_core::{
     TaskIntent, TaskIntentKind, UnicodeMode,
 };
 use nettoolskit_otel::{next_correlation_id, Metrics, Timer};
+use nettoolskit_task_worker::{
+    TaskWorkerCallbacks, TaskWorkerFuture, TaskWorkerPolicy, TaskWorkerResult,
+    TaskWorkerResultStatus, TaskWorkerRuntime, TaskWorkerSubmitError,
+};
 use owo_colors::OwoColorize;
 use std::collections::HashMap;
 use std::future::Future;
@@ -35,27 +42,30 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use std::time::{Duration, Instant};
 use strum::IntoEnumIterator;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::Semaphore;
 use tracing::{info, info_span, warn};
 
 static RUNTIME_METRICS: OnceLock<Metrics> = OnceLock::new();
 static COMMAND_CACHE: OnceLock<Mutex<CommandResultCache>> = OnceLock::new();
 static AI_RATE_LIMITER: OnceLock<Mutex<AiRateLimitState>> = OnceLock::new();
+static SERVICE_SUBMISSION_BUDGET: OnceLock<Mutex<ServiceSubmissionBudgetState>> = OnceLock::new();
 static TASK_REGISTRY: OnceLock<Mutex<HashMap<String, TaskRecord>>> = OnceLock::new();
 static TASK_AUDIT_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<TaskAuditEvent>>>> = OnceLock::new();
-static TASK_WORKER_SENDER: OnceLock<mpsc::Sender<QueuedTask>> = OnceLock::new();
+static TASK_WORKER_RUNTIME: OnceLock<TaskWorkerRuntime<QueuedTask>> = OnceLock::new();
 static TASK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const COMMAND_CACHE_MAX_ENTRIES: usize = 128;
 const COMMAND_CACHE_MAX_SIZE_BYTES: usize = 2 * 1024 * 1024;
 const COMMAND_CACHE_LOG_INTERVAL_SECONDS: u64 = 30;
 const TASK_AUDIT_MAX_EVENTS_PER_TASK: usize = 32;
-const DEFAULT_TASK_QUEUE_CAPACITY: usize = 64;
-const DEFAULT_TASK_MAX_CONCURRENCY: usize = 2;
-const DEFAULT_TASK_MAX_RETRIES: usize = 2;
-const DEFAULT_TASK_RETRY_BASE_DELAY_MS: u64 = 300;
-const DEFAULT_TASK_RETRY_MAX_DELAY_MS: u64 = 1_500;
+const DEFAULT_SERVICE_SUBMIT_BUDGET: usize = 60;
+const DEFAULT_SERVICE_SUBMIT_WINDOW_SECONDS: u64 = 60;
+const DEFAULT_SERVICE_MAX_PAYLOAD_BYTES: usize = 8 * 1024;
+const DEFAULT_SERVICE_MAX_INFLIGHT_TASKS: usize = 64;
+const NTK_SERVICE_AUTOMATION_PROFILE_ENV: &str = "NTK_SERVICE_AUTOMATION_PROFILE";
+const NTK_SERVICE_ALLOWED_INTENTS_ENV: &str = "NTK_SERVICE_ALLOWED_INTENTS";
+const NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV: &str = "NTK_SERVICE_MAX_PAYLOAD_BYTES";
+const NTK_SERVICE_SUBMIT_BUDGET_ENV: &str = "NTK_SERVICE_SUBMIT_BUDGET";
+const NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV: &str = "NTK_SERVICE_SUBMIT_WINDOW_SECONDS";
+const NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV: &str = "NTK_SERVICE_MAX_INFLIGHT_TASKS";
 const AI_CONTEXT_DEFAULT_ALLOWLIST: &[&str] = &[
     "Cargo.toml",
     "README.md",
@@ -119,6 +129,154 @@ impl Default for AiRateLimitState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServiceAutomationProfile {
+    Strict,
+    Balanced,
+    Open,
+}
+
+impl ServiceAutomationProfile {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Balanced => "balanced",
+            Self::Open => "open",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "strict" => Some(Self::Strict),
+            "balanced" | "default" => Some(Self::Balanced),
+            "open" => Some(Self::Open),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ServiceAutomationPolicy {
+    profile: ServiceAutomationProfile,
+    max_payload_bytes: usize,
+    max_submissions: usize,
+    submission_window: Duration,
+    max_inflight_tasks: usize,
+    allow_all_intents: bool,
+    allow_ai_ask: bool,
+    allow_ai_plan: bool,
+    allow_ai_explain: bool,
+    allow_ai_apply_dry_run: bool,
+    allow_repo_workflow: bool,
+    allow_command_execution: bool,
+}
+
+impl ServiceAutomationPolicy {
+    fn for_profile(profile: ServiceAutomationProfile) -> Self {
+        match profile {
+            ServiceAutomationProfile::Strict => Self {
+                profile,
+                max_payload_bytes: 4 * 1024,
+                max_submissions: 20,
+                submission_window: Duration::from_secs(60),
+                max_inflight_tasks: 24,
+                allow_all_intents: false,
+                allow_ai_ask: false,
+                allow_ai_plan: true,
+                allow_ai_explain: true,
+                allow_ai_apply_dry_run: true,
+                allow_repo_workflow: false,
+                allow_command_execution: false,
+            },
+            ServiceAutomationProfile::Balanced => Self {
+                profile,
+                max_payload_bytes: DEFAULT_SERVICE_MAX_PAYLOAD_BYTES,
+                max_submissions: DEFAULT_SERVICE_SUBMIT_BUDGET,
+                submission_window: Duration::from_secs(DEFAULT_SERVICE_SUBMIT_WINDOW_SECONDS),
+                max_inflight_tasks: DEFAULT_SERVICE_MAX_INFLIGHT_TASKS,
+                allow_all_intents: false,
+                allow_ai_ask: true,
+                allow_ai_plan: true,
+                allow_ai_explain: true,
+                allow_ai_apply_dry_run: true,
+                allow_repo_workflow: true,
+                allow_command_execution: false,
+            },
+            ServiceAutomationProfile::Open => Self {
+                profile,
+                max_payload_bytes: 16 * 1024,
+                max_submissions: 120,
+                submission_window: Duration::from_secs(60),
+                max_inflight_tasks: 128,
+                allow_all_intents: true,
+                allow_ai_ask: true,
+                allow_ai_plan: true,
+                allow_ai_explain: true,
+                allow_ai_apply_dry_run: true,
+                allow_repo_workflow: true,
+                allow_command_execution: true,
+            },
+        }
+    }
+
+    fn allows_intent(self, intent: TaskIntentKind) -> bool {
+        if self.allow_all_intents {
+            return true;
+        }
+
+        match intent {
+            TaskIntentKind::AiAsk => self.allow_ai_ask,
+            TaskIntentKind::AiPlan => self.allow_ai_plan,
+            TaskIntentKind::AiExplain => self.allow_ai_explain,
+            TaskIntentKind::AiApplyDryRun => self.allow_ai_apply_dry_run,
+            TaskIntentKind::RepoWorkflow => self.allow_repo_workflow,
+            TaskIntentKind::CommandExecution => self.allow_command_execution,
+        }
+    }
+
+    fn allowed_intents_display(self) -> String {
+        if self.allow_all_intents {
+            return "*".to_string();
+        }
+
+        let mut intents = Vec::new();
+        if self.allow_command_execution {
+            intents.push("command");
+        }
+        if self.allow_ai_ask {
+            intents.push("ai-ask");
+        }
+        if self.allow_ai_plan {
+            intents.push("ai-plan");
+        }
+        if self.allow_ai_explain {
+            intents.push("ai-explain");
+        }
+        if self.allow_ai_apply_dry_run {
+            intents.push("ai-apply-dry-run");
+        }
+        if self.allow_repo_workflow {
+            intents.push("repo-workflow");
+        }
+        intents.join(",")
+    }
+}
+
+#[derive(Debug)]
+struct ServiceSubmissionBudgetState {
+    window_started_at: Instant,
+    used_submissions: usize,
+}
+
+impl Default for ServiceSubmissionBudgetState {
+    fn default() -> Self {
+        Self {
+            window_started_at: Instant::now(),
+            used_submissions: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TaskRecord {
     id: String,
@@ -152,27 +310,6 @@ impl TaskRecord {
             max_attempts: max_attempts.max(1),
             created_at_unix_ms: now_unix_ms,
             updated_at_unix_ms: now_unix_ms,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TaskWorkerPolicy {
-    queue_capacity: usize,
-    max_concurrency: usize,
-    max_retries: usize,
-    retry_base_delay: Duration,
-    retry_max_delay: Duration,
-}
-
-impl Default for TaskWorkerPolicy {
-    fn default() -> Self {
-        Self {
-            queue_capacity: DEFAULT_TASK_QUEUE_CAPACITY,
-            max_concurrency: DEFAULT_TASK_MAX_CONCURRENCY,
-            max_retries: DEFAULT_TASK_MAX_RETRIES,
-            retry_base_delay: Duration::from_millis(DEFAULT_TASK_RETRY_BASE_DELAY_MS),
-            retry_max_delay: Duration::from_millis(DEFAULT_TASK_RETRY_MAX_DELAY_MS),
         }
     }
 }
@@ -1694,6 +1831,7 @@ fn task_intent_kind_label(kind: TaskIntentKind) -> &'static str {
         TaskIntentKind::AiPlan => "ai-plan",
         TaskIntentKind::AiExplain => "ai-explain",
         TaskIntentKind::AiApplyDryRun => "ai-apply-dry-run",
+        TaskIntentKind::RepoWorkflow => "repo-workflow",
     }
 }
 
@@ -1704,6 +1842,7 @@ fn parse_task_intent_kind(value: &str) -> Option<TaskIntentKind> {
         "ai-plan" | "plan" => Some(TaskIntentKind::AiPlan),
         "ai-explain" | "explain" => Some(TaskIntentKind::AiExplain),
         "ai-apply-dry-run" | "apply-dry-run" | "apply" => Some(TaskIntentKind::AiApplyDryRun),
+        "repo-workflow" | "repo" | "repository-workflow" => Some(TaskIntentKind::RepoWorkflow),
         _ => None,
     }
 }
@@ -1793,48 +1932,222 @@ fn task_worker_policy_from_env() -> TaskWorkerPolicy {
     policy
 }
 
-fn task_retry_delay(policy: TaskWorkerPolicy, attempt: usize) -> Duration {
-    let exponent = attempt.saturating_sub(1) as u32;
-    let factor = 2u128.saturating_pow(exponent);
-    let base_ms = policy.retry_base_delay.as_millis();
-    let max_ms = policy.retry_max_delay.as_millis();
-    let delay_ms = (base_ms.saturating_mul(factor)).min(max_ms) as u64;
-    Duration::from_millis(delay_ms)
+fn service_submission_budget() -> &'static Mutex<ServiceSubmissionBudgetState> {
+    SERVICE_SUBMISSION_BUDGET.get_or_init(|| Mutex::new(ServiceSubmissionBudgetState::default()))
 }
 
-fn task_worker_sender() -> mpsc::Sender<QueuedTask> {
-    TASK_WORKER_SENDER
-        .get_or_init(|| {
-            let policy = task_worker_policy_from_env();
-            let (sender, receiver) = mpsc::channel(policy.queue_capacity);
-            start_task_worker_dispatcher(receiver, policy);
-            sender
-        })
-        .clone()
+fn set_service_intent_override(policy: &mut ServiceAutomationPolicy, intent: TaskIntentKind) {
+    match intent {
+        TaskIntentKind::CommandExecution => policy.allow_command_execution = true,
+        TaskIntentKind::AiAsk => policy.allow_ai_ask = true,
+        TaskIntentKind::AiPlan => policy.allow_ai_plan = true,
+        TaskIntentKind::AiExplain => policy.allow_ai_explain = true,
+        TaskIntentKind::AiApplyDryRun => policy.allow_ai_apply_dry_run = true,
+        TaskIntentKind::RepoWorkflow => policy.allow_repo_workflow = true,
+    }
 }
 
-fn start_task_worker_dispatcher(
-    mut receiver: mpsc::Receiver<QueuedTask>,
-    policy: TaskWorkerPolicy,
-) {
-    tokio::spawn(async move {
-        let semaphore = Arc::new(Semaphore::new(policy.max_concurrency));
+fn service_automation_policy_from_env() -> ServiceAutomationPolicy {
+    let profile = std::env::var(NTK_SERVICE_AUTOMATION_PROFILE_ENV)
+        .ok()
+        .as_deref()
+        .and_then(ServiceAutomationProfile::parse)
+        .unwrap_or(ServiceAutomationProfile::Balanced);
+    let mut policy = ServiceAutomationPolicy::for_profile(profile);
 
-        while let Some(task) = receiver.recv().await {
-            let permit = match semaphore.clone().acquire_owned().await {
-                Ok(permit) => permit,
-                Err(_) => {
-                    warn!("task worker semaphore closed; stopping dispatcher");
-                    break;
+    if let Ok(value) = std::env::var(NTK_SERVICE_ALLOWED_INTENTS_ENV) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            if matches!(trimmed.to_ascii_lowercase().as_str(), "*" | "all") {
+                policy.allow_all_intents = true;
+            } else {
+                policy.allow_all_intents = false;
+                policy.allow_command_execution = false;
+                policy.allow_ai_ask = false;
+                policy.allow_ai_plan = false;
+                policy.allow_ai_explain = false;
+                policy.allow_ai_apply_dry_run = false;
+                policy.allow_repo_workflow = false;
+
+                for candidate in trimmed.split([',', ';']) {
+                    if let Some(kind) = parse_task_intent_kind(candidate) {
+                        set_service_intent_override(&mut policy, kind);
+                    }
                 }
-            };
-            let policy_for_task = policy;
-            tokio::spawn(async move {
-                let _permit = permit;
-                run_task_in_background(task, policy_for_task).await;
-            });
+            }
         }
-    });
+    }
+
+    if let Ok(value) = std::env::var(NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV) {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.max_payload_bytes = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_SERVICE_SUBMIT_BUDGET_ENV) {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.max_submissions = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV) {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            policy.submission_window = Duration::from_secs(parsed);
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV) {
+        if let Some(parsed) = parse_nonzero_usize(&value) {
+            policy.max_inflight_tasks = parsed;
+        }
+    }
+
+    policy
+}
+
+fn service_inflight_task_count() -> usize {
+    with_task_registry(|registry| {
+        registry
+            .values()
+            .filter(|record| record.runtime_mode == RuntimeMode::Service)
+            .filter(|record| {
+                matches!(
+                    record.status,
+                    TaskExecutionStatus::Queued | TaskExecutionStatus::Running
+                )
+            })
+            .count()
+    })
+}
+
+fn enforce_service_submission_budget(policy: ServiceAutomationPolicy) -> Result<usize, u64> {
+    let mut state = service_submission_budget()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.window_started_at.elapsed() >= policy.submission_window {
+        state.window_started_at = Instant::now();
+        state.used_submissions = 0;
+    }
+
+    if state.used_submissions >= policy.max_submissions {
+        let retry_after = policy
+            .submission_window
+            .saturating_sub(state.window_started_at.elapsed())
+            .as_secs()
+            .max(1);
+        return Err(retry_after);
+    }
+
+    state.used_submissions += 1;
+    Ok(state.used_submissions)
+}
+
+#[cfg(test)]
+fn reset_service_submission_budget_for_tests() {
+    let mut state = service_submission_budget()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *state = ServiceSubmissionBudgetState::default();
+}
+
+#[cfg(test)]
+fn task_retry_delay(policy: TaskWorkerPolicy, attempt: usize) -> Duration {
+    nettoolskit_task_worker::task_worker_retry_delay(policy, attempt)
+}
+
+#[derive(Debug, Default)]
+struct ProcessorTaskWorkerCallbacks;
+
+impl TaskWorkerCallbacks<QueuedTask> for ProcessorTaskWorkerCallbacks {
+    fn is_cancelled(&self, task: &QueuedTask) -> bool {
+        is_task_cancelled(&task.id)
+    }
+
+    fn on_attempt_start(&self, task: &QueuedTask, attempt: usize, max_attempts: usize) {
+        let _ = update_task_attempt(&task.id, attempt);
+        let _ = update_task_record_status(
+            &task.id,
+            TaskExecutionStatus::Running,
+            format!(
+                "Background worker ({}) attempt {attempt}/{max_attempts} in progress",
+                task.runtime_mode
+            ),
+        );
+    }
+
+    fn on_cancelled_before_start(&self, task: &QueuedTask) {
+        let _ = update_task_record_status(
+            &task.id,
+            TaskExecutionStatus::Cancelled,
+            "Task was cancelled before worker execution",
+        );
+    }
+
+    fn on_cancelled_after_attempt(&self, task: &QueuedTask) {
+        let _ = update_task_record_status(
+            &task.id,
+            TaskExecutionStatus::Cancelled,
+            "Cancellation requested while task was running",
+        );
+    }
+
+    fn on_retry_scheduled(
+        &self,
+        task: &QueuedTask,
+        attempt: usize,
+        max_attempts: usize,
+        delay: Duration,
+        detail: &str,
+    ) {
+        let _ = update_task_record_status(
+            &task.id,
+            TaskExecutionStatus::Running,
+            format!(
+                "Attempt {attempt}/{max_attempts} failed; retrying in {}ms ({detail})",
+                delay.as_millis()
+            ),
+        );
+    }
+
+    fn on_finished(
+        &self,
+        task: &QueuedTask,
+        result: &TaskWorkerResult,
+        attempt: usize,
+        max_attempts: usize,
+    ) {
+        let status = match result.status {
+            TaskWorkerResultStatus::Succeeded => TaskExecutionStatus::Succeeded,
+            TaskWorkerResultStatus::Failed => TaskExecutionStatus::Failed,
+            TaskWorkerResultStatus::Cancelled => TaskExecutionStatus::Cancelled,
+        };
+        let _ = update_task_record_status(
+            &task.id,
+            status,
+            format!("{} (attempt {attempt}/{max_attempts})", result.detail),
+        );
+    }
+
+    fn execute(&self, task: &QueuedTask) -> TaskWorkerFuture {
+        let intent = task.intent.clone();
+        Box::pin(async move {
+            let (status, detail) = execute_task_locally(&intent).await;
+            match status {
+                TaskExecutionStatus::Succeeded => TaskWorkerResult::succeeded(detail),
+                TaskExecutionStatus::Cancelled => TaskWorkerResult::cancelled(detail),
+                TaskExecutionStatus::Failed
+                | TaskExecutionStatus::Queued
+                | TaskExecutionStatus::Running => TaskWorkerResult::failed(detail),
+            }
+        })
+    }
+}
+
+fn task_worker_runtime() -> &'static TaskWorkerRuntime<QueuedTask> {
+    TASK_WORKER_RUNTIME.get_or_init(|| {
+        let policy = task_worker_policy_from_env();
+        TaskWorkerRuntime::start(policy, Arc::new(ProcessorTaskWorkerCallbacks))
+    })
 }
 
 fn submit_task_to_worker(
@@ -1842,17 +2155,17 @@ fn submit_task_to_worker(
     intent: TaskIntent,
     runtime_mode: RuntimeMode,
 ) -> Result<(), String> {
-    match task_worker_sender().try_send(QueuedTask {
+    match task_worker_runtime().submit(QueuedTask {
         id: task_id,
         intent,
         runtime_mode,
     }) {
         Ok(()) => Ok(()),
-        Err(TrySendError::Full(_)) => Err(
+        Err(TaskWorkerSubmitError::QueueFull) => Err(
             "Task queue is at capacity. Retry later or increase NTK_TASK_QUEUE_CAPACITY."
                 .to_string(),
         ),
-        Err(TrySendError::Closed(_)) => Err(
+        Err(TaskWorkerSubmitError::QueueClosed) => Err(
             "Background worker queue is unavailable. Restart the session and retry.".to_string(),
         ),
     }
@@ -1883,62 +2196,6 @@ fn is_task_cancelled(task_id: &str) -> bool {
             .map(|record| record.status == TaskExecutionStatus::Cancelled)
             .unwrap_or(false)
     })
-}
-
-async fn run_task_in_background(task: QueuedTask, policy: TaskWorkerPolicy) {
-    let max_attempts = policy.max_retries.saturating_add(1);
-
-    for attempt in 1..=max_attempts {
-        if is_task_cancelled(&task.id) {
-            let _ = update_task_record_status(
-                &task.id,
-                TaskExecutionStatus::Cancelled,
-                "Task was cancelled before worker execution",
-            );
-            return;
-        }
-
-        let _ = update_task_attempt(&task.id, attempt);
-        let _ = update_task_record_status(
-            &task.id,
-            TaskExecutionStatus::Running,
-            format!(
-                "Background worker ({}) attempt {attempt}/{max_attempts} in progress",
-                task.runtime_mode
-            ),
-        );
-
-        let (status, detail) = execute_task_locally(&task.intent).await;
-        if is_task_cancelled(&task.id) {
-            let _ = update_task_record_status(
-                &task.id,
-                TaskExecutionStatus::Cancelled,
-                "Cancellation requested while task was running",
-            );
-            return;
-        }
-
-        if status == TaskExecutionStatus::Failed && attempt < max_attempts {
-            let delay = task_retry_delay(policy, attempt);
-            let _ = update_task_record_status(
-                &task.id,
-                TaskExecutionStatus::Running,
-                format!(
-                    "Attempt {attempt}/{max_attempts} failed; retrying in {}ms ({detail})",
-                    delay.as_millis()
-                ),
-            );
-            tokio::time::sleep(delay).await;
-            continue;
-        }
-
-        let _ = update_task_record_status(
-            &task.id,
-            status,
-            format!("{detail} (attempt {attempt}/{max_attempts})"),
-        );
-        return;
-    }
 }
 
 fn update_task_record_status(
@@ -2081,6 +2338,28 @@ async fn execute_task_locally(intent: &TaskIntent) -> (TaskExecutionStatus, Stri
                     .to_string(),
             )
         }
+        TaskIntentKind::RepoWorkflow => execute_repo_workflow_intent(&payload),
+    }
+}
+
+fn execute_repo_workflow_intent(payload: &str) -> (TaskExecutionStatus, String) {
+    let request = match parse_repo_workflow_payload(payload) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            return (
+                TaskExecutionStatus::Failed,
+                format!("Repository workflow payload is invalid: {error}"),
+            );
+        }
+    };
+
+    let policy = RepoWorkflowPolicy::from_env();
+    match execute_repo_workflow(&request, &policy) {
+        Ok(result) => (TaskExecutionStatus::Succeeded, result.summary),
+        Err(error) => (
+            TaskExecutionStatus::Failed,
+            format!("Repository workflow was rejected: {error}"),
+        ),
     }
 }
 
@@ -2101,6 +2380,19 @@ fn print_task_usage() {
     println!("  {}", "ai-plan".color(Color::CYAN));
     println!("  {}", "ai-explain".color(Color::CYAN));
     println!("  {}", "ai-apply-dry-run".color(Color::CYAN));
+    println!("  {}", "repo-workflow".color(Color::CYAN));
+    println!();
+    println!(
+        "{}",
+        "Service automation policy env:".color(Color::WHITE).bold()
+    );
+    println!(
+        "  {}",
+        format!(
+            "{NTK_SERVICE_AUTOMATION_PROFILE_ENV}, {NTK_SERVICE_ALLOWED_INTENTS_ENV}, {NTK_SERVICE_SUBMIT_BUDGET_ENV}"
+        )
+        .color(Color::CYAN)
+    );
 }
 
 fn print_task_list(records: &[TaskRecord]) {
@@ -2144,7 +2436,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
         );
         println!(
             "{}",
-            "Supported intents: command, ai-ask, ai-plan, ai-explain, ai-apply-dry-run"
+            "Supported intents: command, ai-ask, ai-plan, ai-explain, ai-apply-dry-run, repo-workflow"
                 .color(Color::YELLOW)
         );
         return ExitStatus::Error;
@@ -2159,7 +2451,100 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
         return ExitStatus::Error;
     }
 
+    let metrics = runtime_metrics().clone();
     let runtime_mode = AppConfig::load().general.runtime_mode;
+    if runtime_mode == RuntimeMode::Service {
+        let policy = service_automation_policy_from_env();
+
+        if !policy.allows_intent(intent_kind) {
+            metrics.increment_counter("runtime_service_task_submit_policy_rejected_total");
+            println!(
+                "{} {}",
+                "✗ Service automation policy rejected intent:"
+                    .color(Color::RED)
+                    .bold(),
+                task_intent_kind_label(intent_kind).color(Color::YELLOW)
+            );
+            println!("  profile: {}", policy.profile.as_str().color(Color::WHITE));
+            println!(
+                "  allowed: {}",
+                policy.allowed_intents_display().color(Color::WHITE)
+            );
+            println!(
+                "  env: {} / {}",
+                NTK_SERVICE_AUTOMATION_PROFILE_ENV.color(Color::CYAN),
+                NTK_SERVICE_ALLOWED_INTENTS_ENV.color(Color::CYAN)
+            );
+            return ExitStatus::Error;
+        }
+
+        let payload_bytes = payload.len();
+        if payload_bytes > policy.max_payload_bytes {
+            metrics.increment_counter("runtime_service_task_submit_payload_rejected_total");
+            println!(
+                "{} {}",
+                "✗ Service payload exceeded automation policy budget:"
+                    .color(Color::RED)
+                    .bold(),
+                format!(
+                    "{} bytes > {} bytes",
+                    payload_bytes, policy.max_payload_bytes
+                )
+                .color(Color::YELLOW)
+            );
+            println!(
+                "  env: {}",
+                NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV.color(Color::CYAN)
+            );
+            return ExitStatus::Error;
+        }
+
+        let inflight = service_inflight_task_count();
+        if inflight >= policy.max_inflight_tasks {
+            metrics.increment_counter("runtime_service_task_submit_inflight_rejected_total");
+            println!(
+                "{} {}",
+                "✗ Service in-flight task budget reached:"
+                    .color(Color::RED)
+                    .bold(),
+                format!("{inflight}/{}", policy.max_inflight_tasks).color(Color::YELLOW)
+            );
+            println!(
+                "  env: {}",
+                NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV.color(Color::CYAN)
+            );
+            return ExitStatus::Error;
+        }
+
+        match enforce_service_submission_budget(policy) {
+            Ok(used_submissions) => {
+                metrics.increment_counter("runtime_service_task_submit_accepted_total");
+                metrics.set_gauge(
+                    "runtime_service_task_submit_budget_used",
+                    used_submissions as f64,
+                );
+            }
+            Err(retry_after_seconds) => {
+                metrics.increment_counter("runtime_service_task_submit_budget_rejected_total");
+                metrics.set_gauge(
+                    "runtime_service_task_submit_budget_retry_after_seconds",
+                    retry_after_seconds as f64,
+                );
+                println!(
+                    "{} {}",
+                    "✗ Service submit budget exceeded.".color(Color::RED).bold(),
+                    format!("Retry in ~{retry_after_seconds}s.").color(Color::YELLOW)
+                );
+                println!(
+                    "  env: {} / {}",
+                    NTK_SERVICE_SUBMIT_BUDGET_ENV.color(Color::CYAN),
+                    NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV.color(Color::CYAN)
+                );
+                return ExitStatus::Error;
+            }
+        }
+    }
+
     let worker_policy = task_worker_policy_from_env();
     let max_attempts = match runtime_mode {
         RuntimeMode::Service => worker_policy.max_retries.saturating_add(1),
@@ -3924,6 +4309,15 @@ mod tests {
         ENV_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
     }
 
+    fn clear_service_policy_env_vars() {
+        std::env::remove_var(NTK_SERVICE_AUTOMATION_PROFILE_ENV);
+        std::env::remove_var(NTK_SERVICE_ALLOWED_INTENTS_ENV);
+        std::env::remove_var(NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV);
+        std::env::remove_var(NTK_SERVICE_SUBMIT_BUDGET_ENV);
+        std::env::remove_var(NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV);
+        std::env::remove_var(NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV);
+    }
+
     #[test]
     fn sanitize_metric_component_normalizes_symbols() {
         assert_eq!(
@@ -4510,7 +4904,86 @@ mod tests {
             parse_task_intent_kind("apply-dry-run"),
             Some(TaskIntentKind::AiApplyDryRun)
         );
+        assert_eq!(
+            parse_task_intent_kind("repo-workflow"),
+            Some(TaskIntentKind::RepoWorkflow)
+        );
         assert_eq!(parse_task_intent_kind("unknown"), None);
+    }
+
+    #[tokio::test]
+    async fn service_automation_policy_defaults_to_balanced_profile() {
+        let _guard = env_test_guard().await;
+        clear_service_policy_env_vars();
+        let policy = service_automation_policy_from_env();
+
+        assert_eq!(policy.profile, ServiceAutomationProfile::Balanced);
+        assert!(policy.allows_intent(TaskIntentKind::AiPlan));
+        assert!(policy.allows_intent(TaskIntentKind::RepoWorkflow));
+        assert!(!policy.allows_intent(TaskIntentKind::CommandExecution));
+        assert_eq!(policy.max_payload_bytes, DEFAULT_SERVICE_MAX_PAYLOAD_BYTES);
+        assert_eq!(policy.max_submissions, DEFAULT_SERVICE_SUBMIT_BUDGET);
+        assert_eq!(
+            policy.submission_window,
+            Duration::from_secs(DEFAULT_SERVICE_SUBMIT_WINDOW_SECONDS)
+        );
+        assert_eq!(
+            policy.max_inflight_tasks,
+            DEFAULT_SERVICE_MAX_INFLIGHT_TASKS
+        );
+    }
+
+    #[tokio::test]
+    async fn service_automation_policy_env_overrides_apply() {
+        let _guard = env_test_guard().await;
+        clear_service_policy_env_vars();
+        std::env::set_var(NTK_SERVICE_AUTOMATION_PROFILE_ENV, "strict");
+        std::env::set_var(NTK_SERVICE_ALLOWED_INTENTS_ENV, "ai-plan,repo-workflow");
+        std::env::set_var(NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV, "2048");
+        std::env::set_var(NTK_SERVICE_SUBMIT_BUDGET_ENV, "7");
+        std::env::set_var(NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV, "120");
+        std::env::set_var(NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV, "11");
+
+        let policy = service_automation_policy_from_env();
+
+        clear_service_policy_env_vars();
+
+        assert_eq!(policy.profile, ServiceAutomationProfile::Strict);
+        assert!(!policy.allows_intent(TaskIntentKind::AiAsk));
+        assert!(policy.allows_intent(TaskIntentKind::AiPlan));
+        assert!(policy.allows_intent(TaskIntentKind::RepoWorkflow));
+        assert!(!policy.allows_intent(TaskIntentKind::CommandExecution));
+        assert_eq!(policy.max_payload_bytes, 2_048);
+        assert_eq!(policy.max_submissions, 7);
+        assert_eq!(policy.submission_window, Duration::from_secs(120));
+        assert_eq!(policy.max_inflight_tasks, 11);
+    }
+
+    #[tokio::test]
+    async fn service_submission_budget_blocks_when_exhausted() {
+        let _guard = env_test_guard().await;
+        clear_service_policy_env_vars();
+        reset_service_submission_budget_for_tests();
+
+        let policy = ServiceAutomationPolicy {
+            profile: ServiceAutomationProfile::Balanced,
+            max_payload_bytes: DEFAULT_SERVICE_MAX_PAYLOAD_BYTES,
+            max_submissions: 1,
+            submission_window: Duration::from_secs(60),
+            max_inflight_tasks: DEFAULT_SERVICE_MAX_INFLIGHT_TASKS,
+            allow_all_intents: false,
+            allow_ai_ask: true,
+            allow_ai_plan: true,
+            allow_ai_explain: true,
+            allow_ai_apply_dry_run: true,
+            allow_repo_workflow: true,
+            allow_command_execution: false,
+        };
+
+        assert_eq!(enforce_service_submission_budget(policy), Ok(1));
+        let blocked = enforce_service_submission_budget(policy);
+        assert!(blocked.is_err());
+        assert!(blocked.err().unwrap_or_default() >= 1);
     }
 
     #[test]
@@ -4546,6 +5019,8 @@ mod tests {
         let _guard = env_test_guard().await;
         std::env::set_var("NTK_RUNTIME_MODE", "service");
         std::env::set_var("NTK_AI_PROVIDER", "mock");
+        clear_service_policy_env_vars();
+        reset_service_submission_budget_for_tests();
 
         let payload_marker = format!("service-queue-test-{}", current_unix_timestamp_ms());
         let parts = vec!["/task", "submit", "ai-plan", payload_marker.as_str()];
@@ -4577,6 +5052,71 @@ mod tests {
                 | TaskExecutionStatus::Failed
                 | TaskExecutionStatus::Cancelled
         ));
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_service_mode_rejects_intent_not_allowed_by_profile() {
+        let _guard = env_test_guard().await;
+        std::env::set_var("NTK_RUNTIME_MODE", "service");
+        std::env::set_var(NTK_SERVICE_AUTOMATION_PROFILE_ENV, "strict");
+        std::env::remove_var(NTK_SERVICE_ALLOWED_INTENTS_ENV);
+        reset_service_submission_budget_for_tests();
+
+        let status = process_task_command(&[
+            "/task",
+            "submit",
+            "repo-workflow",
+            "repo=https://github.com/acme/demo.git;branch=feature/test;command=cargo test;dry_run=true",
+        ])
+        .await;
+
+        clear_service_policy_env_vars();
+        std::env::remove_var("NTK_RUNTIME_MODE");
+
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_service_mode_rejects_payload_over_budget() {
+        let _guard = env_test_guard().await;
+        std::env::set_var("NTK_RUNTIME_MODE", "service");
+        std::env::set_var(NTK_SERVICE_AUTOMATION_PROFILE_ENV, "open");
+        std::env::set_var(NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV, "8");
+        reset_service_submission_budget_for_tests();
+
+        let status =
+            process_task_command(&["/task", "submit", "ai-plan", "payload-over-budget"]).await;
+
+        clear_service_policy_env_vars();
+        std::env::remove_var("NTK_RUNTIME_MODE");
+
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_repo_workflow_dry_run_succeeds_with_policy() {
+        let _guard = env_test_guard().await;
+        std::env::set_var("NTK_REPO_WORKFLOW_ENABLED", "true");
+        std::env::set_var("NTK_REPO_WORKFLOW_ALLOWED_HOSTS", "github.com");
+        std::env::set_var("NTK_REPO_WORKFLOW_ALLOWED_COMMANDS", "cargo test,cargo fmt");
+        std::env::set_var("NTK_REPO_WORKFLOW_ALLOW_PUSH", "false");
+        std::env::set_var("NTK_REPO_WORKFLOW_ALLOW_PR", "false");
+
+        let parts = vec![
+            "/task",
+            "submit",
+            "repo-workflow",
+            "repo=https://github.com/acme/demo.git;branch=feature/chatops;command=cargo test;dry_run=true",
+        ];
+        let status = process_task_command(&parts).await;
+
+        std::env::remove_var("NTK_REPO_WORKFLOW_ALLOW_PR");
+        std::env::remove_var("NTK_REPO_WORKFLOW_ALLOW_PUSH");
+        std::env::remove_var("NTK_REPO_WORKFLOW_ALLOWED_COMMANDS");
+        std::env::remove_var("NTK_REPO_WORKFLOW_ALLOWED_HOSTS");
+        std::env::remove_var("NTK_REPO_WORKFLOW_ENABLED");
+
+        assert_eq!(status, ExitStatus::Success);
     }
 
     #[tokio::test]

@@ -1,0 +1,50 @@
+# NetToolsKit ChatOps reverse-proxy reference profile (Caddy)
+# Replace ntk.example.com and configure your TLS/contact details.
+
+ntk.example.com {
+    encode zstd gzip
+
+    # Keep ingress payload size bounded.
+    request_body {
+        max_size 128KB
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+
+    # Optional: keep health endpoints local-only.
+    @health_local {
+        path /health /ready
+        remote_ip 127.0.0.1 ::1
+    }
+    handle @health_local {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    @telegram_webhook {
+        method POST
+        path /chatops/telegram/webhook
+    }
+    handle @telegram_webhook {
+        reverse_proxy 127.0.0.1:8080 {
+            header_up X-Telegram-Bot-Api-Secret-Token {http.request.header.X-Telegram-Bot-Api-Secret-Token}
+        }
+    }
+
+    @discord_interactions {
+        method POST
+        path /chatops/discord/interactions
+    }
+    handle @discord_interactions {
+        reverse_proxy 127.0.0.1:8080 {
+            header_up X-Signature-Ed25519 {http.request.header.X-Signature-Ed25519}
+            header_up X-Signature-Timestamp {http.request.header.X-Signature-Timestamp}
+        }
+    }
+
+    respond 404
+}
