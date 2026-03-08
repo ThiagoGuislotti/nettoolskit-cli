@@ -10,6 +10,7 @@ use super::chatops::{
     ChatOpsNotification, ChatOpsNotificationSeverity, ChatOpsNotifier, ChatOpsPlatform,
 };
 use crate::models::ExitStatus;
+use nettoolskit_core::IngressTransport;
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -1456,16 +1457,19 @@ impl TelegramUpdate {
             .unwrap_or_default()
             .saturating_mul(1_000)
             .max(current_unix_timestamp_ms());
-        Some(ChatOpsCommandEnvelope::new(
-            ChatOpsPlatform::Telegram,
-            message.chat.id.to_string(),
-            message
-                .from
-                .map(|author| author.id.to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            text,
-            received_at_unix_ms,
-        ))
+        Some(
+            ChatOpsCommandEnvelope::new(
+                ChatOpsPlatform::Telegram,
+                message.chat.id.to_string(),
+                message
+                    .from
+                    .map(|author| author.id.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                text,
+                received_at_unix_ms,
+            )
+            .with_transport(IngressTransport::TelegramPolling),
+        )
     }
 }
 
@@ -1675,7 +1679,8 @@ fn parse_discord_interaction_payload(
                     user_id,
                     message_text,
                     current_unix_timestamp_ms(),
-                ),
+                )
+                .with_transport(IngressTransport::DiscordInteractions),
             ))
         }
         kind => Err(ChatOpsAdapterError::new(format!(
@@ -1840,6 +1845,12 @@ fn append_runtime_audit(
         user_id: envelope.user_id.clone(),
         message_text: envelope.message_text.clone(),
         internal_command: None,
+        request_id: Some(envelope.request_id.clone()),
+        correlation_id: envelope.correlation_id.clone(),
+        operator_id: None,
+        session_id: None,
+        transport: Some(envelope.transport),
+        task_id: None,
         exit_status: Some("error".to_string()),
         note: message.to_string(),
         timestamp_unix_ms: current_unix_timestamp_ms(),
@@ -2193,6 +2204,7 @@ mod tests {
         assert_eq!(envelopes[0].channel_id, "555");
         assert_eq!(envelopes[0].user_id, "777");
         assert_eq!(envelopes[0].message_text, "list");
+        assert_eq!(envelopes[0].transport, IngressTransport::TelegramPolling);
     }
 
     #[test]
@@ -2221,6 +2233,7 @@ mod tests {
         assert_eq!(envelope.channel_id, "555");
         assert_eq!(envelope.user_id, "777");
         assert_eq!(envelope.message_text, "submit ai-plan review pipeline");
+        assert_eq!(envelope.transport, IngressTransport::DiscordInteractions);
     }
 
     #[test]
@@ -2274,6 +2287,7 @@ mod tests {
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].platform, ChatOpsPlatform::Discord);
         assert_eq!(batch[0].message_text, "list");
+        assert_eq!(batch[0].transport, IngressTransport::DiscordInteractions);
     }
 
     #[test]

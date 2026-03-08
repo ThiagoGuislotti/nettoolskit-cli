@@ -46,6 +46,7 @@ Objectives:
 - [Features](#features)
 - [Contents](#contents)
   - [Architecture](#architecture)
+  - [Control Plane Model](#control-plane-model)
   - [Crates](#crates)
   - [Compatibility and Support](#compatibility-and-support)
   - [Operations](#operations)
@@ -95,6 +96,17 @@ graph TD
     style CORE fill:#2d3748,stroke:#b794f4,color:#fff
     style OTEL fill:#2d3748,stroke:#fbd38d,color:#fff
 ```
+
+---
+
+### Control Plane Model
+
+Formal control-plane, session, and operator contracts are documented in:
+
+- [Control Plane, Session, and Operator Model](docs/architecture/control-plane-session-operator-model.md)
+
+This document defines the current local-first runtime boundary and the target contract for future gateway/operator expansion.
+The HTTP service ingress now derives request, operator, and session metadata from `/task/submit` headers using the shared control-plane contracts, and ChatOps `submit` intents now reuse that same typed control-plane path before task admission.
 
 ---
 

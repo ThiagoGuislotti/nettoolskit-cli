@@ -73,8 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added service API bearer-token contract for mutable HTTP task submission (`NTK_SERVICE_AUTH_TOKEN`) with explicit `401` rejection on missing or invalid tokens.
 - Added real service readiness semantics for `GET /ready`, with dependency checks for task admission, local persistence, replay backend state, ChatOps audit store, and ChatOps startup health.
 - Added a CI-enforced critical-file coverage gate using `cargo llvm-cov` JSON output and PowerShell policy checks for public entrypoints.
-- Added validated full-workspace coverage evidence for the critical-file policy: `76.52%` lines, `76.82%` functions, and all tracked entrypoints above enforced budgets.
+- Added validated full-workspace coverage evidence for the critical-file policy: `76.65%` lines, `77.10%` functions, and all tracked entrypoints above enforced budgets.
 - Added governance baseline artifacts: root `LICENSE`, `SECURITY.md`, and `.github/CODEOWNERS`, plus README/CONTRIBUTING references for commercial OSS operation.
+- Added framework-grade service transport on `axum`/`hyper` with request-ID propagation, explicit body-limit handling (`413`), and configurable HTTP timeout middleware (`NTK_SERVICE_HTTP_TIMEOUT_MS`).
+- Added formal control-plane/session/operator architecture specification for the dual-runtime platform direction, including current-state contracts and future gateway/operator envelope targets.
+- Added typed control-plane contracts in `nettoolskit-core` (`OperatorContext`, `SessionContext`, `ControlPolicyContext`, `ControlEnvelope`) with normalized transport/operator metadata and serialization-safe tests.
+- Added first end-to-end service adoption of the shared control-plane model: `/task/submit` now derives request/session/operator metadata from HTTP headers, returns `task_id` plus envelope metadata in accepted responses, and persists the admitted envelope into downstream task registry/audit events.
+- Added first ChatOps adoption of the shared control-plane model: remote `submit` intents now derive typed request/operator/session metadata, flow through `process_control_envelope`, and persist normalized metadata (`request_id`, `correlation_id`, `operator_id`, `session_id`, `transport`, `task_id`) into ChatOps audit records.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**

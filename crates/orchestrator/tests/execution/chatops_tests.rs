@@ -6,14 +6,45 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use nettoolskit_core::IngressTransport;
 use nettoolskit_orchestrator::{
     build_chatops_runtime, execute_chatops_envelope, parse_chatops_intent,
     ChatOpsAuthorizationPolicy, ChatOpsCommandEnvelope, ChatOpsIntent, ChatOpsLocalAuditStore,
     ChatOpsPlatform, ChatOpsRuntimeConfig, RecordingChatOpsNotifier,
 };
+use serial_test::serial;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+
+struct EnvVarGuard {
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl EnvVarGuard {
+    fn set(vars: &[(&str, Option<&str>)]) -> Self {
+        let mut saved = Vec::with_capacity(vars.len());
+        for (key, value) in vars {
+            saved.push(((*key).to_string(), std::env::var(key).ok()));
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        Self { saved }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            match value {
+                Some(value) => std::env::set_var(&key, value),
+                None => std::env::remove_var(&key),
+            }
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 struct TelegramMockState {
@@ -154,6 +185,13 @@ async fn execute_chatops_envelope_persists_local_audit_entries() {
     assert!(entries
         .iter()
         .any(|entry| entry.internal_command.as_deref() == Some("/task list")));
+    assert!(entries.iter().all(|entry| entry
+        .request_id
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())));
+    assert!(entries
+        .iter()
+        .all(|entry| entry.transport == Some(IngressTransport::TelegramPolling)));
 }
 
 #[tokio::test]
@@ -226,4 +264,66 @@ async fn chatops_vps_smoke_profile_executes_poll_and_notification_flow() {
     assert!(entries
         .iter()
         .any(|entry| entry.internal_command.as_deref() == Some("/task list")));
+}
+
+#[tokio::test]
+#[serial]
+async fn execute_chatops_envelope_submit_emits_control_plane_metadata_in_audit() {
+    let _env_guard = EnvVarGuard::set(&[
+        ("NTK_TOOL_SCOPE_ALLOWED_TOOLS", Some("ai.plan")),
+        ("NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS", Some("ai.plan")),
+    ]);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let audit_store =
+        ChatOpsLocalAuditStore::from_path(dir.path().join("chatops-submit-audit.jsonl"));
+    let policy = ChatOpsAuthorizationPolicy::new_with_scopes(
+        vec!["trusted-user".to_string()],
+        vec!["trusted-channel".to_string()],
+        vec!["submit:ai-plan".to_string()],
+    );
+    let notifier = RecordingChatOpsNotifier::new();
+    let envelope = ChatOpsCommandEnvelope::new(
+        ChatOpsPlatform::Discord,
+        "trusted-channel",
+        "trusted-user",
+        "submit ai-plan harden service control plane",
+        1_737_200_000_222,
+    )
+    .with_transport(IngressTransport::DiscordInteractions)
+    .with_request_id("discord-req-9000")
+    .with_correlation_id("corr-discord-9000");
+
+    let status = execute_chatops_envelope(&envelope, &policy, &notifier, Some(&audit_store))
+        .await
+        .expect("authorized chatops submit should execute");
+    assert_eq!(status.to_string(), "success");
+
+    let entries = audit_store
+        .load_latest(16)
+        .expect("audit entries should be readable");
+    let executed = entries
+        .iter()
+        .find(|entry| {
+            entry.internal_command.as_deref()
+                == Some("/task submit ai-plan harden service control plane")
+        })
+        .expect("executed audit entry should exist");
+    assert_eq!(executed.request_id.as_deref(), Some("discord-req-9000"));
+    assert_eq!(
+        executed.correlation_id.as_deref(),
+        Some("corr-discord-9000")
+    );
+    assert_eq!(
+        executed.operator_id.as_deref(),
+        Some("discord:trusted-user")
+    );
+    assert_eq!(
+        executed.session_id.as_deref(),
+        Some("chatops-discord-trusted-user-trusted-channel")
+    );
+    assert_eq!(
+        executed.transport,
+        Some(IngressTransport::DiscordInteractions)
+    );
+    assert!(executed.task_id.as_deref().is_some());
 }

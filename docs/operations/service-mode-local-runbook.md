@@ -45,6 +45,13 @@ Readiness semantics:
 - `GET /health` is liveness-only.
 - `GET /ready` validates local persistence, replay backend readiness, task admission, ChatOps audit path, and ChatOps bootstrap state.
 
+HTTP middleware behavior:
+
+- Service responses include `x-request-id`; if the client omits it, the service generates one.
+- Service echoes `x-correlation-id` when the client supplies one, so upstream callers can keep end-to-end traces stable.
+- HTTP request timeout defaults to `30000ms` and can be tuned with `NTK_SERVICE_HTTP_TIMEOUT_MS` (clamped to `100..300000`).
+- HTTP request bodies are capped at `32768` bytes before endpoint-specific validation runs.
+
 Core endpoints:
 
 - `GET /health`
@@ -59,8 +66,35 @@ Core endpoints:
 curl -sS -X POST http://127.0.0.1:8080/task/submit \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer local-service-token" \
+  -H "X-Correlation-Id: deploy-123" \
+  -H "X-NTK-Operator-Id: tguis" \
+  -H "X-NTK-Session-Id: shell-session-01" \
   -d '{"intent":"ai-plan","payload":"create roadmap for service hardening"}'
 ```
+
+For `ai-*` task intents in service mode, keep the secure tool-scope allowlist configured, for example:
+
+- `NTK_TOOL_SCOPE_ALLOWED_TOOLS=ai.plan`
+
+Optional control-plane headers for `POST /task/submit`:
+
+- `X-Request-Id`: override/generated request ID for this HTTP call.
+- `X-Correlation-Id`: preserve upstream correlation across service/orchestrator boundaries.
+- `X-NTK-Operator-Id`: explicit operator identifier for remote or proxied callers.
+- `X-NTK-Session-Id`: explicit request/session grouping ID.
+- `X-NTK-Operator-Scopes`: optional comma-separated scope hints for future policy routing.
+
+Accepted responses now return control-plane metadata in JSON:
+
+- `task_id` (when submission reaches task admission)
+- `request_id`
+- `correlation_id` (when supplied)
+- `operator_id`
+- `operator_kind`
+- `session_id`
+- `transport`
+
+ChatOps `submit <intent> <payload>` now uses the same typed control-plane admission path internally. Audit records for accepted ChatOps submissions carry `request_id`, optional `correlation_id`, normalized `operator_id`, `session_id`, `transport`, and `task_id`.
 
 ## Telegram Webhook Mode (Optional)
 
@@ -136,8 +170,12 @@ docker compose -f deployments/docker-compose.local.yml down
   - Run `curl http://127.0.0.1:8080/ready` and inspect the failing dependency check.
 - Task submit returns 400:
   - Ensure JSON payload contains both `intent` and `payload`.
+- Task submit returns 413:
+  - Reduce the HTTP body size; the service rejects request bodies larger than `32768` bytes.
 - Task submit returns 401:
   - Ensure `NTK_SERVICE_AUTH_TOKEN` is configured and the HTTP request includes `Authorization: Bearer <token>`.
+- Service request returns 408:
+  - Increase `NTK_SERVICE_HTTP_TIMEOUT_MS` for slow local environments or reduce handler latency.
 
 ## Security Notes
 

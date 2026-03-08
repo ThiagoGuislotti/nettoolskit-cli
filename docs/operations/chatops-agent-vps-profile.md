@@ -48,6 +48,7 @@ This profile defines the first operational baseline for running a ChatOps-driven
 
 - `NTK_RUNTIME_MODE=service`
 - `NTK_SERVICE_AUTH_TOKEN=<secret>`
+- `NTK_SERVICE_HTTP_TIMEOUT_MS=30000`
 - `NTK_CHATOPS_ENABLED=true`
 - `NTK_CHATOPS_ALLOWED_USERS=<id1,id2,...>`
 - `NTK_CHATOPS_ALLOWED_CHANNELS=<id1,id2,...>`
@@ -91,6 +92,7 @@ Service exposure baseline:
 - keep the service listener on `127.0.0.1` whenever possible
 - if binding to a non-loopback/private interface, configure `NTK_SERVICE_AUTH_TOKEN`
 - keep `GET /health` and `GET /ready` private behind the reverse proxy where practical
+- propagate or log `x-request-id` through the reverse proxy for operator troubleshooting
 
 ## Command Surface for Remote Operators
 
@@ -111,6 +113,7 @@ Examples:
 
 - CI dual-runtime gate executes ChatOps VPS smoke profile (`cargo test -p nettoolskit-orchestrator --test test_suite chatops_vps_smoke_profile_`).
 - Service endpoint tests validate Telegram/Discord ingress paths (`/chatops/telegram/webhook`, `/chatops/discord/interactions`) for valid/invalid payloads and disabled-mode behavior.
+- ChatOps `submit` commands now enter the same typed control-plane path as service HTTP task admission, so local audit trails carry normalized request/operator/session/task metadata for remote execution.
 - The smoke test uses a local Telegram-compatible mock HTTP server and validates:
   - ingress polling (`getUpdates`)
   - command execution routing (`list` -> `/task list`)

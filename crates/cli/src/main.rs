@@ -1,10 +1,24 @@
 //! NetToolsKit CLI binary entry point.
 
+use axum::{
+    body::Bytes,
+    error_handling::HandleErrorLayer,
+    extract::{DefaultBodyLimit, Extension, Json, Request, State},
+    http::{HeaderMap as AxumHeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    BoxError, Router,
+};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use nettoolskit_cli::{interactive_mode, InteractiveOptions};
-use nettoolskit_core::{AppConfig, ColorMode, CommandEntry, UnicodeMode};
+use nettoolskit_core::{
+    AppConfig, ApprovalState, ColorMode, CommandEntry, ControlEnvelope, ControlPolicyContext,
+    IngressTransport, OperatorContext, OperatorKind, RuntimeMode, SessionContext, SessionKind,
+    TaskIntent, TaskIntentKind, UnicodeMode,
+};
 use nettoolskit_orchestrator::ExitStatus;
 use nettoolskit_otel::{
     init_tracing_with_config, next_correlation_id, shutdown_tracing, TracingConfig,
@@ -13,10 +27,16 @@ use nettoolskit_ui::{set_color_override, set_unicode_override, ColorLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
+use tower::{timeout::TimeoutLayer, ServiceBuilder};
 use tracing::{info, info_span};
+
+#[cfg(test)]
+use axum::body::Body;
+#[cfg(test)]
+use tower::ServiceExt;
 
 const NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN_ENV: &str =
     "NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN";
@@ -28,10 +48,15 @@ const NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS_ENV: &str =
 const NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES";
 const NTK_CHATOPS_INGRESS_REPLAY_BACKEND_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_BACKEND";
 const NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH";
+const NTK_SERVICE_HTTP_TIMEOUT_MS_ENV: &str = "NTK_SERVICE_HTTP_TIMEOUT_MS";
 const DEFAULT_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS: u64 = 300;
 const DEFAULT_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES: usize = 4_096;
 const DEFAULT_CHATOPS_INGRESS_REPLAY_FILE_LOCK_WAIT_MS: u64 = 1_000;
 const DEFAULT_CHATOPS_INGRESS_REPLAY_FILE_LOCK_STALE_SECONDS: u64 = 30;
+const DEFAULT_SERVICE_HTTP_TIMEOUT_MS: u64 = 30_000;
+const MIN_SERVICE_HTTP_TIMEOUT_MS: u64 = 100;
+const MAX_SERVICE_HTTP_TIMEOUT_MS: u64 = 300_000;
+const DEFAULT_SERVICE_HTTP_BODY_LIMIT_BYTES: usize = 32 * 1024;
 
 /// Global arguments available across all commands
 #[derive(Debug, Clone, Parser)]
@@ -84,10 +109,19 @@ struct ServiceTaskSubmitRequest {
     payload: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ServiceTaskSubmitResponse {
     accepted: bool,
     exit_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+    request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    correlation_id: Option<String>,
+    operator_id: String,
+    operator_kind: String,
+    session_id: String,
+    transport: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -142,6 +176,12 @@ struct ServiceRuntimeState {
     replay_guard: Arc<IngressReplayGuard>,
     service_auth_token: Option<String>,
     data_dir: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct ServiceRequestContext {
+    request_id: String,
+    correlation_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -578,6 +618,7 @@ fn parse_discord_public_key(value: &str) -> Result<VerifyingKey, String> {
         .map_err(|error| format!("invalid Discord public key bytes: {error}"))
 }
 
+#[cfg(test)]
 fn parse_http_headers(request: &str) -> HashMap<String, String> {
     let mut headers = HashMap::new();
     for line in request.lines().skip(1) {
@@ -590,6 +631,16 @@ fn parse_http_headers(request: &str) -> HashMap<String, String> {
         }
     }
     headers
+}
+
+fn normalize_http_headers(headers: &AxumHeaderMap) -> HashMap<String, String> {
+    let mut normalized = HashMap::new();
+    for (name, value) in headers {
+        if let Ok(value) = value.to_str() {
+            normalized.insert(name.as_str().to_ascii_lowercase(), value.trim().to_string());
+        }
+    }
+    normalized
 }
 
 fn request_header<'a>(headers: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
@@ -686,6 +737,7 @@ fn verify_discord_interaction_ingress_security(
     Ok(())
 }
 
+#[cfg(test)]
 fn parse_http_request_line(request: &str) -> Option<(&str, &str)> {
     let line = request.lines().next()?.trim();
     let mut parts = line.split_whitespace();
@@ -694,10 +746,12 @@ fn parse_http_request_line(request: &str) -> Option<(&str, &str)> {
     Some((method, path))
 }
 
+#[cfg(test)]
 fn request_body(request: &str) -> &str {
     request.split_once("\r\n\r\n").map_or("", |(_, body)| body)
 }
 
+#[cfg(test)]
 fn build_http_response(status: &str, content_type: &str, body: &str) -> String {
     format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -712,9 +766,8 @@ fn service_auth_token_from_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn request_bearer_token(headers: &HashMap<String, String>) -> Option<&str> {
-    let authorization = request_header(headers, "authorization")?;
-    let (scheme, token) = authorization.split_once(' ')?;
+fn parse_bearer_token(value: &str) -> Option<&str> {
+    let (scheme, token) = value.split_once(' ')?;
     if !scheme.eq_ignore_ascii_case("bearer") {
         return None;
     }
@@ -725,6 +778,105 @@ fn request_bearer_token(headers: &HashMap<String, String>) -> Option<&str> {
     } else {
         Some(token)
     }
+}
+
+fn request_bearer_token(headers: &HashMap<String, String>) -> Option<&str> {
+    request_header(headers, "authorization").and_then(parse_bearer_token)
+}
+
+fn service_task_intent_kind(intent: &str) -> TaskIntentKind {
+    TaskIntentKind::from_alias(intent).unwrap_or(TaskIntentKind::CommandExecution)
+}
+
+fn service_request_context_from_headers(headers: &AxumHeaderMap) -> ServiceRequestContext {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(next_service_request_id);
+    let correlation_id = headers
+        .get("x-correlation-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    ServiceRequestContext {
+        request_id,
+        correlation_id,
+    }
+}
+
+fn parse_service_operator_scopes(headers: &HashMap<String, String>) -> Vec<String> {
+    let mut scopes = request_header(headers, "x-ntk-operator-scopes")
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|scope| !scope.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    scopes.push("task.submit".to_string());
+    scopes
+}
+
+fn build_service_control_policy() -> ControlPolicyContext {
+    ControlPolicyContext::new(ApprovalState::NotRequired, true)
+}
+
+fn build_service_control_envelope(
+    request_context: &ServiceRequestContext,
+    headers: &HashMap<String, String>,
+    intent: &str,
+    payload: &str,
+) -> ControlEnvelope {
+    let has_bearer_token = request_bearer_token(headers).is_some();
+    let operator_kind = if has_bearer_token {
+        OperatorKind::RemoteHuman
+    } else {
+        OperatorKind::LocalHuman
+    };
+    let operator_id = request_header(headers, "x-ntk-operator-id").unwrap_or(if has_bearer_token {
+        "service-http-operator"
+    } else {
+        "local-service-operator"
+    });
+    let operator = OperatorContext::new(operator_kind, operator_id, IngressTransport::ServiceHttp)
+        .with_channel_id(request_header(headers, "x-ntk-channel-id").unwrap_or_default())
+        .with_authentication(if has_bearer_token {
+            "bearer_token"
+        } else {
+            "loopback_local"
+        })
+        .with_scopes(parse_service_operator_scopes(headers));
+    let session = SessionContext::new(
+        SessionKind::ServiceRequest,
+        request_header(headers, "x-ntk-session-id")
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("service-request-{}", request_context.request_id)),
+        false,
+    );
+    let intent = intent.trim();
+    let payload = payload.trim();
+    let task = TaskIntent::new(
+        service_task_intent_kind(intent),
+        format!("{intent} task"),
+        payload,
+    );
+
+    ControlEnvelope::new(
+        request_context.request_id.clone(),
+        RuntimeMode::Service,
+        operator,
+        session,
+        task,
+    )
+    .with_correlation_id(request_context.correlation_id.clone().unwrap_or_default())
+    .with_policy(build_service_control_policy())
 }
 
 fn is_loopback_bind_host(host: &str) -> bool {
@@ -930,6 +1082,21 @@ fn build_service_readiness_response(state: &ServiceRuntimeState) -> ServiceReadi
     }
 }
 
+fn next_service_request_id() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("req-{}-{sequence:08x}", current_unix_timestamp_ms())
+}
+
+fn service_http_timeout() -> std::time::Duration {
+    let millis = std::env::var(NTK_SERVICE_HTTP_TIMEOUT_MS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(MIN_SERVICE_HTTP_TIMEOUT_MS, MAX_SERVICE_HTTP_TIMEOUT_MS))
+        .unwrap_or(DEFAULT_SERVICE_HTTP_TIMEOUT_MS);
+    std::time::Duration::from_millis(millis)
+}
+
 fn exit_status_label(status: ExitStatus) -> &'static str {
     match status {
         ExitStatus::Success => "success",
@@ -938,275 +1105,325 @@ fn exit_status_label(status: ExitStatus) -> &'static str {
     }
 }
 
-async fn write_json_response<T: Serialize>(
-    stream: &mut TcpStream,
-    status: &str,
-    payload: &T,
-) -> std::io::Result<()> {
-    let body = serde_json::to_string(payload).unwrap_or_else(|_| {
-        "{\"accepted\":false,\"exit_status\":\"error\",\"message\":\"serialization\"}".to_string()
-    });
-    let response = build_http_response(status, "application/json", &body);
-    stream.write_all(response.as_bytes()).await?;
-    stream.flush().await
-}
+async fn service_request_context_middleware(mut request: Request, next: Next) -> Response {
+    let request_context = service_request_context_from_headers(request.headers());
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let started_at = std::time::Instant::now();
+    request.extensions_mut().insert(request_context.clone());
 
-async fn write_plain_response(
-    stream: &mut TcpStream,
-    status: &str,
-    body: &str,
-) -> std::io::Result<()> {
-    let response = build_http_response(status, "text/plain; charset=utf-8", body);
-    stream.write_all(response.as_bytes()).await?;
-    stream.flush().await
-}
-
-async fn handle_service_connection(
-    mut stream: TcpStream,
-    state: Arc<ServiceRuntimeState>,
-) -> std::io::Result<()> {
-    let mut buffer = vec![0_u8; 32 * 1024];
-    let bytes_read = stream.read(&mut buffer).await?;
-    if bytes_read == 0 {
-        return Ok(());
+    let mut response = next.run(request).await;
+    if let Ok(header_value) = HeaderValue::from_str(&request_context.request_id) {
+        response.headers_mut().insert("x-request-id", header_value);
     }
+    if let Some(correlation_id) = request_context.correlation_id.as_deref() {
+        if let Ok(header_value) = HeaderValue::from_str(correlation_id) {
+            response
+                .headers_mut()
+                .insert("x-correlation-id", header_value);
+        }
+    }
+    tracing::info!(
+        request_id = %request_context.request_id,
+        correlation_id = request_context.correlation_id.as_deref().unwrap_or(""),
+        method = %method,
+        path = %path,
+        status = response.status().as_u16(),
+        latency_ms = started_at.elapsed().as_millis() as u64,
+        "service request handled"
+    );
 
-    let request = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
-    let Some((method, path)) = parse_http_request_line(&request) else {
-        write_plain_response(&mut stream, "400 Bad Request", "invalid request line").await?;
-        return Ok(());
+    response
+}
+
+async fn handle_service_timeout_error(_: BoxError) -> Response {
+    (
+        StatusCode::REQUEST_TIMEOUT,
+        "service request timed out before completion",
+    )
+        .into_response()
+}
+
+async fn service_bearer_auth_middleware(
+    State(state): State<Arc<ServiceRuntimeState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(expected_token) = state.service_auth_token.as_deref() else {
+        return next.run(request).await;
     };
-    let headers = parse_http_headers(&request);
 
-    match (method, path) {
-        ("GET", "/") => {
-            write_plain_response(
-                &mut stream,
-                "200 OK",
-                "NetToolsKit service mode is running.\nUse GET /health or GET /ready.",
+    let headers = normalize_http_headers(request.headers());
+    if request_bearer_token(&headers) == Some(expected_token) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid bearer token for /task/submit",
+        )
+            .into_response()
+    }
+}
+
+async fn service_root() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        "NetToolsKit service mode is running.\nUse GET /health or GET /ready.",
+    )
+}
+
+#[cfg(test)]
+async fn service_test_slow() -> impl IntoResponse {
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    (StatusCode::OK, "slow-response")
+}
+
+async fn service_health(State(state): State<Arc<ServiceRuntimeState>>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(build_service_health_response(state.as_ref())),
+    )
+}
+
+async fn service_ready(State(state): State<Arc<ServiceRuntimeState>>) -> impl IntoResponse {
+    let payload = build_service_readiness_response(state.as_ref());
+    let status = if payload.status == "ready" {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(payload))
+}
+
+async fn service_task_submit(
+    State(_state): State<Arc<ServiceRuntimeState>>,
+    Extension(request_context): Extension<ServiceRequestContext>,
+    headers: AxumHeaderMap,
+    payload: Result<Json<ServiceTaskSubmitRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let payload = match payload {
+        Ok(Json(payload)) => payload,
+        Err(error) if error.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "request body exceeded the configured limit for /task/submit",
             )
-            .await?;
+                .into_response();
         }
-        ("GET", "/health") => {
-            let payload = build_service_health_response(state.as_ref());
-            write_json_response(&mut stream, "200 OK", &payload).await?;
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "invalid JSON payload for /task/submit",
+            )
+                .into_response();
         }
-        ("GET", "/ready") => {
-            let payload = build_service_readiness_response(state.as_ref());
-            let status_line = if payload.status == "ready" {
-                "200 OK"
-            } else {
-                "503 Service Unavailable"
-            };
-            write_json_response(&mut stream, status_line, &payload).await?;
+    };
+
+    if payload.intent.trim().is_empty() || payload.payload.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "intent and payload are required").into_response();
+    }
+
+    let normalized_headers = normalize_http_headers(&headers);
+    let control_envelope = build_service_control_envelope(
+        &request_context,
+        &normalized_headers,
+        payload.intent.as_str(),
+        payload.payload.as_str(),
+    );
+    tracing::info!(
+        request_id = %control_envelope.request_id,
+        correlation_id = control_envelope.correlation_id.as_deref().unwrap_or(""),
+        operator_id = %control_envelope.operator.id,
+        operator_kind = %control_envelope.operator.kind,
+        session_id = %control_envelope.session.id,
+        intent = %payload.intent.trim(),
+        "service task submit admitted"
+    );
+    let submission =
+        nettoolskit_orchestrator::process_control_envelope(control_envelope.clone()).await;
+    let response_payload = ServiceTaskSubmitResponse {
+        accepted: submission.exit_status != ExitStatus::Error,
+        exit_status: exit_status_label(submission.exit_status).to_string(),
+        task_id: submission.task_id,
+        request_id: control_envelope.request_id,
+        correlation_id: control_envelope.correlation_id,
+        operator_id: control_envelope.operator.id,
+        operator_kind: control_envelope.operator.kind.to_string(),
+        session_id: control_envelope.session.id,
+        transport: control_envelope.operator.transport.to_string(),
+    };
+    let status_code = if response_payload.accepted {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::BAD_REQUEST
+    };
+
+    (status_code, Json(response_payload)).into_response()
+}
+
+async fn service_telegram_webhook(
+    State(state): State<Arc<ServiceRuntimeState>>,
+    headers: AxumHeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(runtime) = state.chatops_runtime.runtime.as_ref() else {
+        return (StatusCode::NOT_FOUND, "chatops runtime is not enabled").into_response();
+    };
+
+    if !runtime.is_telegram_webhook_enabled() {
+        return (StatusCode::CONFLICT, "telegram webhook mode is disabled").into_response();
+    }
+
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid Telegram webhook payload: request body is not valid UTF-8",
+        )
+            .into_response();
+    };
+    let headers = normalize_http_headers(&headers);
+
+    match verify_telegram_ingress_security(state.as_ref(), &headers, body) {
+        Ok(()) => {}
+        Err(IngressSecurityError::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "telegram webhook signature/token validation failed",
+            )
+                .into_response();
         }
-        ("POST", "/task/submit") => {
-            if let Some(expected_token) = state.service_auth_token.as_deref() {
-                let provided_token = request_bearer_token(&headers);
-                if provided_token != Some(expected_token) {
-                    write_plain_response(
-                        &mut stream,
-                        "401 Unauthorized",
-                        "missing or invalid bearer token for /task/submit",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-
-            let body = request_body(&request);
-            let parsed: Result<ServiceTaskSubmitRequest, _> = serde_json::from_str(body);
-            let Ok(payload) = parsed else {
-                write_plain_response(
-                    &mut stream,
-                    "400 Bad Request",
-                    "invalid JSON payload for /task/submit",
-                )
-                .await?;
-                return Ok(());
-            };
-
-            if payload.intent.trim().is_empty() || payload.payload.trim().is_empty() {
-                write_plain_response(
-                    &mut stream,
-                    "400 Bad Request",
-                    "intent and payload are required",
-                )
-                .await?;
-                return Ok(());
-            }
-
-            let command = format!(
-                "/task submit {} {}",
-                payload.intent.trim(),
-                payload.payload.trim()
-            );
-            let status = nettoolskit_orchestrator::process_command(&command).await;
-            let response_payload = ServiceTaskSubmitResponse {
-                accepted: status != ExitStatus::Error,
-                exit_status: exit_status_label(status).to_string(),
-            };
-            let status_line = if response_payload.accepted {
-                "202 Accepted"
-            } else {
-                "400 Bad Request"
-            };
-            write_json_response(&mut stream, status_line, &response_payload).await?;
+        Err(IngressSecurityError::Replay) => {
+            return (StatusCode::CONFLICT, "telegram webhook replay detected").into_response();
         }
-        ("POST", "/chatops/telegram/webhook") => {
-            let Some(runtime) = state.chatops_runtime.runtime.as_ref() else {
-                write_plain_response(
-                    &mut stream,
-                    "404 Not Found",
-                    "chatops runtime is not enabled",
-                )
-                .await?;
-                return Ok(());
-            };
-
-            if !runtime.is_telegram_webhook_enabled() {
-                write_plain_response(
-                    &mut stream,
-                    "409 Conflict",
-                    "telegram webhook mode is disabled",
-                )
-                .await?;
-                return Ok(());
-            }
-
-            let body = request_body(&request);
-            match verify_telegram_ingress_security(state.as_ref(), &headers, body) {
-                Ok(()) => {}
-                Err(IngressSecurityError::Unauthorized) => {
-                    write_plain_response(
-                        &mut stream,
-                        "401 Unauthorized",
-                        "telegram webhook signature/token validation failed",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                Err(IngressSecurityError::Replay) => {
-                    write_plain_response(
-                        &mut stream,
-                        "409 Conflict",
-                        "telegram webhook replay detected",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                Err(IngressSecurityError::Unavailable) => {
-                    write_plain_response(
-                        &mut stream,
-                        "503 Service Unavailable",
-                        "telegram webhook replay backend unavailable",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-
-            match runtime.enqueue_telegram_webhook_payload(body) {
-                Ok(queued) => {
-                    let response_payload = ServiceTelegramWebhookResponse {
-                        accepted: true,
-                        queued,
-                    };
-                    write_json_response(&mut stream, "202 Accepted", &response_payload).await?;
-                }
-                Err(error) => {
-                    let message = format!("invalid Telegram webhook payload: {error}");
-                    write_plain_response(&mut stream, "400 Bad Request", &message).await?;
-                }
-            }
-        }
-        ("POST", "/chatops/discord/interactions") => {
-            let Some(runtime) = state.chatops_runtime.runtime.as_ref() else {
-                write_plain_response(
-                    &mut stream,
-                    "404 Not Found",
-                    "chatops runtime is not enabled",
-                )
-                .await?;
-                return Ok(());
-            };
-
-            if !runtime.is_discord_interactions_enabled() {
-                write_plain_response(
-                    &mut stream,
-                    "409 Conflict",
-                    "discord interaction mode is disabled",
-                )
-                .await?;
-                return Ok(());
-            }
-
-            let body = request_body(&request);
-            match verify_discord_interaction_ingress_security(state.as_ref(), &headers, body) {
-                Ok(()) => {}
-                Err(IngressSecurityError::Unauthorized) => {
-                    write_plain_response(
-                        &mut stream,
-                        "401 Unauthorized",
-                        "discord interaction signature validation failed",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                Err(IngressSecurityError::Replay) => {
-                    write_plain_response(
-                        &mut stream,
-                        "409 Conflict",
-                        "discord interaction replay detected",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-                Err(IngressSecurityError::Unavailable) => {
-                    write_plain_response(
-                        &mut stream,
-                        "503 Service Unavailable",
-                        "discord interaction replay backend unavailable",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-
-            match runtime.enqueue_discord_interaction_payload(body) {
-                Ok(outcome) if outcome.ping => {
-                    let response_payload = ServiceDiscordInteractionResponse {
-                        response_type: 1,
-                        data: None,
-                    };
-                    write_json_response(&mut stream, "200 OK", &response_payload).await?;
-                }
-                Ok(outcome) => {
-                    let response_payload = ServiceDiscordInteractionResponse {
-                        response_type: 4,
-                        data: Some(ServiceDiscordInteractionData {
-                            content: format!(
-                                "Command accepted for async execution (queued: {}).",
-                                outcome.queued
-                            ),
-                            // 64 => ephemeral response in Discord interactions.
-                            flags: 64,
-                        }),
-                    };
-                    write_json_response(&mut stream, "200 OK", &response_payload).await?;
-                }
-                Err(error) => {
-                    let message = format!("invalid Discord interaction payload: {error}");
-                    write_plain_response(&mut stream, "400 Bad Request", &message).await?;
-                }
-            }
-        }
-        _ => {
-            write_plain_response(&mut stream, "404 Not Found", "not found").await?;
+        Err(IngressSecurityError::Unavailable) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "telegram webhook replay backend unavailable",
+            )
+                .into_response();
         }
     }
 
-    Ok(())
+    match runtime.enqueue_telegram_webhook_payload(body) {
+        Ok(queued) => (
+            StatusCode::ACCEPTED,
+            Json(ServiceTelegramWebhookResponse {
+                accepted: true,
+                queued,
+            }),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            format!("invalid Telegram webhook payload: {error}"),
+        )
+            .into_response(),
+    }
+}
+
+async fn service_discord_interactions(
+    State(state): State<Arc<ServiceRuntimeState>>,
+    headers: AxumHeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(runtime) = state.chatops_runtime.runtime.as_ref() else {
+        return (StatusCode::NOT_FOUND, "chatops runtime is not enabled").into_response();
+    };
+
+    if !runtime.is_discord_interactions_enabled() {
+        return (StatusCode::CONFLICT, "discord interaction mode is disabled").into_response();
+    }
+
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid Discord interaction payload: request body is not valid UTF-8",
+        )
+            .into_response();
+    };
+    let headers = normalize_http_headers(&headers);
+
+    match verify_discord_interaction_ingress_security(state.as_ref(), &headers, body) {
+        Ok(()) => {}
+        Err(IngressSecurityError::Unauthorized) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "discord interaction signature validation failed",
+            )
+                .into_response();
+        }
+        Err(IngressSecurityError::Replay) => {
+            return (StatusCode::CONFLICT, "discord interaction replay detected").into_response();
+        }
+        Err(IngressSecurityError::Unavailable) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "discord interaction replay backend unavailable",
+            )
+                .into_response();
+        }
+    }
+
+    match runtime.enqueue_discord_interaction_payload(body) {
+        Ok(outcome) if outcome.ping => (
+            StatusCode::OK,
+            Json(ServiceDiscordInteractionResponse {
+                response_type: 1,
+                data: None,
+            }),
+        )
+            .into_response(),
+        Ok(outcome) => (
+            StatusCode::OK,
+            Json(ServiceDiscordInteractionResponse {
+                response_type: 4,
+                data: Some(ServiceDiscordInteractionData {
+                    content: format!(
+                        "Command accepted for async execution (queued: {}).",
+                        outcome.queued
+                    ),
+                    flags: 64,
+                }),
+            }),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            format!("invalid Discord interaction payload: {error}"),
+        )
+            .into_response(),
+    }
+}
+
+fn service_router(state: Arc<ServiceRuntimeState>) -> Router {
+    let router = Router::new()
+        .route("/", get(service_root))
+        .route("/health", get(service_health))
+        .route("/ready", get(service_ready))
+        .route(
+            "/task/submit",
+            post(service_task_submit).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                service_bearer_auth_middleware,
+            )),
+        )
+        .route("/chatops/telegram/webhook", post(service_telegram_webhook))
+        .route(
+            "/chatops/discord/interactions",
+            post(service_discord_interactions),
+        );
+    #[cfg(test)]
+    let router = router.route("/__test/slow", get(service_test_slow));
+
+    router
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(handle_service_timeout_error))
+                .layer(TimeoutLayer::new(service_http_timeout())),
+        )
+        .layer(DefaultBodyLimit::max(DEFAULT_SERVICE_HTTP_BODY_LIMIT_BYTES))
+        .layer(middleware::from_fn(service_request_context_middleware))
+        .with_state(state)
 }
 
 async fn run_service_mode(host: String, port: u16) -> ExitStatus {
@@ -1277,21 +1494,12 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
         ingress_security,
     });
 
-    loop {
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                let state = service_state.clone();
-                tokio::spawn(async move {
-                    if let Err(error) = handle_service_connection(stream, state).await {
-                        tracing::warn!(%error, "service connection handling failed");
-                    }
-                });
-            }
-            Err(error) => {
-                tracing::warn!(%error, "service listener accept failed");
-            }
-        }
+    if let Err(error) = axum::serve(listener, service_router(service_state)).await {
+        tracing::warn!(%error, "service listener terminated unexpectedly");
+        return ExitStatus::Error;
     }
+
+    ExitStatus::Success
 }
 
 fn initialize_chatops_runtime() -> InitializedChatOpsRuntime {
@@ -1481,11 +1689,12 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
     use ed25519_dalek::{Signer, SigningKey};
     use nettoolskit_orchestrator::{build_chatops_runtime, ChatOpsRuntime, ChatOpsRuntimeConfig};
+    use serde::de::DeserializeOwned;
     use serial_test::serial;
     use std::sync::{Mutex, OnceLock};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn parse_http_request_line_extracts_method_and_path() {
@@ -1676,43 +1885,63 @@ mod tests {
             .local_addr()
             .expect("test listener should provide local address");
 
-        let request_data = request.to_string();
-        let client = tokio::spawn(async move {
-            let mut stream = TcpStream::connect(address)
+        let server = tokio::spawn(async move {
+            axum::serve(listener, service_router(state))
                 .await
-                .expect("client should connect to test listener");
-            stream
-                .write_all(request_data.as_bytes())
-                .await
-                .expect("client should write request");
-            stream
-                .shutdown()
-                .await
-                .expect("client should shutdown write");
-
-            let mut response = Vec::new();
-            stream
-                .read_to_end(&mut response)
-                .await
-                .expect("client should read response");
-            String::from_utf8(response).expect("response should be valid UTF-8")
+                .expect("axum service router should serve test requests");
         });
-
-        let (server_stream, _) = listener
-            .accept()
+        let (method, path) =
+            parse_http_request_line(request).expect("request line should parse in tests");
+        let headers = parse_http_headers(request);
+        let body = request_body(request).to_string();
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}{path}");
+        let method =
+            reqwest::Method::from_bytes(method.as_bytes()).expect("method should be valid");
+        let mut request_builder = client.request(method, url);
+        for (name, value) in headers {
+            request_builder = request_builder.header(&name, value);
+        }
+        if !body.is_empty() {
+            request_builder = request_builder.body(body);
+        }
+        let response = request_builder
+            .send()
             .await
-            .expect("server should accept client");
-        handle_service_connection(server_stream, state)
+            .expect("request should succeed against test service");
+        let status_line = format!(
+            "{} {}",
+            response.status().as_u16(),
+            response.status().canonical_reason().unwrap_or("Unknown")
+        );
+        let body = response
+            .text()
             .await
-            .expect("service handler should process request");
-
-        client
-            .await
-            .expect("client task should complete without panic")
+            .expect("response body should be readable");
+        server.abort();
+        let _ = server.await;
+        build_http_response(&status_line, "text/plain; charset=utf-8", &body)
     }
 
     async fn execute_service_request(request: &str) -> String {
         execute_service_request_with_state(request, test_service_state(None)).await
+    }
+
+    async fn execute_service_request_direct(
+        request: Request,
+        state: Arc<ServiceRuntimeState>,
+    ) -> Response {
+        service_router(state)
+            .oneshot(request)
+            .await
+            .expect("router should accept direct test request")
+    }
+
+    async fn parse_response_json<T: DeserializeOwned>(response: Response) -> T {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        serde_json::from_slice(&bytes).expect("response body should deserialize")
     }
 
     #[test]
@@ -1780,6 +2009,26 @@ mod tests {
     }
 
     #[test]
+    fn service_http_timeout_uses_default_when_env_is_missing() {
+        let _lock = env_lock().lock().expect("env lock should not be poisoned");
+        let _guard = EnvVarGuard::set(&[(NTK_SERVICE_HTTP_TIMEOUT_MS_ENV, None)]);
+        assert_eq!(
+            service_http_timeout(),
+            std::time::Duration::from_millis(DEFAULT_SERVICE_HTTP_TIMEOUT_MS)
+        );
+    }
+
+    #[test]
+    fn service_http_timeout_clamps_env_value_to_supported_bounds() {
+        let _lock = env_lock().lock().expect("env lock should not be poisoned");
+        let _guard = EnvVarGuard::set(&[(NTK_SERVICE_HTTP_TIMEOUT_MS_ENV, Some("5"))]);
+        assert_eq!(
+            service_http_timeout(),
+            std::time::Duration::from_millis(MIN_SERVICE_HTTP_TIMEOUT_MS)
+        );
+    }
+
+    #[test]
     fn replay_lock_path_appends_lock_extension() {
         let path = std::path::Path::new("cache/ingress-replay-cache.json");
         let lock_path = replay_lock_path(path);
@@ -1842,6 +2091,106 @@ mod tests {
         assert_eq!(response.status, "ready");
         assert_eq!(response.runtime_mode, "service");
         assert_eq!(response.checks.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn service_request_context_middleware_generates_request_id_when_missing() {
+        let response = execute_service_request_direct(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .expect("request should build"),
+            test_service_state(None),
+        )
+        .await;
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("request id header should be present");
+        assert!(request_id.starts_with("req-"));
+    }
+
+    #[tokio::test]
+    async fn service_request_context_middleware_preserves_supplied_request_id() {
+        let response = execute_service_request_direct(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .header("x-request-id", "test-request-123")
+                .body(Body::empty())
+                .expect("request should build"),
+            test_service_state(None),
+        )
+        .await;
+        assert_eq!(
+            response
+                .headers()
+                .get("x-request-id")
+                .and_then(|value| value.to_str().ok()),
+            Some("test-request-123")
+        );
+    }
+
+    #[tokio::test]
+    async fn service_request_context_middleware_preserves_supplied_correlation_id() {
+        let response = execute_service_request_direct(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .header("x-correlation-id", "corr-123")
+                .body(Body::empty())
+                .expect("request should build"),
+            test_service_state(None),
+        )
+        .await;
+        assert_eq!(
+            response
+                .headers()
+                .get("x-correlation-id")
+                .and_then(|value| value.to_str().ok()),
+            Some("corr-123")
+        );
+    }
+
+    #[tokio::test]
+    async fn service_router_enforces_default_body_limit() {
+        let oversized_payload = format!(
+            "{{\"intent\":\"ai-plan\",\"payload\":\"{}\"}}",
+            "x".repeat(DEFAULT_SERVICE_HTTP_BODY_LIMIT_BYTES + 1)
+        );
+        let response = execute_service_request_direct(
+            Request::builder()
+                .method("POST")
+                .uri("/task/submit")
+                .header("content-type", "application/json")
+                .body(Body::from(oversized_payload))
+                .expect("request should build"),
+            test_service_state(None),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn service_router_enforces_timeout_budget() {
+        let router = {
+            let _lock = env_lock().lock().expect("env lock should not be poisoned");
+            let _guard = EnvVarGuard::set(&[(NTK_SERVICE_HTTP_TIMEOUT_MS_ENV, Some("100"))]);
+            service_router(test_service_state(None))
+        };
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/__test/slow")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should accept timeout test request");
+        assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
     }
 
     #[test]
@@ -2010,7 +2359,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn service_mode_task_submit_accepts_valid_payload() {
+        let _guard = EnvVarGuard::set(&[("NTK_TOOL_SCOPE_ALLOWED_TOOLS", Some("ai.plan"))]);
         let request = concat!(
             "POST /task/submit HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -2052,7 +2403,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn service_mode_task_submit_accepts_valid_bearer_token_when_required() {
+        let _guard = EnvVarGuard::set(&[("NTK_TOOL_SCOPE_ALLOWED_TOOLS", Some("ai.plan"))]);
         let request = concat!(
             "POST /task/submit HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -2072,6 +2425,80 @@ mod tests {
         )
         .await;
         assert!(response.starts_with("HTTP/1.1 202 Accepted"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_mode_task_submit_returns_control_plane_metadata() {
+        let _guard = EnvVarGuard::set(&[("NTK_TOOL_SCOPE_ALLOWED_TOOLS", Some("ai.plan"))]);
+        let response = execute_service_request_direct(
+            Request::builder()
+                .method("POST")
+                .uri("/task/submit")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"intent":"ai-plan","payload":"validate service envelope"}"#,
+                ))
+                .expect("request should build"),
+            test_service_state(None),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let payload: ServiceTaskSubmitResponse = parse_response_json(response).await;
+        assert!(payload.accepted);
+        assert!(payload
+            .task_id
+            .as_deref()
+            .is_some_and(|task_id| task_id.starts_with("task-")));
+        assert!(payload.request_id.starts_with("req-"));
+        assert_eq!(payload.correlation_id, None);
+        assert_eq!(payload.operator_id, "local-service-operator");
+        assert_eq!(payload.operator_kind, "local_human");
+        assert_eq!(
+            payload.session_id,
+            format!("service-request-{}", payload.request_id)
+        );
+        assert_eq!(payload.transport, "service_http");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_mode_task_submit_honors_supplied_operator_session_and_correlation_headers() {
+        let _guard = EnvVarGuard::set(&[("NTK_TOOL_SCOPE_ALLOWED_TOOLS", Some("ai.plan"))]);
+        let response = execute_service_request_direct(
+            Request::builder()
+                .method("POST")
+                .uri("/task/submit")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer expected-token")
+                .header("x-request-id", "req-user-123")
+                .header("x-correlation-id", "corr-user-456")
+                .header("x-ntk-operator-id", "remote-dev")
+                .header("x-ntk-session-id", "session-user-789")
+                .body(Body::from(
+                    r#"{"intent":"ai-plan","payload":"review enterprise gaps"}"#,
+                ))
+                .expect("request should build"),
+            test_service_state_with_security(
+                disabled_chatops_runtime(),
+                default_test_ingress_security(),
+                Some("expected-token"),
+                Some(unique_test_path("service-envelope-auth")),
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let payload: ServiceTaskSubmitResponse = parse_response_json(response).await;
+        assert!(payload
+            .task_id
+            .as_deref()
+            .is_some_and(|task_id| task_id.starts_with("task-")));
+        assert_eq!(payload.request_id, "req-user-123");
+        assert_eq!(payload.correlation_id.as_deref(), Some("corr-user-456"));
+        assert_eq!(payload.operator_id, "remote-dev");
+        assert_eq!(payload.operator_kind, "remote_human");
+        assert_eq!(payload.session_id, "session-user-789");
+        assert_eq!(payload.transport, "service_http");
     }
 
     #[tokio::test]

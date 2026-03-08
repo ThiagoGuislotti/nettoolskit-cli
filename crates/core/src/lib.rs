@@ -46,6 +46,7 @@ pub use exit_status::ExitStatus;
 pub use features::Features;
 pub use menu::{CommandEntry, MenuEntry, MenuProvider};
 pub use runtime::{
-    resolve_runtime_mode, RuntimeMode, TaskAuditEvent, TaskExecutionStatus, TaskIntent,
-    TaskIntentKind, NTK_RUNTIME_MODE_ENV,
+    resolve_runtime_mode, ApprovalState, ControlEnvelope, ControlPolicyContext, IngressTransport,
+    OperatorContext, OperatorKind, RuntimeMode, SessionContext, SessionKind, TaskAuditEvent,
+    TaskExecutionStatus, TaskIntent, TaskIntentKind, NTK_RUNTIME_MODE_ENV,
 };

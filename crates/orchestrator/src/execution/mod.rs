@@ -57,7 +57,10 @@ pub use plugins::{
     set_command_plugin_enabled, CommandHookContext, CommandPlugin, PluginDescriptor,
     PluginMetadata, PluginRegistryError,
 };
-pub use processor::{process_command, process_command_with_interrupt, process_text};
+pub use processor::{
+    process_command, process_command_with_interrupt, process_control_envelope, process_text,
+    TaskSubmissionOutcome,
+};
 pub use repo_workflow::{
     execute_repo_workflow, parse_repo_workflow_payload, validate_repo_workflow_request,
     RepoWorkflowError, RepoWorkflowPlan, RepoWorkflowPolicy, RepoWorkflowRequest,

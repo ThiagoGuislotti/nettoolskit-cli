@@ -24,8 +24,8 @@ use nettoolskit_core::ai_context::{
 };
 use nettoolskit_core::file_search::{search_files, SearchConfig};
 use nettoolskit_core::{
-    AppConfig, ColorMode, CommandEntry, RuntimeMode, TaskAuditEvent, TaskExecutionStatus,
-    TaskIntent, TaskIntentKind, UnicodeMode,
+    AppConfig, ColorMode, CommandEntry, ControlEnvelope, RuntimeMode, TaskAuditEvent,
+    TaskExecutionStatus, TaskIntent, TaskIntentKind, UnicodeMode,
 };
 use nettoolskit_otel::{next_correlation_id, Metrics, Timer};
 use nettoolskit_task_worker::{
@@ -969,6 +969,7 @@ impl Default for ServiceSubmissionBudgetState {
 struct TaskRecord {
     id: String,
     intent: TaskIntent,
+    control_envelope: Option<ControlEnvelope>,
     status: TaskExecutionStatus,
     runtime_mode: RuntimeMode,
     execution_target: String,
@@ -990,6 +991,7 @@ impl TaskRecord {
         Self {
             id,
             intent,
+            control_envelope: None,
             status: TaskExecutionStatus::Queued,
             runtime_mode,
             execution_target: "local-fallback".to_string(),
@@ -1000,6 +1002,11 @@ impl TaskRecord {
             updated_at_unix_ms: now_unix_ms,
         }
     }
+
+    fn with_control_envelope(mut self, control_envelope: ControlEnvelope) -> Self {
+        self.control_envelope = Some(control_envelope);
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1007,6 +1014,44 @@ struct QueuedTask {
     id: String,
     intent: TaskIntent,
     runtime_mode: RuntimeMode,
+}
+
+/// Structured outcome returned by typed task submission entrypoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSubmissionOutcome {
+    /// Stable task identifier when admission progressed far enough to create a record.
+    pub task_id: Option<String>,
+    /// Final exit status returned to the caller.
+    pub exit_status: ExitStatus,
+    /// Final task status when a task record exists.
+    pub task_status: Option<TaskExecutionStatus>,
+    /// Runtime mode used for submission.
+    pub runtime_mode: RuntimeMode,
+}
+
+impl TaskSubmissionOutcome {
+    fn rejected(runtime_mode: RuntimeMode, exit_status: ExitStatus) -> Self {
+        Self {
+            task_id: None,
+            exit_status,
+            task_status: None,
+            runtime_mode,
+        }
+    }
+
+    fn accepted(
+        task_id: String,
+        exit_status: ExitStatus,
+        task_status: TaskExecutionStatus,
+        runtime_mode: RuntimeMode,
+    ) -> Self {
+        Self {
+            task_id: Some(task_id),
+            exit_status,
+            task_status: Some(task_status),
+            runtime_mode,
+        }
+    }
 }
 
 fn runtime_metrics() -> &'static Metrics {
@@ -1058,19 +1103,30 @@ fn with_task_audit_registry<T>(
     f(&mut guard)
 }
 
+fn task_control_envelope(task_id: &str) -> Option<ControlEnvelope> {
+    with_task_registry(|registry| {
+        registry
+            .get(task_id)
+            .and_then(|record| record.control_envelope.clone())
+    })
+}
+
 fn append_task_audit_event(
     task_id: &str,
     runtime_mode: RuntimeMode,
     status: TaskExecutionStatus,
     message: impl Into<String>,
 ) {
-    let event = TaskAuditEvent::new(
+    let mut event = TaskAuditEvent::new(
         task_id.to_string(),
         runtime_mode,
         status,
         message,
         current_unix_timestamp_ms(),
     );
+    if let Some(control) = task_control_envelope(task_id) {
+        event = event.with_control_envelope(control);
+    }
     with_task_audit_registry(|registry| {
         let events = registry.entry(task_id.to_string()).or_default();
         events.push(event);
@@ -3507,26 +3563,11 @@ fn next_task_id() -> String {
 }
 
 fn task_intent_kind_label(kind: TaskIntentKind) -> &'static str {
-    match kind {
-        TaskIntentKind::CommandExecution => "command",
-        TaskIntentKind::AiAsk => "ai-ask",
-        TaskIntentKind::AiPlan => "ai-plan",
-        TaskIntentKind::AiExplain => "ai-explain",
-        TaskIntentKind::AiApplyDryRun => "ai-apply-dry-run",
-        TaskIntentKind::RepoWorkflow => "repo-workflow",
-    }
+    kind.as_str()
 }
 
 fn parse_task_intent_kind(value: &str) -> Option<TaskIntentKind> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "command" | "cmd" => Some(TaskIntentKind::CommandExecution),
-        "ai-ask" | "ask" => Some(TaskIntentKind::AiAsk),
-        "ai-plan" | "plan" => Some(TaskIntentKind::AiPlan),
-        "ai-explain" | "explain" => Some(TaskIntentKind::AiExplain),
-        "ai-apply-dry-run" | "apply-dry-run" | "apply" => Some(TaskIntentKind::AiApplyDryRun),
-        "repo-workflow" | "repo" | "repository-workflow" => Some(TaskIntentKind::RepoWorkflow),
-        _ => None,
-    }
+    TaskIntentKind::from_alias(value)
 }
 
 fn ai_intent_from_task_intent(intent_kind: TaskIntentKind) -> Option<AiIntent> {
@@ -4237,46 +4278,33 @@ fn print_task_list(records: &[TaskRecord]) {
     }
 }
 
-async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
+async fn submit_task_intent(
+    intent: TaskIntent,
+    runtime_mode: RuntimeMode,
+    control_envelope: Option<ControlEnvelope>,
+) -> TaskSubmissionOutcome {
     use nettoolskit_ui::Color;
 
-    if parts.len() < 4 {
-        println!(
-            "{}",
-            "Usage: /task submit <intent> <payload>".color(Color::YELLOW)
-        );
-        return ExitStatus::Error;
-    }
-
-    let Some(intent_kind) = parse_task_intent_kind(parts[2]) else {
-        println!(
-            "{} {}",
-            "✗ Unsupported task intent:".color(Color::RED).bold(),
-            parts[2].color(Color::YELLOW)
-        );
-        println!(
-            "{}",
-            "Supported intents: command, ai-ask, ai-plan, ai-explain, ai-apply-dry-run, repo-workflow"
-                .color(Color::YELLOW)
-        );
-        return ExitStatus::Error;
-    };
-
-    let payload = parts[3..].join(" ");
-    if payload.trim().is_empty() {
-        println!(
-            "{}",
-            "✗ Task payload cannot be empty.".color(Color::RED).bold()
-        );
-        return ExitStatus::Error;
-    }
-
     let metrics = runtime_metrics().clone();
-    let runtime_mode = AppConfig::load().general.runtime_mode;
+    let intent_kind = intent.kind;
+    let payload = intent.payload.trim().to_string();
+
+    if let Some(control) = &control_envelope {
+        metrics.increment_counter("runtime_control_envelope_submissions_total");
+        info!(
+            request_id = %control.request_id,
+            correlation_id = control.correlation_id.as_deref().unwrap_or(""),
+            operator_id = %control.operator.id,
+            session_id = %control.session.id,
+            task_intent = %task_intent_kind_label(control.task.kind),
+            "Processing typed control envelope submission"
+        );
+    }
+
     if let Err(reason) = enforce_task_tool_scope(
         runtime_mode,
         intent_kind,
-        payload.trim(),
+        payload.as_str(),
         "task_submit",
         &metrics,
     ) {
@@ -4295,7 +4323,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
             NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV.color(Color::CYAN),
             tool_scope_intent_env(intent_kind).color(Color::CYAN)
         );
-        return ExitStatus::Error;
+        return TaskSubmissionOutcome::rejected(runtime_mode, ExitStatus::Error);
     }
 
     if let Some(ai_intent) = ai_intent_from_task_intent(intent_kind) {
@@ -4303,7 +4331,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
         let model_selection_policy = ai_model_selection_policy_from_env();
         if let Err(reason) = evaluate_ai_task_submit_budget(
             ai_intent,
-            payload.trim(),
+            payload.as_str(),
             token_policy,
             &model_selection_policy,
         ) {
@@ -4324,7 +4352,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                 NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV.color(Color::CYAN),
                 NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV.color(Color::CYAN)
             );
-            return ExitStatus::Error;
+            return TaskSubmissionOutcome::rejected(runtime_mode, ExitStatus::Error);
         }
     }
 
@@ -4350,7 +4378,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                 NTK_SERVICE_AUTOMATION_PROFILE_ENV.color(Color::CYAN),
                 NTK_SERVICE_ALLOWED_INTENTS_ENV.color(Color::CYAN)
             );
-            return ExitStatus::Error;
+            return TaskSubmissionOutcome::rejected(runtime_mode, ExitStatus::Error);
         }
 
         let payload_bytes = payload.len();
@@ -4371,7 +4399,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                 "  env: {}",
                 NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV.color(Color::CYAN)
             );
-            return ExitStatus::Error;
+            return TaskSubmissionOutcome::rejected(runtime_mode, ExitStatus::Error);
         }
 
         let inflight = service_inflight_task_count();
@@ -4388,7 +4416,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                 "  env: {}",
                 NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV.color(Color::CYAN)
             );
-            return ExitStatus::Error;
+            return TaskSubmissionOutcome::rejected(runtime_mode, ExitStatus::Error);
         }
 
         match enforce_service_submission_budget(policy) {
@@ -4415,7 +4443,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                     NTK_SERVICE_SUBMIT_BUDGET_ENV.color(Color::CYAN),
                     NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV.color(Color::CYAN)
                 );
-                return ExitStatus::Error;
+                return TaskSubmissionOutcome::rejected(runtime_mode, ExitStatus::Error);
             }
         }
     }
@@ -4427,15 +4455,16 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
     };
     let task_id = next_task_id();
     let now = current_unix_timestamp_ms();
-    let title = format!("{} task", task_intent_kind_label(intent_kind));
-    let intent = TaskIntent::new(intent_kind, title, payload);
-    let record = TaskRecord::new(
+    let mut record = TaskRecord::new(
         task_id.clone(),
         intent.clone(),
         runtime_mode,
         max_attempts,
         now,
     );
+    if let Some(control) = control_envelope {
+        record = record.with_control_envelope(control);
+    }
 
     with_task_registry(|registry| {
         registry.insert(task_id.clone(), record);
@@ -4476,6 +4505,9 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                             max_attempts,
                             now,
                         );
+                        if let Some(control) = task_control_envelope(&task_id) {
+                            missing = missing.with_control_envelope(control);
+                        }
                         missing.execution_target = execution_target.clone();
                         missing.status_message =
                             "Task queued for background worker execution".to_string();
@@ -4492,6 +4524,9 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                                     max_attempts,
                                     now,
                                 );
+                                if let Some(control) = task_control_envelope(&task_id) {
+                                    missing = missing.with_control_envelope(control);
+                                }
                                 missing.status = TaskExecutionStatus::Failed;
                                 missing.execution_target = execution_target.clone();
                                 missing.status_message = error.clone();
@@ -4502,7 +4537,12 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                         "✗".color(Color::RED).bold(),
                         error.color(Color::RED)
                     );
-                    return task_status_to_exit_status(failed.status);
+                    return TaskSubmissionOutcome::accepted(
+                        failed.id,
+                        task_status_to_exit_status(failed.status),
+                        failed.status,
+                        runtime_mode,
+                    );
                 }
             }
         }
@@ -4525,6 +4565,9 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                     max_attempts,
                     now,
                 );
+                if let Some(control) = task_control_envelope(&task_id) {
+                    missing = missing.with_control_envelope(control);
+                }
                 missing.status = final_status;
                 missing.attempts = 1;
                 missing.execution_target = execution_target;
@@ -4556,7 +4599,54 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
         final_record.status_message.color(Color::WHITE)
     );
 
-    task_status_to_exit_status(final_record.status)
+    TaskSubmissionOutcome::accepted(
+        final_record.id,
+        task_status_to_exit_status(final_record.status),
+        final_record.status,
+        runtime_mode,
+    )
+}
+
+async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
+    use nettoolskit_ui::Color;
+
+    if parts.len() < 4 {
+        println!(
+            "{}",
+            "Usage: /task submit <intent> <payload>".color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    }
+
+    let Some(intent_kind) = parse_task_intent_kind(parts[2]) else {
+        println!(
+            "{} {}",
+            "✗ Unsupported task intent:".color(Color::RED).bold(),
+            parts[2].color(Color::YELLOW)
+        );
+        println!(
+            "{}",
+            "Supported intents: command, ai-ask, ai-plan, ai-explain, ai-apply-dry-run, repo-workflow"
+                .color(Color::YELLOW)
+        );
+        return ExitStatus::Error;
+    };
+
+    let payload = parts[3..].join(" ");
+    if payload.trim().is_empty() {
+        println!(
+            "{}",
+            "✗ Task payload cannot be empty.".color(Color::RED).bold()
+        );
+        return ExitStatus::Error;
+    }
+
+    let runtime_mode = AppConfig::load().general.runtime_mode;
+    let title = format!("{} task", task_intent_kind_label(intent_kind));
+    let intent = TaskIntent::new(intent_kind, title, payload);
+    submit_task_intent(intent, runtime_mode, None)
+        .await
+        .exit_status
 }
 
 fn handle_task_list() -> ExitStatus {
@@ -4606,6 +4696,22 @@ fn handle_task_watch(parts: &[&str]) -> ExitStatus {
     println!("  detail: {}", record.status_message.color(Color::WHITE));
     println!("  created_at_ms: {}", record.created_at_unix_ms);
     println!("  updated_at_ms: {}", record.updated_at_unix_ms);
+    if let Some(control) = &record.control_envelope {
+        println!("  request_id: {}", control.request_id.color(Color::WHITE));
+        if let Some(correlation_id) = &control.correlation_id {
+            println!("  correlation_id: {}", correlation_id.color(Color::WHITE));
+        }
+        println!("  operator_id: {}", control.operator.id.color(Color::WHITE));
+        println!(
+            "  operator_kind: {}",
+            control.operator.kind.to_string().color(Color::WHITE)
+        );
+        println!("  session_id: {}", control.session.id.color(Color::WHITE));
+        println!(
+            "  transport: {}",
+            control.operator.transport.to_string().color(Color::WHITE)
+        );
+    }
     let audits = list_task_audit_events(task_id);
     if !audits.is_empty() {
         println!("  audit_events: {}", audits.len());
@@ -4999,6 +5105,21 @@ async fn process_async_manifest_alias(
 /// Returns `ExitStatus` indicating the result of command execution
 pub async fn process_command(cmd: &str) -> ExitStatus {
     process_command_with_interrupt(cmd, None).await
+}
+
+/// Process an already-admitted control-plane envelope without reparsing a slash command string.
+pub async fn process_control_envelope(envelope: ControlEnvelope) -> TaskSubmissionOutcome {
+    let execution_span = info_span!(
+        "orchestrator.control_envelope",
+        request_id = %envelope.request_id,
+        correlation_id = envelope.correlation_id.as_deref().unwrap_or(""),
+        operator_id = %envelope.operator.id,
+        session_id = %envelope.session.id,
+        task_intent = %task_intent_kind_label(envelope.task.kind),
+    );
+    let _execution_scope = execution_span.enter();
+
+    submit_task_intent(envelope.task.clone(), envelope.runtime_mode, Some(envelope)).await
 }
 
 /// Process slash commands from CLI and return appropriate status, with optional interrupt flag.
@@ -6122,6 +6243,10 @@ pub async fn process_text(text: &str) -> ExitStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nettoolskit_core::{
+        ApprovalState, ControlEnvelope, ControlPolicyContext, IngressTransport, OperatorContext,
+        OperatorKind, SessionContext, SessionKind,
+    };
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::OnceLock;
@@ -7726,6 +7851,83 @@ mod tests {
                 | TaskExecutionStatus::Failed
                 | TaskExecutionStatus::Cancelled
         ));
+    }
+
+    #[tokio::test]
+    async fn process_control_envelope_persists_control_metadata_in_record_and_audit() {
+        let _guard = env_test_guard().await;
+        std::env::set_var("NTK_AI_PROVIDER", "mock");
+        clear_service_policy_env_vars();
+        reset_service_submission_budget_for_tests();
+        std::env::set_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV, "ai.plan");
+
+        let payload_marker = format!("control-envelope-test-{}", current_unix_timestamp_ms());
+        let envelope = ControlEnvelope::new(
+            "req-service-123",
+            RuntimeMode::Service,
+            OperatorContext::new(
+                OperatorKind::RemoteHuman,
+                "remote-dev",
+                IngressTransport::ServiceHttp,
+            )
+            .with_scopes(["task.submit"]),
+            SessionContext::new(SessionKind::ServiceRequest, "session-service-456", false),
+            TaskIntent::new(
+                TaskIntentKind::AiPlan,
+                "ai-plan task",
+                payload_marker.as_str(),
+            ),
+        )
+        .with_correlation_id("corr-service-789")
+        .with_policy(ControlPolicyContext::new(ApprovalState::NotRequired, true));
+
+        let outcome = process_control_envelope(envelope.clone()).await;
+
+        std::env::remove_var("NTK_AI_PROVIDER");
+        std::env::remove_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV);
+
+        assert_eq!(outcome.exit_status, ExitStatus::Success);
+        let record = with_task_registry(|registry| {
+            registry
+                .values()
+                .filter(|task| task.runtime_mode == RuntimeMode::Service)
+                .filter(|task| task.intent.payload.contains(payload_marker.as_str()))
+                .max_by_key(|task| task.updated_at_unix_ms)
+                .cloned()
+        })
+        .expect("service envelope task should exist in registry");
+
+        assert_eq!(record.control_envelope, Some(envelope.clone()));
+
+        let audits = list_task_audit_events(&record.id);
+        assert!(
+            !audits.is_empty(),
+            "task audit should contain at least one event"
+        );
+        assert!(
+            audits
+                .iter()
+                .any(|event| event.control.as_ref() == Some(&envelope)),
+            "at least one task audit event should carry the full control envelope"
+        );
+        let submitted = audits
+            .iter()
+            .find(|event| event.message.contains("Task submitted"))
+            .expect("submission audit event should exist");
+        assert_eq!(
+            submitted
+                .control
+                .as_ref()
+                .map(|control| control.request_id.as_str()),
+            Some("req-service-123")
+        );
+        assert_eq!(
+            submitted
+                .control
+                .as_ref()
+                .and_then(|control| control.correlation_id.as_deref()),
+            Some("corr-service-789")
+        );
     }
 
     #[tokio::test]

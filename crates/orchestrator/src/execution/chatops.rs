@@ -4,16 +4,22 @@
 //! command ingress, notification dispatch, local audit persistence, and
 //! deterministic command execution through the existing `/task` pipeline.
 
-use super::processor::process_command;
+use super::processor::{process_command, process_control_envelope};
 use crate::models::ExitStatus;
-use nettoolskit_core::AppConfig;
+use nettoolskit_core::{
+    AppConfig, ApprovalState, ControlEnvelope, ControlPolicyContext, IngressTransport,
+    OperatorContext, OperatorKind, RuntimeMode, SessionContext, SessionKind, TaskIntent,
+    TaskIntentKind,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Supported ChatOps platforms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,10 +53,19 @@ impl Display for ChatOpsPlatform {
 pub struct ChatOpsCommandEnvelope {
     /// Source platform.
     pub platform: ChatOpsPlatform,
+    /// Stable request identifier for one inbound chat message.
+    #[serde(default)]
+    pub request_id: String,
+    /// Optional end-to-end correlation identifier.
+    #[serde(default)]
+    pub correlation_id: Option<String>,
     /// Remote channel identifier.
     pub channel_id: String,
     /// Remote user identifier.
     pub user_id: String,
+    /// Transport used by the source adapter.
+    #[serde(default)]
+    pub transport: IngressTransport,
     /// Raw command text from chat message.
     pub message_text: String,
     /// UTC unix timestamp in milliseconds.
@@ -69,11 +84,71 @@ impl ChatOpsCommandEnvelope {
     ) -> Self {
         Self {
             platform,
+            request_id: next_chatops_request_id(platform),
+            correlation_id: None,
             channel_id: channel_id.into(),
             user_id: user_id.into(),
+            transport: default_chatops_transport(platform),
             message_text: message_text.into(),
             received_at_unix_ms,
         }
+    }
+
+    /// Override the ingress transport attached to the envelope.
+    #[must_use]
+    pub fn with_transport(mut self, transport: IngressTransport) -> Self {
+        self.transport = transport;
+        self
+    }
+
+    /// Override the stable request identifier attached to the envelope.
+    #[must_use]
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        let request_id = request_id.into();
+        let request_id = request_id.trim();
+        if !request_id.is_empty() {
+            self.request_id = request_id.to_string();
+        }
+        self
+    }
+
+    /// Attach an end-to-end correlation identifier.
+    #[must_use]
+    pub fn with_correlation_id(mut self, correlation_id: impl Into<String>) -> Self {
+        let correlation_id = correlation_id.into();
+        let correlation_id = correlation_id.trim();
+        self.correlation_id = if correlation_id.is_empty() {
+            None
+        } else {
+            Some(correlation_id.to_string())
+        };
+        self
+    }
+
+    fn resolved_request_id(&self) -> String {
+        let request_id = self.request_id.trim();
+        if request_id.is_empty() {
+            next_chatops_request_id(self.platform)
+        } else {
+            request_id.to_string()
+        }
+    }
+
+    fn resolved_transport(&self) -> IngressTransport {
+        if self.transport == IngressTransport::Cli {
+            default_chatops_transport(self.platform)
+        } else {
+            self.transport
+        }
+    }
+
+    fn derived_session_id(&self) -> String {
+        format!(
+            "chatops-{}-{}-{}",
+            self.platform.as_str(),
+            self.user_id.trim(),
+            self.channel_id.trim()
+        )
     }
 }
 
@@ -572,12 +647,38 @@ pub struct ChatOpsAuditEntry {
     pub message_text: String,
     /// Normalized internal command, when available.
     pub internal_command: Option<String>,
+    /// Stable request identifier attributed to the chat ingress event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// Optional end-to-end correlation identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    /// Normalized operator identifier when a typed control envelope exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_id: Option<String>,
+    /// Normalized session identifier when a typed control envelope exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Ingress transport used by the message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<IngressTransport>,
+    /// Stable task identifier when task admission succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     /// Exit status label for executed commands.
     pub exit_status: Option<String>,
     /// Human-readable note.
     pub note: String,
     /// UTC unix timestamp in milliseconds.
     pub timestamp_unix_ms: u64,
+}
+
+struct ChatOpsAuditContext<'a> {
+    internal_command: Option<&'a str>,
+    control_envelope: Option<&'a ControlEnvelope>,
+    task_id: Option<&'a str>,
+    exit_status: Option<&'a str>,
+    note: &'a str,
 }
 
 /// Local JSONL persistence for ChatOps audit events.
@@ -699,9 +800,13 @@ pub async fn execute_chatops_envelope(
         audit_store,
         envelope,
         ChatOpsAuditKind::CommandReceived,
-        None,
-        None,
-        "envelope received",
+        ChatOpsAuditContext {
+            internal_command: None,
+            control_envelope: None,
+            task_id: None,
+            exit_status: None,
+            note: "envelope received",
+        },
     );
 
     if let Err(error) = policy.authorize(envelope) {
@@ -709,9 +814,13 @@ pub async fn execute_chatops_envelope(
             audit_store,
             envelope,
             ChatOpsAuditKind::CommandRejected,
-            None,
-            Some("error"),
-            &error.to_string(),
+            ChatOpsAuditContext {
+                internal_command: None,
+                control_envelope: None,
+                task_id: None,
+                exit_status: Some("error"),
+                note: &error.to_string(),
+            },
         );
 
         let notification = ChatOpsNotification {
@@ -727,9 +836,13 @@ pub async fn execute_chatops_envelope(
             audit_store,
             envelope,
             ChatOpsAuditKind::NotificationSent,
-            None,
-            Some("error"),
-            "denial notification sent",
+            ChatOpsAuditContext {
+                internal_command: None,
+                control_envelope: None,
+                task_id: None,
+                exit_status: Some("error"),
+                note: "denial notification sent",
+            },
         );
         return Err(ChatOpsExecutionError::Unauthorized(error.to_string()));
     }
@@ -741,9 +854,13 @@ pub async fn execute_chatops_envelope(
             audit_store,
             envelope,
             ChatOpsAuditKind::CommandRejected,
-            None,
-            Some("error"),
-            &error.to_string(),
+            ChatOpsAuditContext {
+                internal_command: None,
+                control_envelope: None,
+                task_id: None,
+                exit_status: Some("error"),
+                note: &error.to_string(),
+            },
         );
 
         let notification = ChatOpsNotification {
@@ -759,9 +876,13 @@ pub async fn execute_chatops_envelope(
             audit_store,
             envelope,
             ChatOpsAuditKind::NotificationSent,
-            None,
-            Some("error"),
-            "intent denial notification sent",
+            ChatOpsAuditContext {
+                internal_command: None,
+                control_envelope: None,
+                task_id: None,
+                exit_status: Some("error"),
+                note: "intent denial notification sent",
+            },
         );
         return Err(ChatOpsExecutionError::Unauthorized(error.to_string()));
     }
@@ -780,9 +901,13 @@ pub async fn execute_chatops_envelope(
             audit_store,
             envelope,
             ChatOpsAuditKind::NotificationSent,
-            None,
-            Some("success"),
-            "help notification sent",
+            ChatOpsAuditContext {
+                internal_command: None,
+                control_envelope: None,
+                task_id: None,
+                exit_status: Some("success"),
+                note: "help notification sent",
+            },
         );
         return Ok(ExitStatus::Success);
     }
@@ -790,15 +915,41 @@ pub async fn execute_chatops_envelope(
     let internal_command = intent
         .to_internal_command()
         .expect("non-help intent should always map to command");
-    let status = process_command(&internal_command).await;
+    let (status, control_envelope, task_id, execution_note) =
+        match build_chatops_control_envelope(envelope, &intent, audit_store)? {
+            Some(control_envelope) => {
+                let submission = process_control_envelope(control_envelope.clone()).await;
+                let note = if submission.task_id.is_some() {
+                    "command executed through typed ChatOps control plane"
+                } else {
+                    "typed ChatOps control plane rejected task admission"
+                };
+                (
+                    submission.exit_status,
+                    Some(control_envelope),
+                    submission.task_id,
+                    note,
+                )
+            }
+            None => (
+                process_command(&internal_command).await,
+                None,
+                None,
+                "command executed through task pipeline",
+            ),
+        };
 
     append_audit(
         audit_store,
         envelope,
         ChatOpsAuditKind::CommandExecuted,
-        Some(&internal_command),
-        Some(status.to_string().as_str()),
-        "command executed through task pipeline",
+        ChatOpsAuditContext {
+            internal_command: Some(&internal_command),
+            control_envelope: control_envelope.as_ref(),
+            task_id: task_id.as_deref(),
+            exit_status: Some(status.to_string().as_str()),
+            note: execution_note,
+        },
     );
 
     let severity = match status {
@@ -809,10 +960,7 @@ pub async fn execute_chatops_envelope(
     let notification = ChatOpsNotification {
         platform: envelope.platform,
         channel_id: envelope.channel_id.clone(),
-        message_text: format!(
-            "Command `{}` completed with status `{}`.",
-            internal_command, status
-        ),
+        message_text: build_chatops_status_message(&internal_command, status, task_id.as_deref()),
         severity,
     };
     notifier
@@ -823,9 +971,13 @@ pub async fn execute_chatops_envelope(
         audit_store,
         envelope,
         ChatOpsAuditKind::NotificationSent,
-        Some(&internal_command),
-        Some(status.to_string().as_str()),
-        "result notification sent",
+        ChatOpsAuditContext {
+            internal_command: Some(&internal_command),
+            control_envelope: control_envelope.as_ref(),
+            task_id: task_id.as_deref(),
+            exit_status: Some(status.to_string().as_str()),
+            note: "result notification sent",
+        },
     );
 
     Ok(status)
@@ -851,9 +1003,7 @@ fn append_audit(
     store: Option<&ChatOpsLocalAuditStore>,
     envelope: &ChatOpsCommandEnvelope,
     kind: ChatOpsAuditKind,
-    internal_command: Option<&str>,
-    exit_status: Option<&str>,
-    note: &str,
+    context: ChatOpsAuditContext<'_>,
 ) {
     let Some(store) = store else {
         return;
@@ -864,17 +1014,164 @@ fn append_audit(
         channel_id: envelope.channel_id.clone(),
         user_id: envelope.user_id.clone(),
         message_text: envelope.message_text.clone(),
-        internal_command: internal_command.map(ToOwned::to_owned),
-        exit_status: exit_status.map(ToOwned::to_owned),
-        note: note.to_string(),
+        internal_command: context.internal_command.map(ToOwned::to_owned),
+        request_id: Some(envelope.resolved_request_id()),
+        correlation_id: context
+            .control_envelope
+            .and_then(|control| control.correlation_id.clone())
+            .or_else(|| envelope.correlation_id.clone()),
+        operator_id: context
+            .control_envelope
+            .map(|control| control.operator.id.clone()),
+        session_id: context
+            .control_envelope
+            .map(|control| control.session.id.clone()),
+        transport: Some(
+            context
+                .control_envelope
+                .map(|control| control.operator.transport)
+                .unwrap_or_else(|| envelope.resolved_transport()),
+        ),
+        task_id: context.task_id.map(ToOwned::to_owned),
+        exit_status: context.exit_status.map(ToOwned::to_owned),
+        note: context.note.to_string(),
         timestamp_unix_ms: envelope.received_at_unix_ms,
     };
     let _ = store.append(&entry);
 }
 
+fn build_chatops_status_message(
+    internal_command: &str,
+    status: ExitStatus,
+    task_id: Option<&str>,
+) -> String {
+    match task_id {
+        Some(task_id) => format!(
+            "Command `{internal_command}` completed with status `{status}` as task `{task_id}`."
+        ),
+        None => format!("Command `{internal_command}` completed with status `{status}`."),
+    }
+}
+
+fn build_chatops_control_envelope(
+    envelope: &ChatOpsCommandEnvelope,
+    intent: &ChatOpsIntent,
+    audit_store: Option<&ChatOpsLocalAuditStore>,
+) -> Result<Option<ControlEnvelope>, ChatOpsExecutionError> {
+    let ChatOpsIntent::TaskSubmit {
+        intent: task_intent,
+        payload,
+    } = intent
+    else {
+        return Ok(None);
+    };
+
+    let Some(task_kind) = TaskIntentKind::from_alias(task_intent) else {
+        return Err(ChatOpsExecutionError::Parse(format!(
+            "unsupported ChatOps task intent: {task_intent}"
+        )));
+    };
+
+    let mut scopes = vec!["task.submit".to_string()];
+    scopes.extend(intent.authorization_scopes());
+    scopes.push(format!("platform:{}", envelope.platform.as_str()));
+
+    let operator = OperatorContext::new(
+        OperatorKind::RemoteHuman,
+        format!("{}:{}", envelope.platform.as_str(), envelope.user_id.trim()),
+        envelope.resolved_transport(),
+    )
+    .with_channel_id(envelope.channel_id.clone())
+    .with_authentication(format!("chatops_{}", envelope.platform.as_str()))
+    .with_scopes(scopes);
+    let session = SessionContext::new(SessionKind::ChatOps, envelope.derived_session_id(), true);
+    let task = TaskIntent::new(
+        task_kind,
+        format!("{} task", task_kind.as_str()),
+        payload.trim(),
+    );
+    let mut control = ControlEnvelope::new(
+        envelope.resolved_request_id(),
+        RuntimeMode::Service,
+        operator,
+        session,
+        task,
+    )
+    .with_policy(build_chatops_control_policy(audit_store));
+    if let Some(correlation_id) = envelope.correlation_id.clone() {
+        control = control.with_correlation_id(correlation_id);
+    }
+
+    Ok(Some(control))
+}
+
+fn build_chatops_control_policy(
+    audit_store: Option<&ChatOpsLocalAuditStore>,
+) -> ControlPolicyContext {
+    let mut policy = ControlPolicyContext::new(ApprovalState::NotRequired, true);
+    if let Some(audit_store) = audit_store {
+        policy = policy.with_local_audit(audit_store.path().display().to_string());
+    }
+    policy
+}
+
+fn default_chatops_transport(platform: ChatOpsPlatform) -> IngressTransport {
+    match platform {
+        ChatOpsPlatform::Telegram => IngressTransport::TelegramPolling,
+        ChatOpsPlatform::Discord => IngressTransport::DiscordPolling,
+    }
+}
+
+fn next_chatops_request_id(platform: ChatOpsPlatform) -> String {
+    static CHATOPS_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+    let sequence = CHATOPS_REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "chatops-{}-{}-{sequence:08x}",
+        platform.as_str(),
+        current_unix_timestamp_ms()
+    )
+}
+
+fn current_unix_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    struct EnvVarGuard {
+        saved: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvVarGuard {
+        fn set(vars: &[(&str, Option<&str>)]) -> Self {
+            let mut saved = Vec::with_capacity(vars.len());
+            for (key, value) in vars {
+                saved.push(((*key).to_string(), std::env::var(key).ok()));
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.saved.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(&key, value),
+                    None => std::env::remove_var(&key),
+                }
+            }
+        }
+    }
 
     #[test]
     fn parse_chatops_intent_supports_submit_and_list_aliases() {
@@ -944,6 +1241,12 @@ mod tests {
                 user_id: "user".to_string(),
                 message_text: format!("list-{index}"),
                 internal_command: None,
+                request_id: None,
+                correlation_id: None,
+                operator_id: None,
+                session_id: None,
+                transport: None,
+                task_id: None,
                 exit_status: None,
                 note: "received".to_string(),
                 timestamp_unix_ms: index,
@@ -1039,6 +1342,103 @@ mod tests {
             notifications[0].severity,
             ChatOpsNotificationSeverity::Error
         );
+    }
+
+    #[test]
+    fn build_chatops_control_envelope_normalizes_remote_operator_and_session() {
+        let envelope = ChatOpsCommandEnvelope::new(
+            ChatOpsPlatform::Discord,
+            "channel-42",
+            "user-99",
+            "submit ai-plan review rollout",
+            91,
+        )
+        .with_transport(IngressTransport::DiscordInteractions)
+        .with_request_id("discord-req-001")
+        .with_correlation_id("corr-42");
+        let intent = ChatOpsIntent::TaskSubmit {
+            intent: "ai-plan".to_string(),
+            payload: "review rollout".to_string(),
+        };
+
+        let control = build_chatops_control_envelope(&envelope, &intent, None)
+            .expect("control envelope should build")
+            .expect("submit intent should produce typed envelope");
+
+        assert_eq!(control.request_id, "discord-req-001");
+        assert_eq!(control.correlation_id.as_deref(), Some("corr-42"));
+        assert_eq!(control.operator.id, "discord:user-99");
+        assert_eq!(control.operator.channel_id.as_deref(), Some("channel-42"));
+        assert_eq!(
+            control.operator.transport,
+            IngressTransport::DiscordInteractions
+        );
+        assert_eq!(control.session.id, "chatops-discord-user-99-channel-42");
+        assert_eq!(control.task.kind, TaskIntentKind::AiPlan);
+        assert_eq!(control.task.title, "ai-plan task");
+        assert!(control
+            .operator
+            .scopes
+            .iter()
+            .any(|scope| scope == "task.submit"));
+        assert!(control
+            .operator
+            .scopes
+            .iter()
+            .any(|scope| scope == "submit:ai-plan"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn execute_chatops_envelope_submit_records_control_plane_metadata() {
+        let _env_guard = EnvVarGuard::set(&[
+            ("NTK_TOOL_SCOPE_ALLOWED_TOOLS", Some("ai.plan")),
+            ("NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS", Some("ai.plan")),
+        ]);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let audit_store = ChatOpsLocalAuditStore::from_path(dir.path().join("chatops-audit.jsonl"));
+        let policy = ChatOpsAuthorizationPolicy::new_with_scopes(
+            vec!["user-1".to_string()],
+            vec!["channel-1".to_string()],
+            vec!["submit:ai-plan".to_string()],
+        );
+        let notifier = RecordingChatOpsNotifier::new();
+        let envelope = ChatOpsCommandEnvelope::new(
+            ChatOpsPlatform::Telegram,
+            "channel-1",
+            "user-1",
+            "submit ai-plan harden chatops ingress",
+            123,
+        )
+        .with_request_id("telegram-req-001")
+        .with_correlation_id("corr-chatops-001");
+
+        let status = execute_chatops_envelope(&envelope, &policy, &notifier, Some(&audit_store))
+            .await
+            .expect("authorized submit should execute");
+        assert_eq!(status, ExitStatus::Success);
+
+        let entries = audit_store
+            .load_latest(16)
+            .expect("audit entries should be readable");
+        let executed = entries
+            .iter()
+            .find(|entry| entry.kind == ChatOpsAuditKind::CommandExecuted)
+            .expect("executed entry should exist");
+        assert_eq!(executed.request_id.as_deref(), Some("telegram-req-001"));
+        assert_eq!(executed.correlation_id.as_deref(), Some("corr-chatops-001"));
+        assert_eq!(executed.operator_id.as_deref(), Some("telegram:user-1"));
+        assert_eq!(
+            executed.session_id.as_deref(),
+            Some("chatops-telegram-user-1-channel-1")
+        );
+        assert_eq!(executed.transport, Some(IngressTransport::TelegramPolling));
+        assert!(executed.task_id.as_deref().is_some());
+        assert!(executed.note.contains("typed ChatOps control plane"));
+
+        let notifications = notifier.snapshot();
+        assert_eq!(notifications.len(), 1);
+        assert!(notifications[0].message_text.contains("task `task-"));
     }
 
     #[tokio::test]
