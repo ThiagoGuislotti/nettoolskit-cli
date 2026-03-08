@@ -138,6 +138,16 @@ Release pipeline gates also validate lifecycle table semantics before publishing
 
 ---
 
+### Governance and Security
+
+- [License](LICENSE)
+- [Security Policy](SECURITY.md)
+- [Code Ownership](.github/CODEOWNERS)
+
+Security reports should use the private disclosure path documented in `SECURITY.md`.
+
+---
+
 ## Build and Tests
 
 This repository uses standard Cargo workflows for building, testing, formatting, linting, and documentation generation.

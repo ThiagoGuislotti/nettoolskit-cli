@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Run NetToolsKit in background service mode using Docker for local or VPS-style operation, with health checks and local-first persistence.
+Run NetToolsKit in background service mode using Docker for local or VPS-style operation, with health checks, readiness checks, and local-first persistence.
 
 ## Prerequisites
 
@@ -40,6 +40,11 @@ Expected JSON fields:
 - `uptime_seconds`
 - `version`
 
+Readiness semantics:
+
+- `GET /health` is liveness-only.
+- `GET /ready` validates local persistence, replay backend readiness, task admission, ChatOps audit path, and ChatOps bootstrap state.
+
 Core endpoints:
 
 - `GET /health`
@@ -53,6 +58,7 @@ Core endpoints:
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/task/submit \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer local-service-token" \
   -d '{"intent":"ai-plan","payload":"create roadmap for service hardening"}'
 ```
 
@@ -126,12 +132,17 @@ docker compose -f deployments/docker-compose.local.yml down
 - Healthcheck failing:
   - Verify container is running and check logs.
   - Run `curl http://127.0.0.1:8080/health` from host.
+- Readiness failing:
+  - Run `curl http://127.0.0.1:8080/ready` and inspect the failing dependency check.
 - Task submit returns 400:
   - Ensure JSON payload contains both `intent` and `payload`.
+- Task submit returns 401:
+  - Ensure `NTK_SERVICE_AUTH_TOKEN` is configured and the HTTP request includes `Authorization: Bearer <token>`.
 
 ## Security Notes
 
 - Keep service behind firewall/VPN in VPS environments.
+- Service binds to loopback by default; non-loopback bind now requires `NTK_SERVICE_AUTH_TOKEN`.
 - Do not expose service directly to the public internet without authentication/reverse proxy.
 - For mutating AI flows, keep explicit approval and dry-run safeguards enabled.
 - For internet-exposed ChatOps ingress, use one of the reverse-proxy reference profiles and keep ingress security envs enabled.

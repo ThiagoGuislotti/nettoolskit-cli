@@ -47,6 +47,7 @@ This profile defines the first operational baseline for running a ChatOps-driven
 ## Suggested Environment Contract
 
 - `NTK_RUNTIME_MODE=service`
+- `NTK_SERVICE_AUTH_TOKEN=<secret>`
 - `NTK_CHATOPS_ENABLED=true`
 - `NTK_CHATOPS_ALLOWED_USERS=<id1,id2,...>`
 - `NTK_CHATOPS_ALLOWED_CHANNELS=<id1,id2,...>`
@@ -84,6 +85,12 @@ This profile defines the first operational baseline for running a ChatOps-driven
 - `NTK_REPO_WORKFLOW_ALLOW_PUSH=false`
 - `NTK_REPO_WORKFLOW_ALLOW_PR=false`
 - `NTK_REPO_WORKFLOW_BASE_DIR=/var/lib/ntk/repo-workflow`
+
+Service exposure baseline:
+
+- keep the service listener on `127.0.0.1` whenever possible
+- if binding to a non-loopback/private interface, configure `NTK_SERVICE_AUTH_TOKEN`
+- keep `GET /health` and `GET /ready` private behind the reverse proxy where practical
 
 ## Command Surface for Remote Operators
 

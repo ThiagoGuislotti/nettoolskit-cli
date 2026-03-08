@@ -22,6 +22,7 @@ const NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN_ENV: &str =
     "NTK_CHATOPS_TELEGRAM_WEBHOOK_SECRET_TOKEN";
 const NTK_CHATOPS_DISCORD_INTERACTIONS_PUBLIC_KEY_ENV: &str =
     "NTK_CHATOPS_DISCORD_INTERACTIONS_PUBLIC_KEY";
+const NTK_SERVICE_AUTH_TOKEN_ENV: &str = "NTK_SERVICE_AUTH_TOKEN";
 const NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS_ENV: &str =
     "NTK_CHATOPS_INGRESS_REPLAY_WINDOW_SECONDS";
 const NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES_ENV: &str = "NTK_CHATOPS_INGRESS_REPLAY_MAX_ENTRIES";
@@ -68,7 +69,7 @@ pub enum Commands {
     /// Run background service mode with HTTP health and task submission endpoints
     Service {
         /// Bind host for the service listener
-        #[clap(long, default_value = "0.0.0.0")]
+        #[clap(long, default_value = "127.0.0.1")]
         host: String,
 
         /// Bind port for the service listener
@@ -117,12 +118,37 @@ struct ServiceHealthResponse {
     version: String,
 }
 
+#[derive(Debug, Serialize)]
+struct ServiceReadinessCheck {
+    name: String,
+    ready: bool,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceReadinessResponse {
+    status: String,
+    runtime_mode: String,
+    uptime_seconds: u64,
+    version: String,
+    checks: Vec<ServiceReadinessCheck>,
+}
+
 #[derive(Clone)]
 struct ServiceRuntimeState {
     started_at: std::time::Instant,
-    chatops_runtime: Option<Arc<nettoolskit_orchestrator::ChatOpsRuntime>>,
+    chatops_runtime: InitializedChatOpsRuntime,
     ingress_security: Arc<ServiceIngressSecurityConfig>,
     replay_guard: Arc<IngressReplayGuard>,
+    service_auth_token: Option<String>,
+    data_dir: Option<std::path::PathBuf>,
+}
+
+#[derive(Clone)]
+struct InitializedChatOpsRuntime {
+    runtime: Option<Arc<nettoolskit_orchestrator::ChatOpsRuntime>>,
+    config: nettoolskit_orchestrator::ChatOpsRuntimeConfig,
+    startup_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -679,6 +705,231 @@ fn build_http_response(status: &str, content_type: &str, body: &str) -> String {
     )
 }
 
+fn service_auth_token_from_env() -> Option<String> {
+    std::env::var(NTK_SERVICE_AUTH_TOKEN_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn request_bearer_token(headers: &HashMap<String, String>) -> Option<&str> {
+    let authorization = request_header(headers, "authorization")?;
+    let (scheme, token) = authorization.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
+}
+
+fn is_loopback_bind_host(host: &str) -> bool {
+    matches!(
+        host.trim().to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "::1" | "[::1]" | "0:0:0:0:0:0:0:1"
+    )
+}
+
+fn validate_service_bind_security(
+    host: &str,
+    service_auth_token: Option<&str>,
+) -> Result<(), String> {
+    if is_loopback_bind_host(host) || service_auth_token.is_some() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "non-loopback service bind `{host}` requires {NTK_SERVICE_AUTH_TOKEN_ENV} to be configured"
+    ))
+}
+
+fn service_runtime_mode_label() -> &'static str {
+    "service"
+}
+
+fn build_service_health_response(state: &ServiceRuntimeState) -> ServiceHealthResponse {
+    ServiceHealthResponse {
+        status: "ok".to_string(),
+        runtime_mode: service_runtime_mode_label().to_string(),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+fn readiness_check(name: &str, ready: bool, detail: impl Into<String>) -> ServiceReadinessCheck {
+    ServiceReadinessCheck {
+        name: name.to_string(),
+        ready,
+        detail: detail.into(),
+    }
+}
+
+fn task_admission_readiness_check() -> ServiceReadinessCheck {
+    readiness_check(
+        "task_admission",
+        true,
+        "service task admission pipeline is available",
+    )
+}
+
+fn ensure_directory_ready(path: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|error| format!("create directory `{}`: {error}", path.display()))?;
+    if path.is_dir() {
+        Ok(())
+    } else {
+        Err(format!("path `{}` is not a directory", path.display()))
+    }
+}
+
+fn ensure_appendable_file_ready(path: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        ensure_directory_ready(parent)?;
+    }
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("open file `{}` for append: {error}", path.display()))?;
+    std::io::Write::flush(&mut file)
+        .map_err(|error| format!("flush file `{}`: {error}", path.display()))
+}
+
+fn local_persistence_readiness_check(
+    data_dir: Option<&std::path::PathBuf>,
+) -> ServiceReadinessCheck {
+    let Some(path) = data_dir else {
+        return readiness_check(
+            "local_persistence",
+            false,
+            "default local data directory is unavailable",
+        );
+    };
+
+    match ensure_directory_ready(path) {
+        Ok(()) => readiness_check(
+            "local_persistence",
+            true,
+            format!("data directory ready at {}", path.display()),
+        ),
+        Err(error) => readiness_check("local_persistence", false, error),
+    }
+}
+
+fn replay_backend_readiness_check(config: &IngressReplayBackendConfig) -> ServiceReadinessCheck {
+    match config {
+        IngressReplayBackendConfig::Memory => {
+            readiness_check("replay_backend", true, "memory replay backend is ready")
+        }
+        IngressReplayBackendConfig::File { path } => {
+            let lock_path = replay_lock_path(path);
+            match ensure_appendable_file_ready(path)
+                .and_then(|()| ensure_appendable_file_ready(&lock_path))
+            {
+                Ok(()) => readiness_check(
+                    "replay_backend",
+                    true,
+                    format!("file replay backend ready at {}", path.display()),
+                ),
+                Err(error) => readiness_check("replay_backend", false, error),
+            }
+        }
+    }
+}
+
+fn chatops_audit_store_readiness_check(
+    chatops_runtime: &InitializedChatOpsRuntime,
+    data_dir: Option<&std::path::PathBuf>,
+) -> ServiceReadinessCheck {
+    if !chatops_runtime.config.enabled {
+        return readiness_check("chatops_audit_store", true, "chatops runtime is disabled");
+    }
+
+    let audit_path = chatops_runtime.config.audit_path.clone().or_else(|| {
+        data_dir.map(|base| {
+            base.join(nettoolskit_orchestrator::ChatOpsLocalAuditStore::DEFAULT_RELATIVE_PATH)
+        })
+    });
+
+    let Some(path) = audit_path else {
+        return readiness_check(
+            "chatops_audit_store",
+            false,
+            "chatops audit path could not be resolved",
+        );
+    };
+
+    match ensure_appendable_file_ready(&path) {
+        Ok(()) => readiness_check(
+            "chatops_audit_store",
+            true,
+            format!("chatops audit store ready at {}", path.display()),
+        ),
+        Err(error) => readiness_check("chatops_audit_store", false, error),
+    }
+}
+
+fn chatops_runtime_readiness_check(
+    chatops_runtime: &InitializedChatOpsRuntime,
+) -> ServiceReadinessCheck {
+    if !chatops_runtime.config.enabled {
+        return readiness_check("chatops_runtime", true, "chatops runtime is disabled");
+    }
+
+    if let Some(error) = &chatops_runtime.startup_error {
+        return readiness_check("chatops_runtime", false, error.clone());
+    }
+
+    match &chatops_runtime.runtime {
+        Some(runtime) => {
+            let platforms = runtime
+                .enabled_platforms()
+                .into_iter()
+                .map(|platform| platform.to_string())
+                .collect::<Vec<_>>();
+            let detail = if platforms.is_empty() {
+                "chatops runtime started with no active adapters".to_string()
+            } else {
+                format!("chatops runtime ready for {}", platforms.join(", "))
+            };
+            readiness_check("chatops_runtime", true, detail)
+        }
+        None => readiness_check(
+            "chatops_runtime",
+            false,
+            "chatops runtime is enabled but not initialized",
+        ),
+    }
+}
+
+fn build_service_readiness_response(state: &ServiceRuntimeState) -> ServiceReadinessResponse {
+    let checks = vec![
+        task_admission_readiness_check(),
+        local_persistence_readiness_check(state.data_dir.as_ref()),
+        replay_backend_readiness_check(&state.ingress_security.replay_backend),
+        chatops_audit_store_readiness_check(&state.chatops_runtime, state.data_dir.as_ref()),
+        chatops_runtime_readiness_check(&state.chatops_runtime),
+    ];
+    let status = if checks.iter().all(|check| check.ready) {
+        "ready"
+    } else {
+        "degraded"
+    };
+
+    ServiceReadinessResponse {
+        status: status.to_string(),
+        runtime_mode: service_runtime_mode_label().to_string(),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        checks,
+    }
+}
+
 fn exit_status_label(status: ExitStatus) -> &'static str {
     match status {
         ExitStatus::Success => "success",
@@ -732,20 +983,37 @@ async fn handle_service_connection(
             write_plain_response(
                 &mut stream,
                 "200 OK",
-                "NetToolsKit service mode is running.\nUse GET /health.",
+                "NetToolsKit service mode is running.\nUse GET /health or GET /ready.",
             )
             .await?;
         }
-        ("GET", "/health") | ("GET", "/ready") => {
-            let payload = ServiceHealthResponse {
-                status: "ok".to_string(),
-                runtime_mode: AppConfig::load().general.runtime_mode.to_string(),
-                uptime_seconds: state.started_at.elapsed().as_secs(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            };
+        ("GET", "/health") => {
+            let payload = build_service_health_response(state.as_ref());
             write_json_response(&mut stream, "200 OK", &payload).await?;
         }
+        ("GET", "/ready") => {
+            let payload = build_service_readiness_response(state.as_ref());
+            let status_line = if payload.status == "ready" {
+                "200 OK"
+            } else {
+                "503 Service Unavailable"
+            };
+            write_json_response(&mut stream, status_line, &payload).await?;
+        }
         ("POST", "/task/submit") => {
+            if let Some(expected_token) = state.service_auth_token.as_deref() {
+                let provided_token = request_bearer_token(&headers);
+                if provided_token != Some(expected_token) {
+                    write_plain_response(
+                        &mut stream,
+                        "401 Unauthorized",
+                        "missing or invalid bearer token for /task/submit",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+
             let body = request_body(&request);
             let parsed: Result<ServiceTaskSubmitRequest, _> = serde_json::from_str(body);
             let Ok(payload) = parsed else {
@@ -786,7 +1054,7 @@ async fn handle_service_connection(
             write_json_response(&mut stream, status_line, &response_payload).await?;
         }
         ("POST", "/chatops/telegram/webhook") => {
-            let Some(runtime) = state.chatops_runtime.as_ref() else {
+            let Some(runtime) = state.chatops_runtime.runtime.as_ref() else {
                 write_plain_response(
                     &mut stream,
                     "404 Not Found",
@@ -853,7 +1121,7 @@ async fn handle_service_connection(
             }
         }
         ("POST", "/chatops/discord/interactions") => {
-            let Some(runtime) = state.chatops_runtime.as_ref() else {
+            let Some(runtime) = state.chatops_runtime.runtime.as_ref() else {
                 write_plain_response(
                     &mut stream,
                     "404 Not Found",
@@ -942,6 +1210,12 @@ async fn handle_service_connection(
 }
 
 async fn run_service_mode(host: String, port: u16) -> ExitStatus {
+    let service_auth_token = service_auth_token_from_env();
+    if let Err(error) = validate_service_bind_security(&host, service_auth_token.as_deref()) {
+        eprintln!("Refusing to start service mode: {error}");
+        return ExitStatus::Error;
+    }
+
     let bind_addr = format!("{host}:{port}");
     let listener = match TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,
@@ -953,8 +1227,13 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
 
     println!("NetToolsKit service mode listening on http://{bind_addr}");
     println!("Health endpoint: GET /health");
-    println!("Task submit endpoint: POST /task/submit");
     println!("Readiness endpoint: GET /ready");
+    println!("Task submit endpoint: POST /task/submit");
+    if service_auth_token.is_some() {
+        println!("Task submit auth: bearer token enabled");
+    } else {
+        println!("Task submit auth: disabled (loopback-only bind)");
+    }
 
     let ingress_security = match ServiceIngressSecurityConfig::from_env() {
         Ok(config) => Arc::new(config),
@@ -975,13 +1254,15 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
     );
 
     let chatops_runtime = initialize_chatops_runtime();
-    if let Some(runtime) = &chatops_runtime {
+    if let Some(runtime) = &chatops_runtime.runtime {
         if runtime.is_telegram_webhook_enabled() {
             println!("Telegram webhook endpoint: POST /chatops/telegram/webhook");
         }
         if runtime.is_discord_interactions_enabled() {
             println!("Discord interactions endpoint: POST /chatops/discord/interactions");
         }
+    } else if let Some(error) = &chatops_runtime.startup_error {
+        eprintln!("Warning: ChatOps runtime is enabled but could not start: {error}");
     }
     let service_state = Arc::new(ServiceRuntimeState {
         started_at: std::time::Instant::now(),
@@ -991,6 +1272,8 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
             ingress_security.replay_max_entries,
             ingress_security.replay_backend.clone(),
         )),
+        service_auth_token,
+        data_dir: AppConfig::default_data_dir(),
         ingress_security,
     });
 
@@ -1011,8 +1294,10 @@ async fn run_service_mode(host: String, port: u16) -> ExitStatus {
     }
 }
 
-fn initialize_chatops_runtime() -> Option<Arc<nettoolskit_orchestrator::ChatOpsRuntime>> {
-    match nettoolskit_orchestrator::build_chatops_runtime_from_env() {
+fn initialize_chatops_runtime() -> InitializedChatOpsRuntime {
+    let config = nettoolskit_orchestrator::ChatOpsRuntimeConfig::from_env();
+
+    match nettoolskit_orchestrator::build_chatops_runtime(config.clone()) {
         Ok(Some(runtime)) => {
             let runtime = Arc::new(runtime);
             let poll_interval = runtime.poll_interval();
@@ -1028,13 +1313,22 @@ fn initialize_chatops_runtime() -> Option<Arc<nettoolskit_orchestrator::ChatOpsR
                 poll_interval.as_millis()
             );
             spawn_chatops_runtime_loop(runtime.clone());
-            Some(runtime)
+            InitializedChatOpsRuntime {
+                runtime: Some(runtime),
+                config,
+                startup_error: None,
+            }
         }
-        Ok(None) => None,
-        Err(error) => {
-            eprintln!("Warning: ChatOps runtime is enabled but could not start: {error}");
-            None
-        }
+        Ok(None) => InitializedChatOpsRuntime {
+            runtime: None,
+            config,
+            startup_error: None,
+        },
+        Err(error) => InitializedChatOpsRuntime {
+            runtime: None,
+            config,
+            startup_error: Some(error.to_string()),
+        },
     }
 }
 
@@ -1189,6 +1483,8 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use nettoolskit_orchestrator::{build_chatops_runtime, ChatOpsRuntime, ChatOpsRuntimeConfig};
+    use serial_test::serial;
+    use std::sync::{Mutex, OnceLock};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
@@ -1222,9 +1518,42 @@ mod tests {
         })
     }
 
+    fn disabled_chatops_runtime() -> InitializedChatOpsRuntime {
+        InitializedChatOpsRuntime {
+            runtime: None,
+            config: ChatOpsRuntimeConfig::default(),
+            startup_error: None,
+        }
+    }
+
+    fn initialized_chatops_runtime(
+        runtime: Option<Arc<ChatOpsRuntime>>,
+        config: ChatOpsRuntimeConfig,
+        startup_error: Option<&str>,
+    ) -> InitializedChatOpsRuntime {
+        InitializedChatOpsRuntime {
+            runtime,
+            config,
+            startup_error: startup_error.map(ToOwned::to_owned),
+        }
+    }
+
+    fn unique_test_path(label: &str) -> std::path::PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after UNIX_EPOCH")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "nettoolskit-{label}-{}-{suffix}",
+            std::process::id()
+        ))
+    }
+
     fn test_service_state_with_security(
-        chatops_runtime: Option<Arc<ChatOpsRuntime>>,
+        chatops_runtime: InitializedChatOpsRuntime,
         ingress_security: Arc<ServiceIngressSecurityConfig>,
+        service_auth_token: Option<&str>,
+        data_dir: Option<std::path::PathBuf>,
     ) -> Arc<ServiceRuntimeState> {
         Arc::new(ServiceRuntimeState {
             started_at: std::time::Instant::now(),
@@ -1234,6 +1563,8 @@ mod tests {
                 ingress_security.replay_max_entries,
                 ingress_security.replay_backend.clone(),
             )),
+            service_auth_token: service_auth_token.map(ToOwned::to_owned),
+            data_dir,
             ingress_security,
         })
     }
@@ -1241,11 +1572,16 @@ mod tests {
     fn test_service_state(
         chatops_runtime: Option<Arc<ChatOpsRuntime>>,
     ) -> Arc<ServiceRuntimeState> {
-        test_service_state_with_security(chatops_runtime, default_test_ingress_security())
+        test_service_state_with_security(
+            initialized_chatops_runtime(chatops_runtime, ChatOpsRuntimeConfig::default(), None),
+            default_test_ingress_security(),
+            None,
+            Some(unique_test_path("service-data")),
+        )
     }
 
-    fn test_telegram_webhook_runtime(webhook_enabled: bool) -> Arc<ChatOpsRuntime> {
-        let runtime = build_chatops_runtime(ChatOpsRuntimeConfig {
+    fn test_telegram_webhook_config(webhook_enabled: bool) -> ChatOpsRuntimeConfig {
+        ChatOpsRuntimeConfig {
             enabled: true,
             allowed_user_ids: vec!["777".to_string()],
             allowed_channel_ids: vec!["555".to_string()],
@@ -1254,14 +1590,21 @@ mod tests {
             telegram_api_base: "http://127.0.0.1".to_string(),
             telegram_webhook_enabled: webhook_enabled,
             ..ChatOpsRuntimeConfig::default()
-        })
-        .expect("runtime should build")
-        .expect("enabled runtime should be present");
-        Arc::new(runtime)
+        }
     }
 
-    fn test_discord_interactions_runtime(interactions_enabled: bool) -> Arc<ChatOpsRuntime> {
-        let runtime = build_chatops_runtime(ChatOpsRuntimeConfig {
+    fn test_telegram_webhook_runtime(
+        webhook_enabled: bool,
+    ) -> (Arc<ChatOpsRuntime>, ChatOpsRuntimeConfig) {
+        let config = test_telegram_webhook_config(webhook_enabled);
+        let runtime = build_chatops_runtime(config.clone())
+            .expect("runtime should build")
+            .expect("enabled runtime should be present");
+        (Arc::new(runtime), config)
+    }
+
+    fn test_discord_interactions_config(interactions_enabled: bool) -> ChatOpsRuntimeConfig {
+        ChatOpsRuntimeConfig {
             enabled: true,
             allowed_user_ids: vec!["777".to_string()],
             allowed_channel_ids: vec!["555".to_string()],
@@ -1275,10 +1618,51 @@ mod tests {
                 vec!["555".to_string()]
             },
             ..ChatOpsRuntimeConfig::default()
-        })
-        .expect("runtime should build")
-        .expect("enabled runtime should be present");
-        Arc::new(runtime)
+        }
+    }
+
+    fn test_discord_interactions_runtime(
+        interactions_enabled: bool,
+    ) -> (Arc<ChatOpsRuntime>, ChatOpsRuntimeConfig) {
+        let config = test_discord_interactions_config(interactions_enabled);
+        let runtime = build_chatops_runtime(config.clone())
+            .expect("runtime should build")
+            .expect("enabled runtime should be present");
+        (Arc::new(runtime), config)
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        saved: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvVarGuard {
+        fn set(vars: &[(&str, Option<&str>)]) -> Self {
+            let mut saved = Vec::with_capacity(vars.len());
+            for (key, value) in vars {
+                saved.push(((*key).to_string(), std::env::var(key).ok()));
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.saved.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(&key, value),
+                    None => std::env::remove_var(&key),
+                }
+            }
+        }
     }
 
     async fn execute_service_request_with_state(
@@ -1331,6 +1715,175 @@ mod tests {
         execute_service_request_with_state(request, test_service_state(None)).await
     }
 
+    #[test]
+    fn parse_http_headers_normalizes_names_and_request_header_trims_values() {
+        let headers = parse_http_headers(
+            "GET /health HTTP/1.1\r\nHost: localhost\r\nAuthorization:   Bearer token-123   \r\n\r\n",
+        );
+        assert_eq!(request_header(&headers, "host"), Some("localhost"));
+        assert_eq!(
+            request_header(&headers, "authorization"),
+            Some("Bearer token-123")
+        );
+    }
+
+    #[test]
+    fn request_bearer_token_extracts_bearer_token() {
+        let headers = HashMap::from([(
+            "authorization".to_string(),
+            "Bearer service-token".to_string(),
+        )]);
+        assert_eq!(request_bearer_token(&headers), Some("service-token"));
+    }
+
+    #[test]
+    fn request_bearer_token_rejects_non_bearer_scheme() {
+        let headers = HashMap::from([(
+            "authorization".to_string(),
+            "Basic service-token".to_string(),
+        )]);
+        assert_eq!(request_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn service_runtime_mode_label_returns_service() {
+        assert_eq!(service_runtime_mode_label(), "service");
+    }
+
+    #[test]
+    fn build_service_health_response_uses_service_runtime_mode() {
+        let state = test_service_state(None);
+        let response = build_service_health_response(state.as_ref());
+        assert_eq!(response.runtime_mode, "service");
+        assert_eq!(response.status, "ok");
+    }
+
+    #[test]
+    fn is_loopback_bind_host_accepts_supported_values() {
+        assert!(is_loopback_bind_host("127.0.0.1"));
+        assert!(is_loopback_bind_host("localhost"));
+        assert!(is_loopback_bind_host("::1"));
+        assert!(!is_loopback_bind_host("0.0.0.0"));
+    }
+
+    #[test]
+    fn validate_service_bind_security_rejects_remote_bind_without_token() {
+        let error = validate_service_bind_security("0.0.0.0", None)
+            .expect_err("non-loopback bind should require token");
+        assert!(error.contains(NTK_SERVICE_AUTH_TOKEN_ENV));
+    }
+
+    #[test]
+    fn validate_service_bind_security_allows_remote_bind_with_token() {
+        validate_service_bind_security("0.0.0.0", Some("service-token"))
+            .expect("remote bind should be allowed when token is configured");
+    }
+
+    #[test]
+    fn replay_lock_path_appends_lock_extension() {
+        let path = std::path::Path::new("cache/ingress-replay-cache.json");
+        let lock_path = replay_lock_path(path);
+        assert!(lock_path.ends_with("ingress-replay-cache.json.lock"));
+    }
+
+    #[test]
+    fn ensure_directory_ready_creates_missing_directory() {
+        let path = unique_test_path("directory-ready");
+        ensure_directory_ready(&path).expect("directory should be created");
+        assert!(path.is_dir());
+    }
+
+    #[test]
+    fn ensure_appendable_file_ready_creates_parent_directory_and_file() {
+        let path = unique_test_path("appendable-file")
+            .join("nested")
+            .join("audit.jsonl");
+        ensure_appendable_file_ready(&path).expect("appendable file should be created");
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn task_admission_readiness_check_reports_ready() {
+        let check = task_admission_readiness_check();
+        assert!(check.ready);
+        assert_eq!(check.name, "task_admission");
+    }
+
+    #[test]
+    fn local_persistence_readiness_check_reports_missing_data_directory() {
+        let check = local_persistence_readiness_check(None);
+        assert!(!check.ready);
+        assert_eq!(check.name, "local_persistence");
+    }
+
+    #[test]
+    fn chatops_audit_store_readiness_check_reports_disabled_runtime_as_ready() {
+        let check = chatops_audit_store_readiness_check(&disabled_chatops_runtime(), None);
+        assert!(check.ready);
+        assert_eq!(check.name, "chatops_audit_store");
+    }
+
+    #[test]
+    fn chatops_runtime_readiness_check_reports_disabled_runtime_as_ready() {
+        let check = chatops_runtime_readiness_check(&disabled_chatops_runtime());
+        assert!(check.ready);
+        assert_eq!(check.name, "chatops_runtime");
+    }
+
+    #[test]
+    fn readiness_check_builds_expected_payload() {
+        let state = test_service_state_with_security(
+            disabled_chatops_runtime(),
+            default_test_ingress_security(),
+            None,
+            Some(unique_test_path("readiness-payload")),
+        );
+        let response = build_service_readiness_response(state.as_ref());
+        assert_eq!(response.status, "ready");
+        assert_eq!(response.runtime_mode, "service");
+        assert_eq!(response.checks.len(), 5);
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_replay_backend_from_env_supports_file_backend_override() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let expected_path = unique_test_path("replay-backend").join("cache.json");
+        let expected_string = expected_path.to_string_lossy().to_string();
+        let _env = EnvVarGuard::set(&[
+            (NTK_CHATOPS_INGRESS_REPLAY_BACKEND_ENV, Some("file")),
+            (
+                NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH_ENV,
+                Some(expected_string.as_str()),
+            ),
+        ]);
+
+        let backend = resolve_replay_backend_from_env().expect("file backend should resolve");
+        match backend {
+            IngressReplayBackendConfig::File { path } => assert_eq!(path, expected_path),
+            IngressReplayBackendConfig::Memory => {
+                panic!("expected file backend when override is configured")
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_replay_backend_from_env_rejects_unknown_backend() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let _env = EnvVarGuard::set(&[
+            (
+                NTK_CHATOPS_INGRESS_REPLAY_BACKEND_ENV,
+                Some("invalid-backend"),
+            ),
+            (NTK_CHATOPS_INGRESS_REPLAY_FILE_PATH_ENV, None),
+        ]);
+
+        let error =
+            resolve_replay_backend_from_env().expect_err("unknown backend should be rejected");
+        assert!(error.contains("unsupported replay backend"));
+    }
+
     #[tokio::test]
     async fn service_mode_health_endpoint_returns_ok_json() {
         let response =
@@ -1343,6 +1896,101 @@ mod tests {
             response.contains("\"status\":\"ok\""),
             "health response should expose status=ok"
         );
+        assert!(
+            response.contains("\"runtime_mode\":\"service\""),
+            "health response should force runtime_mode=service"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_mode_health_endpoint_remains_live_when_readiness_is_degraded() {
+        let degraded_state = test_service_state_with_security(
+            disabled_chatops_runtime(),
+            default_test_ingress_security(),
+            None,
+            None,
+        );
+
+        let health = execute_service_request_with_state(
+            "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            degraded_state.clone(),
+        )
+        .await;
+        assert!(health.starts_with("HTTP/1.1 200 OK"));
+
+        let ready = execute_service_request_with_state(
+            "GET /ready HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            degraded_state,
+        )
+        .await;
+        assert!(ready.starts_with("HTTP/1.1 503 Service Unavailable"));
+    }
+
+    #[tokio::test]
+    async fn service_mode_readiness_endpoint_returns_ready_when_dependencies_are_available() {
+        let state = test_service_state_with_security(
+            disabled_chatops_runtime(),
+            default_test_ingress_security(),
+            None,
+            Some(unique_test_path("service-ready")),
+        );
+        let response = execute_service_request_with_state(
+            "GET /ready HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            state,
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("\"status\":\"ready\""));
+        assert!(response.contains("\"task_admission\""));
+    }
+
+    #[tokio::test]
+    async fn service_mode_readiness_returns_unavailable_for_chatops_bootstrap_failure() {
+        let config = ChatOpsRuntimeConfig {
+            enabled: true,
+            audit_path: Some(unique_test_path("chatops-audit").join("audit.jsonl")),
+            ..ChatOpsRuntimeConfig::default()
+        };
+        let state = test_service_state_with_security(
+            initialized_chatops_runtime(None, config, Some("chatops bootstrap failed")),
+            default_test_ingress_security(),
+            None,
+            Some(unique_test_path("service-ready-chatops")),
+        );
+        let response = execute_service_request_with_state(
+            "GET /ready HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            state,
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 503 Service Unavailable"));
+        assert!(response.contains("chatops bootstrap failed"));
+    }
+
+    #[tokio::test]
+    async fn service_mode_readiness_returns_unavailable_for_broken_replay_backend() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let security = Arc::new(ServiceIngressSecurityConfig {
+            telegram_secret_token: None,
+            discord_verifying_key: None,
+            replay_window: std::time::Duration::from_secs(300),
+            replay_max_entries: 1_024,
+            replay_backend: IngressReplayBackendConfig::File {
+                path: temp_dir.path().to_path_buf(),
+            },
+        });
+        let state = test_service_state_with_security(
+            disabled_chatops_runtime(),
+            security,
+            None,
+            Some(unique_test_path("service-ready-broken-replay")),
+        );
+        let response = execute_service_request_with_state(
+            "GET /ready HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            state,
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 503 Service Unavailable"));
+        assert!(response.contains("\"replay_backend\""));
     }
 
     #[tokio::test]
@@ -1382,8 +2030,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn service_mode_task_submit_rejects_missing_bearer_token_when_required() {
+        let request = concat!(
+            "POST /task/submit HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "\r\n",
+            "{\"intent\":\"ai-plan\",\"payload\":\"validate dual runtime gate\"}"
+        );
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                disabled_chatops_runtime(),
+                default_test_ingress_security(),
+                Some("expected-token"),
+                Some(unique_test_path("service-auth")),
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 401 Unauthorized"));
+    }
+
+    #[tokio::test]
+    async fn service_mode_task_submit_accepts_valid_bearer_token_when_required() {
+        let request = concat!(
+            "POST /task/submit HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Content-Type: application/json\r\n",
+            "Authorization: Bearer expected-token\r\n",
+            "\r\n",
+            "{\"intent\":\"ai-plan\",\"payload\":\"validate dual runtime gate\"}"
+        );
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                disabled_chatops_runtime(),
+                default_test_ingress_security(),
+                Some("expected-token"),
+                Some(unique_test_path("service-auth-valid")),
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 202 Accepted"));
+    }
+
+    #[tokio::test]
     async fn service_mode_telegram_webhook_accepts_valid_payload_when_enabled() {
-        let runtime = test_telegram_webhook_runtime(true);
+        let (runtime, config) = test_telegram_webhook_runtime(true);
         let request = concat!(
             "POST /chatops/telegram/webhook HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1391,8 +2084,16 @@ mod tests {
             "\r\n",
             "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("telegram-enabled")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 202 Accepted"),
             "valid webhook payload should be accepted"
@@ -1405,7 +2106,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_telegram_webhook_rejects_invalid_payload() {
-        let runtime = test_telegram_webhook_runtime(true);
+        let (runtime, config) = test_telegram_webhook_runtime(true);
         let request = concat!(
             "POST /chatops/telegram/webhook HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1413,8 +2114,16 @@ mod tests {
             "\r\n",
             "{invalid"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("telegram-invalid")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 400 Bad Request"),
             "invalid webhook payload should be rejected"
@@ -1427,7 +2136,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_telegram_webhook_returns_conflict_when_disabled() {
-        let runtime = test_telegram_webhook_runtime(false);
+        let (runtime, config) = test_telegram_webhook_runtime(false);
         let request = concat!(
             "POST /chatops/telegram/webhook HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1435,8 +2144,16 @@ mod tests {
             "\r\n",
             "{\"update_id\":10,\"message\":{\"date\":1737200000,\"text\":\"list\",\"chat\":{\"id\":555},\"from\":{\"id\":777}}}"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("telegram-disabled")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 409 Conflict"),
             "webhook endpoint should reject requests when webhook mode is disabled"
@@ -1445,7 +2162,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_telegram_webhook_rejects_invalid_secret_token() {
-        let runtime = test_telegram_webhook_runtime(true);
+        let (runtime, config) = test_telegram_webhook_runtime(true);
         let security = Arc::new(ServiceIngressSecurityConfig {
             telegram_secret_token: Some("expected-token".to_string()),
             discord_verifying_key: None,
@@ -1463,7 +2180,12 @@ mod tests {
         );
         let response = execute_service_request_with_state(
             request,
-            test_service_state_with_security(Some(runtime), security),
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                security,
+                None,
+                Some(unique_test_path("telegram-secret")),
+            ),
         )
         .await;
         assert!(
@@ -1474,7 +2196,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_telegram_webhook_rejects_replay_for_same_payload() {
-        let runtime = test_telegram_webhook_runtime(true);
+        let (runtime, config) = test_telegram_webhook_runtime(true);
         let security = Arc::new(ServiceIngressSecurityConfig {
             telegram_secret_token: Some("expected-token".to_string()),
             discord_verifying_key: None,
@@ -1482,7 +2204,12 @@ mod tests {
             replay_max_entries: 1_024,
             replay_backend: IngressReplayBackendConfig::Memory,
         });
-        let state = test_service_state_with_security(Some(runtime), security);
+        let state = test_service_state_with_security(
+            initialized_chatops_runtime(Some(runtime), config, None),
+            security,
+            None,
+            Some(unique_test_path("telegram-replay")),
+        );
         let request = concat!(
             "POST /chatops/telegram/webhook HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1507,7 +2234,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_telegram_webhook_replay_is_shared_for_file_backend() {
-        let runtime = test_telegram_webhook_runtime(true);
+        let (runtime, config) = test_telegram_webhook_runtime(true);
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let replay_path = temp_dir.path().join("ingress-replay-cache.json");
         let security = Arc::new(ServiceIngressSecurityConfig {
@@ -1519,8 +2246,18 @@ mod tests {
                 path: replay_path.clone(),
             },
         });
-        let state_one = test_service_state_with_security(Some(runtime.clone()), security.clone());
-        let state_two = test_service_state_with_security(Some(runtime), security);
+        let state_one = test_service_state_with_security(
+            initialized_chatops_runtime(Some(runtime.clone()), config.clone(), None),
+            security.clone(),
+            None,
+            Some(unique_test_path("telegram-replay-file-one")),
+        );
+        let state_two = test_service_state_with_security(
+            initialized_chatops_runtime(Some(runtime), config, None),
+            security,
+            None,
+            Some(unique_test_path("telegram-replay-file-two")),
+        );
         let request = concat!(
             "POST /chatops/telegram/webhook HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1550,7 +2287,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_telegram_webhook_returns_unavailable_for_broken_file_backend() {
-        let runtime = test_telegram_webhook_runtime(true);
+        let (runtime, config) = test_telegram_webhook_runtime(true);
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let security = Arc::new(ServiceIngressSecurityConfig {
             telegram_secret_token: Some("expected-token".to_string()),
@@ -1562,7 +2299,12 @@ mod tests {
                 path: temp_dir.path().to_path_buf(),
             },
         });
-        let state = test_service_state_with_security(Some(runtime), security);
+        let state = test_service_state_with_security(
+            initialized_chatops_runtime(Some(runtime), config, None),
+            security,
+            None,
+            Some(unique_test_path("telegram-replay-broken")),
+        );
         let request = concat!(
             "POST /chatops/telegram/webhook HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1581,7 +2323,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_discord_interactions_returns_pong_for_ping() {
-        let runtime = test_discord_interactions_runtime(true);
+        let (runtime, config) = test_discord_interactions_runtime(true);
         let request = concat!(
             "POST /chatops/discord/interactions HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1589,8 +2331,16 @@ mod tests {
             "\r\n",
             "{\"type\":1}"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("discord-ping")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 200 OK"),
             "ping interaction should return 200"
@@ -1603,7 +2353,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_discord_interactions_accepts_command_payload() {
-        let runtime = test_discord_interactions_runtime(true);
+        let (runtime, config) = test_discord_interactions_runtime(true);
         let request = concat!(
             "POST /chatops/discord/interactions HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1611,8 +2361,16 @@ mod tests {
             "\r\n",
             "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("discord-command")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 200 OK"),
             "command interaction should return 200"
@@ -1629,7 +2387,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_discord_interactions_rejects_invalid_payload() {
-        let runtime = test_discord_interactions_runtime(true);
+        let (runtime, config) = test_discord_interactions_runtime(true);
         let request = concat!(
             "POST /chatops/discord/interactions HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1637,8 +2395,16 @@ mod tests {
             "\r\n",
             "{invalid"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("discord-invalid")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 400 Bad Request"),
             "invalid interaction payload should be rejected"
@@ -1651,7 +2417,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_discord_interactions_returns_conflict_when_disabled() {
-        let runtime = test_discord_interactions_runtime(false);
+        let (runtime, config) = test_discord_interactions_runtime(false);
         let request = concat!(
             "POST /chatops/discord/interactions HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -1659,8 +2425,16 @@ mod tests {
             "\r\n",
             "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}"
         );
-        let response =
-            execute_service_request_with_state(request, test_service_state(Some(runtime))).await;
+        let response = execute_service_request_with_state(
+            request,
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                default_test_ingress_security(),
+                None,
+                Some(unique_test_path("discord-disabled")),
+            ),
+        )
+        .await;
         assert!(
             response.starts_with("HTTP/1.1 409 Conflict"),
             "interaction endpoint should reject requests when mode is disabled"
@@ -1669,7 +2443,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_discord_interactions_rejects_missing_signature_when_key_configured() {
-        let runtime = test_discord_interactions_runtime(true);
+        let (runtime, config) = test_discord_interactions_runtime(true);
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let security = Arc::new(ServiceIngressSecurityConfig {
             telegram_secret_token: None,
@@ -1687,7 +2461,12 @@ mod tests {
         );
         let response = execute_service_request_with_state(
             request,
-            test_service_state_with_security(Some(runtime), security),
+            test_service_state_with_security(
+                initialized_chatops_runtime(Some(runtime), config, None),
+                security,
+                None,
+                Some(unique_test_path("discord-signature-missing")),
+            ),
         )
         .await;
         assert!(
@@ -1698,7 +2477,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_mode_discord_interactions_accepts_valid_signed_request_and_rejects_replay() {
-        let runtime = test_discord_interactions_runtime(true);
+        let (runtime, config) = test_discord_interactions_runtime(true);
         let signing_key = SigningKey::from_bytes(&[11_u8; 32]);
         let security = Arc::new(ServiceIngressSecurityConfig {
             telegram_secret_token: None,
@@ -1707,7 +2486,12 @@ mod tests {
             replay_max_entries: 1_024,
             replay_backend: IngressReplayBackendConfig::Memory,
         });
-        let state = test_service_state_with_security(Some(runtime), security);
+        let state = test_service_state_with_security(
+            initialized_chatops_runtime(Some(runtime), config, None),
+            security,
+            None,
+            Some(unique_test_path("discord-replay")),
+        );
         let body =
             "{\"type\":2,\"channel_id\":\"555\",\"member\":{\"user\":{\"id\":\"777\"}},\"data\":{\"name\":\"list\"}}";
         let timestamp = current_unix_timestamp_seconds().to_string();

@@ -116,6 +116,14 @@ test(core): add config loader edge cases
 
 ---
 
+## Security Reports
+
+Do not file public issues for suspected vulnerabilities.
+
+Use the private disclosure path described in [SECURITY.md](SECURITY.md). Changes touching runtime exposure, authentication, or supply-chain controls should also be reviewed by the owners listed in [.github/CODEOWNERS](.github/CODEOWNERS).
+
+---
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.

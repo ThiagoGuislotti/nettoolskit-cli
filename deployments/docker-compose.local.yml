@@ -6,10 +6,11 @@ services:
       dockerfile: deployments/Dockerfile.service
     image: nettoolskit/ntk-service:local
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       NTK_RUNTIME_MODE: service
       NTK_LOG_LEVEL: info
+      NTK_SERVICE_AUTH_TOKEN: local-service-token
       NTK_TASK_MAX_CONCURRENCY: "2"
       NTK_TASK_MAX_RETRIES: "2"
       NTK_TASK_QUEUE_CAPACITY: "128"

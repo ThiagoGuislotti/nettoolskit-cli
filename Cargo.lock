@@ -1791,6 +1791,7 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "serial_test",
  "supports-color",
  "tempfile",
  "tokio",

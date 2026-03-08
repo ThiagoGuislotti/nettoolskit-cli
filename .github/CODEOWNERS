@@ -1,0 +1,23 @@
+# Default owners
+* @ThiagoGuislotti
+
+# CI/CD and repository governance
+/.github/ @ThiagoGuislotti
+/CHANGELOG.md @ThiagoGuislotti
+/README.md @ThiagoGuislotti
+/SECURITY.md @ThiagoGuislotti
+/LICENSE @ThiagoGuislotti
+
+# Runtime and service control plane
+/crates/cli/ @ThiagoGuislotti
+/crates/orchestrator/ @ThiagoGuislotti
+/crates/task-worker/ @ThiagoGuislotti
+
+# Shared platform crates
+/crates/core/ @ThiagoGuislotti
+/crates/otel/ @ThiagoGuislotti
+/crates/ui/ @ThiagoGuislotti
+
+# Operational assets
+/deployments/ @ThiagoGuislotti
+/docs/operations/ @ThiagoGuislotti

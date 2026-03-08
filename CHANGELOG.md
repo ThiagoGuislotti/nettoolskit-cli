@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added service-agent SLO bundle for AI runtime with p95 latency, success ratio, tokens/task, and cost/task indicators plus environment-configurable SLO thresholds (`NTK_AI_SLO_*`).
 - Added CI `Agent SLO Gate` to run deterministic regression checks for percentile calculation and AI SLO budget compliance paths.
 - Added dedicated worker runtime crate (`nettoolskit-task-worker`) and migrated orchestrator queue/dispatch/retry execution to callback-based integration.
+- Added service API bearer-token contract for mutable HTTP task submission (`NTK_SERVICE_AUTH_TOKEN`) with explicit `401` rejection on missing or invalid tokens.
+- Added real service readiness semantics for `GET /ready`, with dependency checks for task admission, local persistence, replay backend state, ChatOps audit store, and ChatOps startup health.
+- Added a CI-enforced critical-file coverage gate using `cargo llvm-cov` JSON output and PowerShell policy checks for public entrypoints.
+- Added validated full-workspace coverage evidence for the critical-file policy: `76.52%` lines, `76.82%` functions, and all tracked entrypoints above enforced budgets.
+- Added governance baseline artifacts: root `LICENSE`, `SECURITY.md`, and `.github/CODEOWNERS`, plus README/CONTRIBUTING references for commercial OSS operation.
 
 ### Decisions
 - **DEC-0001 (Accepted, 2026-02-28): Modular workspace boundaries**
