@@ -58,20 +58,6 @@ pub enum Commands {
         command: Option<ManifestCommand>,
     },
 
-    /// Translate templates between programming languages
-    Translate {
-        /// Source language identifier
-        #[clap(long)]
-        from: String,
-
-        /// Target language identifier
-        #[clap(long)]
-        to: String,
-
-        /// Template file path to translate
-        path: String,
-    },
-
     /// Generate shell completions for the specified shell
     Completions {
         /// Target shell (bash, zsh, fish, powershell)
@@ -275,10 +261,6 @@ impl Commands {
                     process_command(&command_line).await
                 }
             },
-            Commands::Translate { from, to, path } => {
-                let request = nettoolskit_translate::TranslateRequest { from, to, path };
-                nettoolskit_translate::handle_translate(request).await
-            }
             Commands::Completions { shell } => {
                 clap_complete::generate(shell, &mut Cli::command(), "ntk", &mut std::io::stdout());
                 ExitStatus::Success

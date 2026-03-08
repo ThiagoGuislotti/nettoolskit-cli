@@ -35,21 +35,6 @@ fn test_main_action_manifest_variant() {
 }
 
 #[test]
-fn test_main_action_translate_variant() {
-    // Arrange
-    let action = MainAction::Translate;
-
-    // Act
-    let is_translate = matches!(action, MainAction::Translate);
-
-    // Assert
-    assert!(
-        is_translate,
-        "MainAction::Translate should match Translate variant"
-    );
-}
-
-#[test]
 fn test_main_action_ai_variant() {
     // Arrange
     let action = MainAction::Ai;
@@ -139,21 +124,6 @@ fn test_main_action_slash_static_manifest() {
 }
 
 #[test]
-fn test_main_action_slash_static_translate() {
-    // Arrange
-    let action = MainAction::Translate;
-
-    // Act
-    let slash_cmd = action.slash_static();
-
-    // Assert
-    assert_eq!(
-        slash_cmd, "/translate",
-        "Translate should produce /translate command"
-    );
-}
-
-#[test]
 fn test_main_action_slash_static_ai() {
     // Arrange
     let action = MainAction::Ai;
@@ -224,7 +194,6 @@ fn test_main_action_pattern_matching_exhaustive() {
     let actions = vec![
         MainAction::Help,
         MainAction::Manifest,
-        MainAction::Translate,
         MainAction::Ai,
         MainAction::Task,
         MainAction::Config,
@@ -237,7 +206,6 @@ fn test_main_action_pattern_matching_exhaustive() {
         let matched = match action {
             MainAction::Help => true,
             MainAction::Manifest => true,
-            MainAction::Translate => true,
             MainAction::Ai => true,
             MainAction::Task => true,
             MainAction::Config => true,

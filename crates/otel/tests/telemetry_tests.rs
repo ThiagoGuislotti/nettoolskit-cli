@@ -308,3 +308,40 @@ fn test_time_operation_macro_records_once() {
         "time_operation! macro must record exactly once"
     );
 }
+
+#[test]
+fn test_get_timing_percentile_returns_expected_sample() {
+    let metrics = Metrics::new();
+
+    metrics.record_timing("latency", std::time::Duration::from_millis(10));
+    metrics.record_timing("latency", std::time::Duration::from_millis(30));
+    metrics.record_timing("latency", std::time::Duration::from_millis(50));
+    metrics.record_timing("latency", std::time::Duration::from_millis(90));
+
+    let p95 = metrics
+        .get_timing_percentile("latency", 95.0)
+        .expect("p95 should be available");
+    let p50 = metrics
+        .get_timing_percentile("latency", 50.0)
+        .expect("p50 should be available");
+
+    assert_eq!(p95, std::time::Duration::from_millis(90));
+    assert_eq!(p50, std::time::Duration::from_millis(50));
+}
+
+#[test]
+fn test_get_timing_percentile_clamps_bounds() {
+    let metrics = Metrics::new();
+    metrics.record_timing("latency", std::time::Duration::from_millis(20));
+    metrics.record_timing("latency", std::time::Duration::from_millis(40));
+
+    let p_low = metrics
+        .get_timing_percentile("latency", -10.0)
+        .expect("low percentile should clamp to minimum sample");
+    let p_high = metrics
+        .get_timing_percentile("latency", 180.0)
+        .expect("high percentile should clamp to maximum sample");
+
+    assert_eq!(p_low, std::time::Duration::from_millis(20));
+    assert_eq!(p_high, std::time::Duration::from_millis(40));
+}

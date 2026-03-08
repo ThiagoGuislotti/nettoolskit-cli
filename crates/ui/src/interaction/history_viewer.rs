@@ -226,7 +226,7 @@ mod tests {
             "/manifest list".to_string(),
             "/manifest apply".to_string(),
             "generate api module".to_string(),
-            "/translate rust csharp".to_string(),
+            "/ai explain task flow".to_string(),
         ]
     }
 

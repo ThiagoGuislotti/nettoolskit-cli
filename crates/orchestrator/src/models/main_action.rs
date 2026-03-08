@@ -19,10 +19,6 @@ pub enum MainAction {
     #[strum(serialize = "manifest")]
     Manifest,
 
-    /// Translate templates between programming languages
-    #[strum(serialize = "translate")]
-    Translate,
-
     /// AI assistant commands for planning and explanation flows
     #[strum(serialize = "ai")]
     Ai,
@@ -53,7 +49,6 @@ impl MainAction {
         match self {
             MainAction::Help => "Display help information and available commands",
             MainAction::Manifest => "Manage and apply manifests (submenu)",
-            MainAction::Translate => "Translate templates between programming languages",
             MainAction::Ai => {
                 "AI assistant commands (ask, plan, explain, resume, apply with dry-run/approval)"
             }
@@ -72,7 +67,6 @@ impl MenuEntry for MainAction {
         match self {
             MainAction::Help => "/help",
             MainAction::Manifest => "/manifest",
-            MainAction::Translate => "/translate",
             MainAction::Ai => "/ai",
             MainAction::Task => "/task",
             MainAction::Config => "/config",

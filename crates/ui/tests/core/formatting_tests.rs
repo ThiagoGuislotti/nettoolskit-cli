@@ -26,7 +26,7 @@ fn test_all_items_have_description_separator() {
     let items = vec![
         format_menu_item("/ help", Some("Help text")),
         format_menu_item("/ manifest", Some("Manifest text")),
-        format_menu_item("/ translate", Some("Translate text")),
+        format_menu_item("/ ai", Some("AI text")),
     ];
 
     // All items with descriptions should have a dash separator

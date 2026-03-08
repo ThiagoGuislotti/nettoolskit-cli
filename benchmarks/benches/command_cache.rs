@@ -16,7 +16,7 @@ const HELP_MARKDOWN_SAMPLE: &str = r#"# NetToolsKit CLI - Help
 ## Available Commands
 - `/help` - Display help information and available commands
 - `/manifest` - Manage and apply manifests (submenu)
-- `/translate` - Translate templates between programming languages
+- `/ai` - AI assistant commands (ask, plan, explain, apply)
 - `/config` - View and edit user configuration
 - `/clear` - Clear and redraw terminal layout
 - `/quit` - Exit NetToolsKit CLI
@@ -29,6 +29,7 @@ fn build_cache() -> CommandResultCache {
         CacheTtl {
             help: Duration::from_secs(300),
             manifest_list: Duration::from_secs(60),
+            ai_response: Duration::from_secs(180),
         },
     )
 }

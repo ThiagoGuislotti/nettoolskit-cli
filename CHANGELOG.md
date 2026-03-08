@@ -62,6 +62,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added scoped ChatOps command authorization (`NTK_CHATOPS_ALLOWED_COMMANDS`) and per-user/per-channel rate-limit controls with auditable throttle notifications.
 - Added deterministic ChatOps VPS smoke profile coverage in CI using a local Telegram-compatible mock server (`chatops_vps_smoke_profile_*`).
 - Added service automation policy profiles (`strict`/`balanced`/`open`) with explicit allowed-intent controls and queue-admission budgets (`NTK_SERVICE_*`) for `runtime_mode=service`.
+- Added deterministic AI provider routing chain for `/ai` (`primary -> secondary`, max depth 2) with configurable route controls (`NTK_AI_PROVIDER_CHAIN`, `NTK_AI_FALLBACK_PROVIDER`) and per-provider timeout budgets (`NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS`, `NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS`).
+- Added AI token-economy policy for `/ai` and `/task submit ai-*` with request/session token caps, per-request cost cap, prompt compaction tiers, and cache-first response reuse controls (`NTK_AI_TOKEN_BUDGET_*`, `NTK_AI_COST_BUDGET_USD_PER_REQUEST`, `NTK_AI_PROMPT_COMPACTION_TIER`, `NTK_AI_CACHE_FIRST_ENABLED`).
+- Added secure tool-scope gateway for `/task submit` and worker execution with service-mode deny-by-default policy, global tool allowlist, intent-level tool scopes, and local JSONL audit proofs (`NTK_TOOL_SCOPE_*`).
+- Added adaptive AI model-selection policy with tiered routing (`cheap` for lightweight intents, `reasoning` for deeper intents) plus tier-specific cost guardrails and optional fallback-to-cheap controls for `/ai` and `/task submit ai-*` (`NTK_AI_MODEL_SELECTION_*`).
+- Added compressed local AI session persistence modes (`off`, `delta`, `summary`) with backward-compatible snapshot metadata and operational env controls (`NTK_AI_SESSION_COMPRESSION_*`) to reduce replay/storage overhead.
+- Added service-agent SLO bundle for AI runtime with p95 latency, success ratio, tokens/task, and cost/task indicators plus environment-configurable SLO thresholds (`NTK_AI_SLO_*`).
+- Added CI `Agent SLO Gate` to run deterministic regression checks for percentile calculation and AI SLO budget compliance paths.
 - Added dedicated worker runtime crate (`nettoolskit-task-worker`) and migrated orchestrator queue/dispatch/retry execution to callback-based integration.
 
 ### Decisions
@@ -118,6 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CHANGELOG.md` aligned to Keep a Changelog structure with an explicit `Unreleased` section.
 - `crates/otel` migrated to a hybrid model: optional OTLP trace export plus existing in-process metrics.
 - OTLP dependencies were added to workspace/crate manifests (`tracing-opentelemetry`, `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`).
+- Hardened orchestrator task submission test isolation by applying env lock + deterministic env cleanup in the default `ai-plan` submit test path.
 - Correlation IDs were introduced and attached to tracing spans at session/execution/command boundaries.
 - Runtime/business metrics were defined in orchestrator with stable names for latency, error rate, and cancellation rate.
 - Incident response and troubleshooting playbook was added under `docs/operations/` and linked from project README.
@@ -189,6 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added dual-runtime service-mode task tests validating queue submission behavior and worker retry-delay policy semantics.
 - Added service CLI tests covering `service --help` command surface and HTTP helper parsing/response routines.
 - Added service endpoint handler tests for `GET /health`, invalid JSON rejection on `POST /task/submit`, and accepted task submission responses.
+- Added adaptive model-selection tests covering intent-tier routing, env override parsing, tier cost guardrail rejection, fallback-to-cheap behavior, and task-submit guardrail enforcement.
 - Added ChatOps unit/integration tests covering remote command parsing, allowlist authorization, local audit persistence, inbox processing, and command execution through `/task` routing.
 - Added ChatOps runtime tests for environment configuration parsing and startup gating (disabled mode, missing token validation, list parsing).
 - Added ChatOps runtime tests for Telegram webhook payload parsing, queue drain order, and runtime webhook-mode enqueue gating.
@@ -223,9 +232,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed**: `crates/commands/management/` (deprecated, replaced by orchestrator)
 - **Help Command**: Moved from `cli/src/handlers/help.rs` to `crates/commands/help/`
   - Created dedicated `nettoolskit-help` crate
-  - Structure matches other commands (manifest, translate)
+  - Structure matches other commands (manifest)
 - **Commands Crate**: Now pure aggregator of command implementations
-  - Simplified to re-export help, manifest, translate
+  - Simplified to re-export help and manifest
   - No orchestration logic
 
 #### Architecture Benefits

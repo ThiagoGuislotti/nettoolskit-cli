@@ -28,7 +28,7 @@ Objectives:
 
 -   ✅ Interactive terminal interface with `/` command palette activation
 -   ✅ Real-time command filtering with intuitive arrow navigation
--   ✅ Modular workspace architecture with 10 specialized crates
+-   ✅ Modular workspace architecture with 9 specialized crates
 -   ✅ High-performance async I/O with Tokio multi-thread runtime
 -   ✅ Template scaffolding and project generation via Handlebars
 -   ✅ Manifest-driven solution configuration and application
@@ -82,13 +82,11 @@ graph TD
         HELP["help"]
         MANIFEST["manifest"]
         TEMPLATING["templating"]
-        TRANSLATE["translate"]
     end
 
     CMD --> HELP
     CMD --> MANIFEST
     CMD --> TEMPLATING
-    CMD --> TRANSLATE
 
     style CLI fill:#2d3748,stroke:#63b3ed,color:#fff
     style ORC fill:#2d3748,stroke:#68d391,color:#fff
@@ -115,7 +113,6 @@ This workspace is organized as a multi-crate Rust project. Each crate has its ow
 | `help` | Help discovery and display utilities | [crates/commands/help/README.md](crates/commands/help/README.md) |
 | `manifest` | Manifest parsing, validation, and execution | [crates/commands/manifest/README.md](crates/commands/manifest/README.md) |
 | `templating` | Template rendering and resolution via Handlebars | [crates/commands/templating/README.md](crates/commands/templating/README.md) |
-| `translate` | Template translation handler and types | [crates/commands/translate/README.md](crates/commands/translate/README.md) |
 
 ---
 
@@ -220,7 +217,6 @@ We follow semantic versioning and conventional commits. Please ensure your contr
   - [crates/commands/help/README.md](crates/commands/help/README.md)
   - [crates/commands/manifest/README.md](crates/commands/manifest/README.md)
   - [crates/commands/templating/README.md](crates/commands/templating/README.md)
-  - [crates/commands/translate/README.md](crates/commands/translate/README.md)
   - [crates/core/README.md](crates/core/README.md)
   - [crates/orchestrator/README.md](crates/orchestrator/README.md)
   - [crates/otel/README.md](crates/otel/README.md)

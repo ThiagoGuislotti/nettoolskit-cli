@@ -48,9 +48,12 @@ nettoolskit-commands = { path = "../commands" }
 Minimal usage in 3–5 lines:
 
 ```rust
-use nettoolskit_commands::{nettoolskit_help, nettoolskit_manifest, nettoolskit_translate};
+use nettoolskit_commands::{nettoolskit_help, nettoolskit_manifest};
 
-let _ = (nettoolskit_help::discover_manifests, nettoolskit_manifest::ManifestExecutor::new, nettoolskit_translate::handle_translate);
+let _ = (
+    nettoolskit_help::discover_manifests,
+    nettoolskit_manifest::ManifestExecutor::new,
+);
 ```
 
 ---
@@ -79,7 +82,6 @@ This crate re-exports the command subcrates:
 
 - `nettoolskit_help`
 - `nettoolskit_manifest`
-- `nettoolskit_translate`
 
 ---
 

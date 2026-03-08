@@ -23,7 +23,6 @@ nettoolskit-task-worker = { path = "../task-worker" }
 
 # Command implementations
 nettoolskit-manifest = { path = "../commands/manifest" }
-nettoolskit-translate = { path = "../commands/translate" }
 nettoolskit-help = { path = "../commands/help" }
 
 # Async runtime

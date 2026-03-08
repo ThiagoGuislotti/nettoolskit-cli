@@ -54,7 +54,6 @@ const COMPLETION_COMMANDS: &[&str] = &[
     "/render-async",
     "/apply-async",
     "/new-async",
-    "/translate",
     "/ai",
     "/ai ask",
     "/ai plan",

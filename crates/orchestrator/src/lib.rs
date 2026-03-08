@@ -18,7 +18,9 @@ pub use execution::{
     ai_session::{
         active_ai_session_id, list_local_ai_session_snapshots, load_local_ai_session_from_path,
         prune_local_ai_session_snapshots, resolve_active_ai_session_id, set_active_ai_session_id,
-        AiSessionExchange, LocalAiSessionSnapshot, LocalAiSessionState, LOCAL_AI_SESSIONS_DIR_NAME,
+        AiSessionCompressionMode, AiSessionExchange, LocalAiSessionSnapshot, LocalAiSessionState,
+        LOCAL_AI_SESSIONS_DIR_NAME, NTK_AI_SESSION_COMPRESSION_MAX_CHARS_ENV,
+        NTK_AI_SESSION_COMPRESSION_MODE_ENV, NTK_AI_SESSION_DELTA_MIN_SHARED_PREFIX_CHARS_ENV,
     },
     approval::{
         evaluate_approval, request_approval, ApprovalActionKind, ApprovalDecision, ApprovalRequest,
