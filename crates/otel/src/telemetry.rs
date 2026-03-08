@@ -1,6 +1,7 @@
 //! Telemetry utilities for NetToolsKit CLI
 
 use crate::tracing_setup::{record_otlp_counter, record_otlp_gauge, record_otlp_timing};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -96,6 +97,23 @@ impl Metrics {
             }
         }
         None
+    }
+
+    /// Get timing percentile (0-100) for an operation.
+    pub fn get_timing_percentile(&self, name: &str, percentile: f64) -> Option<Duration> {
+        let timings = self.timings.lock().unwrap();
+        let times = timings.get(name)?;
+        if times.is_empty() {
+            return None;
+        }
+
+        let clamped_percentile = percentile.clamp(0.0, 100.0);
+        let mut sorted = times.clone();
+        sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+
+        let last_index = sorted.len() - 1;
+        let rank = ((clamped_percentile / 100.0) * (last_index as f64)).ceil() as usize;
+        sorted.get(rank.min(last_index)).copied()
     }
 
     /// Get the number of timing samples recorded for an operation

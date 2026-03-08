@@ -3,7 +3,6 @@
 //! This crate aggregates individual command implementations:
 //! - **help**: Help and manifest discovery
 //! - **manifest**: Manifest-driven code generation
-//! - **translate**: Code translation between languages
 //!
 //! Command orchestration is provided by the `nettoolskit-orchestrator` crate.
 //!
@@ -17,4 +16,3 @@
 // Re-export command implementations for convenient access
 pub use nettoolskit_help;
 pub use nettoolskit_manifest;
-pub use nettoolskit_translate;

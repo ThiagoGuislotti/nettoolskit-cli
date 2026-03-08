@@ -6,7 +6,8 @@ use crate::execution::ai::{
 };
 use crate::execution::ai_session::{
     prune_local_ai_session_snapshots, resolve_active_ai_session_id, set_active_ai_session_id,
-    LocalAiSessionState,
+    LocalAiSessionState, NTK_AI_SESSION_COMPRESSION_MAX_CHARS_ENV,
+    NTK_AI_SESSION_COMPRESSION_MODE_ENV, NTK_AI_SESSION_DELTA_MIN_SHARED_PREFIX_CHARS_ENV,
 };
 use crate::execution::approval::{request_approval, ApprovalDecision, ApprovalRequest};
 use crate::execution::cache::{CacheKey, CacheStats, CacheTtl, CacheValue, CommandResultCache};
@@ -32,8 +33,10 @@ use nettoolskit_task_worker::{
     TaskWorkerResultStatus, TaskWorkerRuntime, TaskWorkerSubmitError,
 };
 use owo_colors::OwoColorize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -66,6 +69,18 @@ const NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV: &str = "NTK_SERVICE_MAX_PAYLOAD_BYTES";
 const NTK_SERVICE_SUBMIT_BUDGET_ENV: &str = "NTK_SERVICE_SUBMIT_BUDGET";
 const NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV: &str = "NTK_SERVICE_SUBMIT_WINDOW_SECONDS";
 const NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV: &str = "NTK_SERVICE_MAX_INFLIGHT_TASKS";
+const NTK_TOOL_SCOPE_ENABLED_ENV: &str = "NTK_TOOL_SCOPE_ENABLED";
+const NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV: &str = "NTK_TOOL_SCOPE_ALLOWED_TOOLS";
+const NTK_TOOL_SCOPE_INTENT_COMMAND_EXECUTION_TOOLS_ENV: &str =
+    "NTK_TOOL_SCOPE_INTENT_COMMAND_EXECUTION_TOOLS";
+const NTK_TOOL_SCOPE_INTENT_AI_ASK_TOOLS_ENV: &str = "NTK_TOOL_SCOPE_INTENT_AI_ASK_TOOLS";
+const NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS_ENV: &str = "NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS";
+const NTK_TOOL_SCOPE_INTENT_AI_EXPLAIN_TOOLS_ENV: &str = "NTK_TOOL_SCOPE_INTENT_AI_EXPLAIN_TOOLS";
+const NTK_TOOL_SCOPE_INTENT_AI_APPLY_DRY_RUN_TOOLS_ENV: &str =
+    "NTK_TOOL_SCOPE_INTENT_AI_APPLY_DRY_RUN_TOOLS";
+const NTK_TOOL_SCOPE_INTENT_REPO_WORKFLOW_TOOLS_ENV: &str =
+    "NTK_TOOL_SCOPE_INTENT_REPO_WORKFLOW_TOOLS";
+const NTK_TOOL_SCOPE_AUDIT_PATH_ENV: &str = "NTK_TOOL_SCOPE_AUDIT_PATH";
 const AI_CONTEXT_DEFAULT_ALLOWLIST: &[&str] = &[
     "Cargo.toml",
     "README.md",
@@ -79,6 +94,48 @@ const DEFAULT_AI_MAX_RETRIES: usize = 2;
 const DEFAULT_AI_RETRY_BASE_DELAY_MS: u64 = 250;
 const DEFAULT_AI_RETRY_MAX_DELAY_MS: u64 = 2_000;
 const DEFAULT_AI_REQUEST_TIMEOUT_MS: u64 = 45_000;
+const DEFAULT_AI_TOKEN_BUDGET_INPUT_PER_REQUEST: u64 = 10_000;
+const DEFAULT_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST: u64 = 2_000;
+const DEFAULT_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST: u64 = 12_000;
+const DEFAULT_AI_TOKEN_BUDGET_SESSION_TOTAL: u64 = 60_000;
+const DEFAULT_AI_COST_BUDGET_USD_PER_REQUEST: f64 = 0.25;
+const DEFAULT_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER: f64 = 1.0;
+const DEFAULT_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER: f64 = 1.2;
+const DEFAULT_AI_SLO_MAX_P95_LATENCY_MS: f64 = 30_000.0;
+const DEFAULT_AI_SLO_MIN_SUCCESS_RATE_PCT: f64 = 95.0;
+const DEFAULT_AI_SLO_MAX_TOKENS_PER_TASK: f64 = 20_000.0;
+const DEFAULT_AI_SLO_MAX_COST_USD_PER_TASK: f64 = 1.0;
+const NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV: &str = "NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST";
+const NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV: &str = "NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST";
+const NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV: &str = "NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST";
+const NTK_AI_TOKEN_BUDGET_SESSION_TOTAL_ENV: &str = "NTK_AI_TOKEN_BUDGET_SESSION_TOTAL";
+const NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV: &str = "NTK_AI_COST_BUDGET_USD_PER_REQUEST";
+const NTK_AI_PROMPT_COMPACTION_TIER_ENV: &str = "NTK_AI_PROMPT_COMPACTION_TIER";
+const NTK_AI_CACHE_FIRST_ENABLED_ENV: &str = "NTK_AI_CACHE_FIRST_ENABLED";
+const NTK_AI_MODEL_SELECTION_ENABLED_ENV: &str = "NTK_AI_MODEL_SELECTION_ENABLED";
+const NTK_AI_MODEL_SELECTION_CHEAP_MODEL_ENV: &str = "NTK_AI_MODEL_SELECTION_CHEAP_MODEL";
+const NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV: &str = "NTK_AI_MODEL_SELECTION_REASONING_MODEL";
+const NTK_AI_MODEL_SELECTION_CHEAP_INTENTS_ENV: &str = "NTK_AI_MODEL_SELECTION_CHEAP_INTENTS";
+const NTK_AI_MODEL_SELECTION_REASONING_INTENTS_ENV: &str =
+    "NTK_AI_MODEL_SELECTION_REASONING_INTENTS";
+const NTK_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER_ENV: &str =
+    "NTK_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER";
+const NTK_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER_ENV: &str =
+    "NTK_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER";
+const NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV: &str =
+    "NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD";
+const NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV: &str =
+    "NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD";
+const NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV: &str =
+    "NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL";
+const NTK_AI_PROVIDER_CHAIN_ENV: &str = "NTK_AI_PROVIDER_CHAIN";
+const NTK_AI_FALLBACK_PROVIDER_ENV: &str = "NTK_AI_FALLBACK_PROVIDER";
+const NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS_ENV: &str = "NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS";
+const NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS_ENV: &str = "NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS";
+const NTK_AI_SLO_MAX_P95_LATENCY_MS_ENV: &str = "NTK_AI_SLO_MAX_P95_LATENCY_MS";
+const NTK_AI_SLO_MIN_SUCCESS_RATE_PCT_ENV: &str = "NTK_AI_SLO_MIN_SUCCESS_RATE_PCT";
+const NTK_AI_SLO_MAX_TOKENS_PER_TASK_ENV: &str = "NTK_AI_SLO_MAX_TOKENS_PER_TASK";
+const NTK_AI_SLO_MAX_COST_USD_PER_TASK_ENV: &str = "NTK_AI_SLO_MAX_COST_USD_PER_TASK";
 
 #[derive(Debug, Clone, Copy)]
 struct AiRateLimitPolicy {
@@ -112,6 +169,238 @@ impl Default for AiRetryPolicy {
             request_timeout: Duration::from_millis(DEFAULT_AI_REQUEST_TIMEOUT_MS),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiPromptCompactionTier {
+    Off,
+    Balanced,
+    Aggressive,
+}
+
+impl AiPromptCompactionTier {
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" | "disabled" => Some(Self::Off),
+            "balanced" | "default" => Some(Self::Balanced),
+            "aggressive" | "high" => Some(Self::Aggressive),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AiTokenEconomyPolicy {
+    max_input_tokens_per_request: u64,
+    max_output_tokens_per_request: u64,
+    max_total_tokens_per_request: u64,
+    max_session_tokens_total: u64,
+    max_cost_usd_per_request: f64,
+    prompt_compaction_tier: AiPromptCompactionTier,
+    cache_first_enabled: bool,
+}
+
+impl Default for AiTokenEconomyPolicy {
+    fn default() -> Self {
+        Self {
+            max_input_tokens_per_request: DEFAULT_AI_TOKEN_BUDGET_INPUT_PER_REQUEST,
+            max_output_tokens_per_request: DEFAULT_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST,
+            max_total_tokens_per_request: DEFAULT_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST,
+            max_session_tokens_total: DEFAULT_AI_TOKEN_BUDGET_SESSION_TOTAL,
+            max_cost_usd_per_request: DEFAULT_AI_COST_BUDGET_USD_PER_REQUEST,
+            prompt_compaction_tier: AiPromptCompactionTier::Balanced,
+            cache_first_enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AiSloPolicy {
+    max_p95_latency_ms: f64,
+    min_success_rate_pct: f64,
+    max_tokens_per_task: f64,
+    max_cost_usd_per_task: f64,
+}
+
+impl Default for AiSloPolicy {
+    fn default() -> Self {
+        Self {
+            max_p95_latency_ms: DEFAULT_AI_SLO_MAX_P95_LATENCY_MS,
+            min_success_rate_pct: DEFAULT_AI_SLO_MIN_SUCCESS_RATE_PCT,
+            max_tokens_per_task: DEFAULT_AI_SLO_MAX_TOKENS_PER_TASK,
+            max_cost_usd_per_task: DEFAULT_AI_SLO_MAX_COST_USD_PER_TASK,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiModelSelectionTier {
+    Cheap,
+    Reasoning,
+}
+
+impl AiModelSelectionTier {
+    const fn as_label(self) -> &'static str {
+        match self {
+            Self::Cheap => "cheap",
+            Self::Reasoning => "reasoning",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AiModelSelectionPolicy {
+    enabled: bool,
+    cheap_model: Option<String>,
+    reasoning_model: Option<String>,
+    cheap_intents: Vec<AiIntent>,
+    reasoning_intents: Vec<AiIntent>,
+    cheap_cost_multiplier: f64,
+    reasoning_cost_multiplier: f64,
+    cheap_cost_cap_usd: Option<f64>,
+    reasoning_cost_cap_usd: Option<f64>,
+    fallback_to_cheap_on_guardrail: bool,
+}
+
+impl Default for AiModelSelectionPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cheap_model: None,
+            reasoning_model: None,
+            cheap_intents: vec![AiIntent::Ask],
+            reasoning_intents: vec![AiIntent::Plan, AiIntent::Explain, AiIntent::ApplyDryRun],
+            cheap_cost_multiplier: DEFAULT_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER,
+            reasoning_cost_multiplier: DEFAULT_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER,
+            cheap_cost_cap_usd: None,
+            reasoning_cost_cap_usd: None,
+            fallback_to_cheap_on_guardrail: true,
+        }
+    }
+}
+
+impl AiModelSelectionPolicy {
+    fn tier_for_intent(&self, intent: AiIntent) -> AiModelSelectionTier {
+        if self.reasoning_intents.contains(&intent) {
+            return AiModelSelectionTier::Reasoning;
+        }
+        if self.cheap_intents.contains(&intent) {
+            return AiModelSelectionTier::Cheap;
+        }
+
+        if matches!(intent, AiIntent::Ask) {
+            AiModelSelectionTier::Cheap
+        } else {
+            AiModelSelectionTier::Reasoning
+        }
+    }
+
+    fn model_for_tier(&self, tier: AiModelSelectionTier) -> Option<String> {
+        match tier {
+            AiModelSelectionTier::Cheap => self
+                .cheap_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(ToOwned::to_owned),
+            AiModelSelectionTier::Reasoning => self
+                .reasoning_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(ToOwned::to_owned),
+        }
+    }
+
+    fn cost_multiplier_for_tier(&self, tier: AiModelSelectionTier) -> f64 {
+        match tier {
+            AiModelSelectionTier::Cheap => self.cheap_cost_multiplier,
+            AiModelSelectionTier::Reasoning => self.reasoning_cost_multiplier,
+        }
+    }
+
+    fn cost_cap_for_tier(&self, tier: AiModelSelectionTier) -> Option<f64> {
+        match tier {
+            AiModelSelectionTier::Cheap => self.cheap_cost_cap_usd,
+            AiModelSelectionTier::Reasoning => self.reasoning_cost_cap_usd,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AiModelSelectionDecision {
+    tier: AiModelSelectionTier,
+    model: Option<String>,
+}
+
+impl AiModelSelectionDecision {
+    fn model_label(&self) -> &str {
+        self.model
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .unwrap_or("provider-default")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AiRequestBudgetEstimate {
+    input_tokens: u64,
+    output_tokens: u64,
+    total_tokens: u64,
+    session_tokens_before: u64,
+    estimated_cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiProviderKind {
+    Mock,
+    OpenAiCompatible,
+}
+
+impl AiProviderKind {
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mock" => Some(Self::Mock),
+            "openai" | "openai-compatible" => Some(Self::OpenAiCompatible),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AiProviderRouteTimeoutBudget {
+    primary: Duration,
+    secondary: Duration,
+}
+
+impl Default for AiProviderRouteTimeoutBudget {
+    fn default() -> Self {
+        Self {
+            primary: Duration::from_millis(DEFAULT_AI_REQUEST_TIMEOUT_MS),
+            secondary: Duration::from_millis(DEFAULT_AI_REQUEST_TIMEOUT_MS),
+        }
+    }
+}
+
+struct AiProviderRoute {
+    provider: Box<dyn AiProvider>,
+    timeout_budget: Duration,
+}
+
+#[derive(Debug)]
+struct AiProviderRouteSuccess {
+    provider_id: String,
+    chunks: Vec<AiChunk>,
+    retries: usize,
+    failovers: usize,
+}
+
+#[derive(Debug)]
+struct AiProviderRouteFailure {
+    provider_id: String,
+    error: AiProviderError,
+    failovers: usize,
 }
 
 #[derive(Debug)]
@@ -260,6 +549,405 @@ impl ServiceAutomationPolicy {
         }
         intents.join(",")
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ToolCapability {
+    AiAsk,
+    AiPlan,
+    AiExplain,
+    AiApplyDryRun,
+    CommandExecution,
+    RepoWorkflowExecute,
+    RepoWorkflowPush,
+    RepoWorkflowPullRequest,
+}
+
+impl ToolCapability {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AiAsk => "ai.ask",
+            Self::AiPlan => "ai.plan",
+            Self::AiExplain => "ai.explain",
+            Self::AiApplyDryRun => "ai.apply.dry-run",
+            Self::CommandExecution => "task.command.execute",
+            Self::RepoWorkflowExecute => "repo.workflow.execute",
+            Self::RepoWorkflowPush => "repo.workflow.push",
+            Self::RepoWorkflowPullRequest => "repo.workflow.pr",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ai.ask" | "ai-ask" | "ask" => Some(Self::AiAsk),
+            "ai.plan" | "ai-plan" | "plan" => Some(Self::AiPlan),
+            "ai.explain" | "ai-explain" | "explain" => Some(Self::AiExplain),
+            "ai.apply.dry-run" | "ai-apply-dry-run" | "apply-dry-run" | "apply" => {
+                Some(Self::AiApplyDryRun)
+            }
+            "task.command.execute" | "command.execute" | "task-command" | "command" => {
+                Some(Self::CommandExecution)
+            }
+            "repo.workflow.execute" | "repo-workflow.execute" | "repo-workflow" | "repo" => {
+                Some(Self::RepoWorkflowExecute)
+            }
+            "repo.workflow.push" | "repo-workflow.push" | "repo-push" => {
+                Some(Self::RepoWorkflowPush)
+            }
+            "repo.workflow.pr" | "repo-workflow.pr" | "repo-pr" | "pull-request" => {
+                Some(Self::RepoWorkflowPullRequest)
+            }
+            _ => None,
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        const ALL: [ToolCapability; 8] = [
+            ToolCapability::AiAsk,
+            ToolCapability::AiPlan,
+            ToolCapability::AiExplain,
+            ToolCapability::AiApplyDryRun,
+            ToolCapability::CommandExecution,
+            ToolCapability::RepoWorkflowExecute,
+            ToolCapability::RepoWorkflowPush,
+            ToolCapability::RepoWorkflowPullRequest,
+        ];
+        &ALL
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ToolScopePolicy {
+    enabled: bool,
+    allowed_tools: HashSet<ToolCapability>,
+    ai_ask_scope: HashSet<ToolCapability>,
+    ai_plan_scope: HashSet<ToolCapability>,
+    ai_explain_scope: HashSet<ToolCapability>,
+    ai_apply_dry_run_scope: HashSet<ToolCapability>,
+    command_execution_scope: HashSet<ToolCapability>,
+    repo_workflow_scope: HashSet<ToolCapability>,
+}
+
+impl ToolScopePolicy {
+    fn for_runtime(runtime_mode: RuntimeMode) -> Self {
+        Self {
+            enabled: runtime_mode == RuntimeMode::Service,
+            allowed_tools: HashSet::new(),
+            ai_ask_scope: default_tool_scope_for_intent(TaskIntentKind::AiAsk),
+            ai_plan_scope: default_tool_scope_for_intent(TaskIntentKind::AiPlan),
+            ai_explain_scope: default_tool_scope_for_intent(TaskIntentKind::AiExplain),
+            ai_apply_dry_run_scope: default_tool_scope_for_intent(TaskIntentKind::AiApplyDryRun),
+            command_execution_scope: default_tool_scope_for_intent(
+                TaskIntentKind::CommandExecution,
+            ),
+            repo_workflow_scope: default_tool_scope_for_intent(TaskIntentKind::RepoWorkflow),
+        }
+    }
+
+    fn intent_scope(&self, intent: TaskIntentKind) -> &HashSet<ToolCapability> {
+        match intent {
+            TaskIntentKind::AiAsk => &self.ai_ask_scope,
+            TaskIntentKind::AiPlan => &self.ai_plan_scope,
+            TaskIntentKind::AiExplain => &self.ai_explain_scope,
+            TaskIntentKind::AiApplyDryRun => &self.ai_apply_dry_run_scope,
+            TaskIntentKind::CommandExecution => &self.command_execution_scope,
+            TaskIntentKind::RepoWorkflow => &self.repo_workflow_scope,
+        }
+    }
+
+    fn set_intent_scope(&mut self, intent: TaskIntentKind, scope: HashSet<ToolCapability>) {
+        match intent {
+            TaskIntentKind::AiAsk => self.ai_ask_scope = scope,
+            TaskIntentKind::AiPlan => self.ai_plan_scope = scope,
+            TaskIntentKind::AiExplain => self.ai_explain_scope = scope,
+            TaskIntentKind::AiApplyDryRun => self.ai_apply_dry_run_scope = scope,
+            TaskIntentKind::CommandExecution => self.command_execution_scope = scope,
+            TaskIntentKind::RepoWorkflow => self.repo_workflow_scope = scope,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct ToolScopeAuditRecord {
+    timestamp_unix_ms: u64,
+    runtime_mode: String,
+    intent: String,
+    required_tools: Vec<String>,
+    decision: String,
+    reason: String,
+    source: String,
+}
+
+fn tool_scope_intent_env(intent: TaskIntentKind) -> &'static str {
+    match intent {
+        TaskIntentKind::CommandExecution => NTK_TOOL_SCOPE_INTENT_COMMAND_EXECUTION_TOOLS_ENV,
+        TaskIntentKind::AiAsk => NTK_TOOL_SCOPE_INTENT_AI_ASK_TOOLS_ENV,
+        TaskIntentKind::AiPlan => NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS_ENV,
+        TaskIntentKind::AiExplain => NTK_TOOL_SCOPE_INTENT_AI_EXPLAIN_TOOLS_ENV,
+        TaskIntentKind::AiApplyDryRun => NTK_TOOL_SCOPE_INTENT_AI_APPLY_DRY_RUN_TOOLS_ENV,
+        TaskIntentKind::RepoWorkflow => NTK_TOOL_SCOPE_INTENT_REPO_WORKFLOW_TOOLS_ENV,
+    }
+}
+
+fn default_tool_scope_for_intent(intent: TaskIntentKind) -> HashSet<ToolCapability> {
+    let mut scope = HashSet::new();
+    match intent {
+        TaskIntentKind::AiAsk => {
+            scope.insert(ToolCapability::AiAsk);
+        }
+        TaskIntentKind::AiPlan => {
+            scope.insert(ToolCapability::AiPlan);
+        }
+        TaskIntentKind::AiExplain => {
+            scope.insert(ToolCapability::AiExplain);
+        }
+        TaskIntentKind::AiApplyDryRun => {
+            scope.insert(ToolCapability::AiApplyDryRun);
+        }
+        TaskIntentKind::CommandExecution => {
+            scope.insert(ToolCapability::CommandExecution);
+        }
+        TaskIntentKind::RepoWorkflow => {
+            scope.insert(ToolCapability::RepoWorkflowExecute);
+            scope.insert(ToolCapability::RepoWorkflowPush);
+            scope.insert(ToolCapability::RepoWorkflowPullRequest);
+        }
+    }
+    scope
+}
+
+fn parse_tool_capability_set(value: &str) -> HashSet<ToolCapability> {
+    let mut scopes = HashSet::new();
+    for entry in value.split([',', ';', '|']) {
+        let normalized = entry.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+
+        if matches!(normalized.as_str(), "*" | "all") {
+            scopes.extend(ToolCapability::all().iter().copied());
+            continue;
+        }
+
+        if let Some(parsed) = ToolCapability::parse(&normalized) {
+            scopes.insert(parsed);
+        }
+    }
+    scopes
+}
+
+fn required_tool_capabilities_for_intent(
+    intent: TaskIntentKind,
+    payload: &str,
+) -> Vec<ToolCapability> {
+    let mut scopes = HashSet::new();
+    match intent {
+        TaskIntentKind::AiAsk => {
+            scopes.insert(ToolCapability::AiAsk);
+        }
+        TaskIntentKind::AiPlan => {
+            scopes.insert(ToolCapability::AiPlan);
+        }
+        TaskIntentKind::AiExplain => {
+            scopes.insert(ToolCapability::AiExplain);
+        }
+        TaskIntentKind::AiApplyDryRun => {
+            scopes.insert(ToolCapability::AiApplyDryRun);
+        }
+        TaskIntentKind::CommandExecution => {
+            scopes.insert(ToolCapability::CommandExecution);
+        }
+        TaskIntentKind::RepoWorkflow => {
+            scopes.insert(ToolCapability::RepoWorkflowExecute);
+            if let Ok(request) = parse_repo_workflow_payload(payload) {
+                if request.push {
+                    scopes.insert(ToolCapability::RepoWorkflowPush);
+                }
+                if request.open_pull_request {
+                    scopes.insert(ToolCapability::RepoWorkflowPullRequest);
+                }
+            }
+        }
+    }
+
+    let mut required = scopes.into_iter().collect::<Vec<_>>();
+    required.sort_by_key(|scope| scope.as_str());
+    required
+}
+
+fn sorted_tool_capability_labels(scopes: &[ToolCapability]) -> Vec<String> {
+    let mut labels = scopes
+        .iter()
+        .map(|scope| scope.as_str().to_string())
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels
+}
+
+fn tool_scope_policy_from_env(runtime_mode: RuntimeMode) -> ToolScopePolicy {
+    let mut policy = ToolScopePolicy::for_runtime(runtime_mode);
+
+    if let Ok(value) = std::env::var(NTK_TOOL_SCOPE_ENABLED_ENV) {
+        if let Some(parsed) = parse_bool(&value) {
+            policy.enabled = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV) {
+        policy.allowed_tools = parse_tool_capability_set(&value);
+    }
+
+    for intent in [
+        TaskIntentKind::CommandExecution,
+        TaskIntentKind::AiAsk,
+        TaskIntentKind::AiPlan,
+        TaskIntentKind::AiExplain,
+        TaskIntentKind::AiApplyDryRun,
+        TaskIntentKind::RepoWorkflow,
+    ] {
+        if let Ok(value) = std::env::var(tool_scope_intent_env(intent)) {
+            policy.set_intent_scope(intent, parse_tool_capability_set(&value));
+        }
+    }
+
+    policy
+}
+
+fn evaluate_tool_scope_policy(
+    policy: &ToolScopePolicy,
+    intent: TaskIntentKind,
+    required_scopes: &[ToolCapability],
+) -> Result<(), String> {
+    if !policy.enabled {
+        return Ok(());
+    }
+
+    if required_scopes.is_empty() {
+        return Err("no required tool scopes resolved for intent; deny-by-default".to_string());
+    }
+
+    let intent_scope = policy.intent_scope(intent);
+    if intent_scope.is_empty() {
+        return Err(format!(
+            "intent `{}` has no allowed tools configured ({})",
+            task_intent_kind_label(intent),
+            tool_scope_intent_env(intent)
+        ));
+    }
+
+    for scope in required_scopes {
+        if !policy.allowed_tools.contains(scope) {
+            return Err(format!(
+                "tool `{}` is not allowlisted globally ({})",
+                scope.as_str(),
+                NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV
+            ));
+        }
+        if !intent_scope.contains(scope) {
+            return Err(format!(
+                "tool `{}` is not allowed for intent `{}` ({})",
+                scope.as_str(),
+                task_intent_kind_label(intent),
+                tool_scope_intent_env(intent)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_tool_scope_audit_path() -> Option<PathBuf> {
+    if let Ok(path_override) = std::env::var(NTK_TOOL_SCOPE_AUDIT_PATH_ENV) {
+        let trimmed = path_override.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    std::env::current_dir().ok().map(|cwd| {
+        cwd.join(".temp")
+            .join("service")
+            .join("tool-scope-audit.jsonl")
+    })
+}
+
+fn append_tool_scope_audit_to(path: &Path, record: &ToolScopeAuditRecord) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let line = serde_json::to_string(record).map_err(io::Error::other)?;
+    writeln!(file, "{line}")?;
+    Ok(())
+}
+
+fn append_tool_scope_audit(
+    runtime_mode: RuntimeMode,
+    intent: TaskIntentKind,
+    required_scopes: &[ToolCapability],
+    decision: &str,
+    reason: &str,
+    source: &str,
+) {
+    let Some(path) = resolve_tool_scope_audit_path() else {
+        return;
+    };
+    let record = ToolScopeAuditRecord {
+        timestamp_unix_ms: current_unix_timestamp_ms(),
+        runtime_mode: runtime_mode.to_string(),
+        intent: task_intent_kind_label(intent).to_string(),
+        required_tools: sorted_tool_capability_labels(required_scopes),
+        decision: decision.to_string(),
+        reason: reason.to_string(),
+        source: source.to_string(),
+    };
+
+    let _ = append_tool_scope_audit_to(path.as_path(), &record);
+}
+
+fn enforce_task_tool_scope(
+    runtime_mode: RuntimeMode,
+    intent: TaskIntentKind,
+    payload: &str,
+    source: &str,
+    metrics: &Metrics,
+) -> Result<(), String> {
+    let policy = tool_scope_policy_from_env(runtime_mode);
+    if !policy.enabled {
+        return Ok(());
+    }
+
+    let required_scopes = required_tool_capabilities_for_intent(intent, payload);
+    let decision = evaluate_tool_scope_policy(&policy, intent, &required_scopes);
+
+    metrics.increment_counter("runtime_tool_scope_decisions_total");
+    match &decision {
+        Ok(()) => {
+            metrics.increment_counter("runtime_tool_scope_approved_total");
+            append_tool_scope_audit(
+                runtime_mode,
+                intent,
+                &required_scopes,
+                "approved",
+                "required tools are allowlisted globally and for intent scope",
+                source,
+            );
+        }
+        Err(reason) => {
+            metrics.increment_counter("runtime_tool_scope_denied_total");
+            append_tool_scope_audit(
+                runtime_mode,
+                intent,
+                &required_scopes,
+                "denied",
+                reason,
+                source,
+            );
+        }
+    }
+
+    decision
 }
 
 #[derive(Debug)]
@@ -769,58 +1457,6 @@ fn print_execution_summary(summary: &nettoolskit_manifest::core::models::Executi
     );
 }
 
-fn parse_translate_request(
-    parts: &[&str],
-) -> Result<nettoolskit_translate::TranslateRequest, String> {
-    let mut from: Option<String> = None;
-    let mut to: Option<String> = None;
-    let mut path: Option<String> = None;
-    let mut index = 1;
-
-    while index < parts.len() {
-        match parts[index] {
-            "--from" => {
-                let value = parts
-                    .get(index + 1)
-                    .ok_or_else(|| "missing value for --from".to_string())?;
-                if value.starts_with("--") {
-                    return Err("missing value for --from".to_string());
-                }
-                from = Some((*value).to_string());
-                index += 2;
-            }
-            "--to" => {
-                let value = parts
-                    .get(index + 1)
-                    .ok_or_else(|| "missing value for --to".to_string())?;
-                if value.starts_with("--") {
-                    return Err("missing value for --to".to_string());
-                }
-                to = Some((*value).to_string());
-                index += 2;
-            }
-            other if other.starts_with("--") => {
-                return Err(format!("unknown flag '{other}'"));
-            }
-            positional => {
-                if path.is_some() {
-                    return Err(format!(
-                        "unexpected positional argument '{positional}' (only one template path is allowed)"
-                    ));
-                }
-                path = Some(positional.to_string());
-                index += 1;
-            }
-        }
-    }
-
-    let from = from.ok_or_else(|| "missing --from <language>".to_string())?;
-    let to = to.ok_or_else(|| "missing --to <language>".to_string())?;
-    let path = path.ok_or_else(|| "missing template path".to_string())?;
-
-    Ok(nettoolskit_translate::TranslateRequest { from, to, path })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AiIntent {
     Ask,
@@ -900,6 +1536,236 @@ fn parse_nonzero_usize(value: &str) -> Option<usize> {
 fn parse_positive_f64(value: &str) -> Option<f64> {
     let parsed = value.trim().parse::<f64>().ok()?;
     (parsed > 0.0).then_some(parsed)
+}
+
+fn parse_nonzero_u64(value: &str) -> Option<u64> {
+    let parsed = value.trim().parse::<u64>().ok()?;
+    (parsed > 0).then_some(parsed)
+}
+
+fn ai_token_economy_policy_from_env() -> AiTokenEconomyPolicy {
+    let mut policy = AiTokenEconomyPolicy::default();
+
+    if let Ok(value) = std::env::var(NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV) {
+        if let Some(parsed) = parse_nonzero_u64(&value) {
+            policy.max_input_tokens_per_request = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV) {
+        if let Some(parsed) = parse_nonzero_u64(&value) {
+            policy.max_output_tokens_per_request = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV) {
+        if let Some(parsed) = parse_nonzero_u64(&value) {
+            policy.max_total_tokens_per_request = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_TOKEN_BUDGET_SESSION_TOTAL_ENV) {
+        if let Some(parsed) = parse_nonzero_u64(&value) {
+            policy.max_session_tokens_total = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.max_cost_usd_per_request = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_PROMPT_COMPACTION_TIER_ENV) {
+        if let Some(parsed) = AiPromptCompactionTier::parse(&value) {
+            policy.prompt_compaction_tier = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_CACHE_FIRST_ENABLED_ENV) {
+        if let Some(parsed) = parse_bool(&value) {
+            policy.cache_first_enabled = parsed;
+        }
+    }
+
+    policy
+}
+
+fn ai_slo_policy_from_env() -> AiSloPolicy {
+    let mut policy = AiSloPolicy::default();
+
+    if let Ok(value) = std::env::var(NTK_AI_SLO_MAX_P95_LATENCY_MS_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.max_p95_latency_ms = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_SLO_MIN_SUCCESS_RATE_PCT_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.min_success_rate_pct = parsed.clamp(0.0, 100.0);
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_SLO_MAX_TOKENS_PER_TASK_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.max_tokens_per_task = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_SLO_MAX_COST_USD_PER_TASK_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.max_cost_usd_per_task = parsed;
+        }
+    }
+
+    policy
+}
+
+fn parse_ai_model_selection_intent(value: &str) -> Option<AiIntent> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "ask" | "ai-ask" => Some(AiIntent::Ask),
+        "plan" | "ai-plan" => Some(AiIntent::Plan),
+        "explain" | "ai-explain" => Some(AiIntent::Explain),
+        "apply" | "apply-dry-run" | "ai-apply-dry-run" => Some(AiIntent::ApplyDryRun),
+        _ => None,
+    }
+}
+
+fn parse_ai_model_selection_intents(value: &str) -> Vec<AiIntent> {
+    let mut intents = Vec::new();
+    for entry in value.split([',', ';', '|']) {
+        let normalized = entry.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+
+        if matches!(normalized.as_str(), "*" | "all") {
+            return vec![
+                AiIntent::Ask,
+                AiIntent::Plan,
+                AiIntent::Explain,
+                AiIntent::ApplyDryRun,
+            ];
+        }
+
+        if let Some(parsed) = parse_ai_model_selection_intent(&normalized) {
+            if !intents.contains(&parsed) {
+                intents.push(parsed);
+            }
+        }
+    }
+
+    intents
+}
+
+fn parse_ai_model_selection_model(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn ai_model_selection_policy_from_env() -> AiModelSelectionPolicy {
+    let mut policy = AiModelSelectionPolicy::default();
+
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_ENABLED_ENV) {
+        if let Some(parsed) = parse_bool(&value) {
+            policy.enabled = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_CHEAP_MODEL_ENV) {
+        policy.cheap_model = parse_ai_model_selection_model(&value);
+    }
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV) {
+        policy.reasoning_model = parse_ai_model_selection_model(&value);
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_CHEAP_INTENTS_ENV) {
+        let parsed = parse_ai_model_selection_intents(&value);
+        if !parsed.is_empty() {
+            policy.cheap_intents = parsed;
+        }
+    }
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_REASONING_INTENTS_ENV) {
+        let parsed = parse_ai_model_selection_intents(&value);
+        if !parsed.is_empty() {
+            policy.reasoning_intents = parsed;
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.cheap_cost_multiplier = parsed;
+        }
+    }
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.reasoning_cost_multiplier = parsed;
+        }
+    }
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.cheap_cost_cap_usd = Some(parsed);
+        }
+    }
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV) {
+        if let Some(parsed) = parse_positive_f64(&value) {
+            policy.reasoning_cost_cap_usd = Some(parsed);
+        }
+    }
+    if let Ok(value) = std::env::var(NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV) {
+        if let Some(parsed) = parse_bool(&value) {
+            policy.fallback_to_cheap_on_guardrail = parsed;
+        }
+    }
+
+    policy
+}
+
+fn select_ai_model_for_intent(
+    policy: &AiModelSelectionPolicy,
+    intent: AiIntent,
+) -> AiModelSelectionDecision {
+    let tier = policy.tier_for_intent(intent);
+    let model = if policy.enabled {
+        policy.model_for_tier(tier)
+    } else {
+        None
+    };
+
+    AiModelSelectionDecision { tier, model }
+}
+
+fn fallback_ai_model_selection_to_cheap(
+    policy: &AiModelSelectionPolicy,
+    current: &AiModelSelectionDecision,
+) -> Option<AiModelSelectionDecision> {
+    if !policy.enabled
+        || !policy.fallback_to_cheap_on_guardrail
+        || current.tier != AiModelSelectionTier::Reasoning
+    {
+        return None;
+    }
+
+    let cheap_model = policy.model_for_tier(AiModelSelectionTier::Cheap)?;
+    if current.model.as_deref().map(str::trim) == Some(cheap_model.as_str()) {
+        return None;
+    }
+
+    Some(AiModelSelectionDecision {
+        tier: AiModelSelectionTier::Cheap,
+        model: Some(cheap_model),
+    })
+}
+
+fn apply_ai_model_selection_to_request(
+    request: &mut AiRequest,
+    selection: &AiModelSelectionDecision,
+) {
+    request.model = selection.model.clone();
 }
 
 fn ai_retry_policy_from_env() -> AiRetryPolicy {
@@ -1076,6 +1942,104 @@ fn update_ai_request_rate_gauges(metrics: &Metrics) {
         "runtime_ai_timeout_rate_pct",
         (timeouts / total_f64) * 100.0,
     );
+    update_ai_slo_gauges(metrics);
+}
+
+fn update_ai_slo_gauges(metrics: &Metrics) {
+    if let Some(p95_latency) = metrics.get_timing_percentile("runtime_ai_request_latency", 95.0) {
+        metrics.set_gauge(
+            "runtime_ai_request_latency_p95_ms",
+            p95_latency.as_secs_f64() * 1000.0,
+        );
+    }
+
+    let successful_requests = metrics.get_counter("runtime_ai_requests_success_total");
+    if successful_requests > 0 {
+        let successful_requests_f64 = successful_requests as f64;
+        if let Some(total_tokens) = metrics.get_gauge("runtime_ai_tokens_estimated_total") {
+            metrics.set_gauge(
+                "runtime_ai_tokens_per_task",
+                total_tokens / successful_requests_f64,
+            );
+        }
+        if let Some(total_cost) = metrics.get_gauge("runtime_ai_cost_estimate_total_usd") {
+            metrics.set_gauge(
+                "runtime_ai_cost_per_task_usd",
+                total_cost / successful_requests_f64,
+            );
+        }
+    }
+
+    let policy = ai_slo_policy_from_env();
+    metrics.set_gauge(
+        "runtime_ai_slo_max_p95_latency_ms",
+        policy.max_p95_latency_ms,
+    );
+    metrics.set_gauge(
+        "runtime_ai_slo_min_success_rate_pct",
+        policy.min_success_rate_pct,
+    );
+    metrics.set_gauge(
+        "runtime_ai_slo_max_tokens_per_task",
+        policy.max_tokens_per_task,
+    );
+    metrics.set_gauge(
+        "runtime_ai_slo_max_cost_usd_per_task",
+        policy.max_cost_usd_per_task,
+    );
+
+    let violations = evaluate_ai_slo_budget_compliance(metrics, policy);
+    metrics.set_gauge("runtime_ai_slo_violations_count", violations.len() as f64);
+    metrics.set_gauge(
+        "runtime_ai_slo_compliant",
+        if violations.is_empty() { 1.0 } else { 0.0 },
+    );
+}
+
+fn evaluate_ai_slo_budget_compliance(metrics: &Metrics, policy: AiSloPolicy) -> Vec<String> {
+    let mut violations = Vec::new();
+
+    if let Some(p95_latency_ms) = metrics.get_gauge("runtime_ai_request_latency_p95_ms") {
+        if p95_latency_ms > policy.max_p95_latency_ms {
+            violations.push(format!(
+                "p95 latency budget exceeded ({p95_latency_ms:.2}ms > {:.2}ms)",
+                policy.max_p95_latency_ms
+            ));
+        }
+    }
+
+    let total_requests = metrics.get_counter("runtime_ai_requests_total");
+    if total_requests > 0 {
+        let success_rate = metrics
+            .get_gauge("runtime_ai_success_rate_pct")
+            .unwrap_or_default();
+        if success_rate < policy.min_success_rate_pct {
+            violations.push(format!(
+                "success rate below SLO ({success_rate:.2}% < {:.2}%)",
+                policy.min_success_rate_pct
+            ));
+        }
+    }
+
+    if let Some(tokens_per_task) = metrics.get_gauge("runtime_ai_tokens_per_task") {
+        if tokens_per_task > policy.max_tokens_per_task {
+            violations.push(format!(
+                "tokens/task budget exceeded ({tokens_per_task:.2} > {:.2})",
+                policy.max_tokens_per_task
+            ));
+        }
+    }
+
+    if let Some(cost_per_task) = metrics.get_gauge("runtime_ai_cost_per_task_usd") {
+        if cost_per_task > policy.max_cost_usd_per_task {
+            violations.push(format!(
+                "cost/task budget exceeded (${cost_per_task:.4} > ${:.4})",
+                policy.max_cost_usd_per_task
+            ));
+        }
+    }
+
+    violations
 }
 
 fn estimate_token_count(text: &str) -> u64 {
@@ -1089,6 +2053,248 @@ fn estimate_request_input_tokens(request: &AiRequest) -> u64 {
         .iter()
         .map(|message| estimate_token_count(&message.content))
         .sum()
+}
+
+fn ai_intent_default_output_tokens(intent: AiIntent) -> u64 {
+    match intent {
+        AiIntent::Ask => 1024,
+        AiIntent::Plan => 1400,
+        AiIntent::Explain => 1200,
+        AiIntent::ApplyDryRun => 1600,
+    }
+}
+
+fn estimate_request_expected_output_tokens(request: &AiRequest, intent: AiIntent) -> u64 {
+    request
+        .max_output_tokens
+        .map(u64::from)
+        .unwrap_or_else(|| ai_intent_default_output_tokens(intent))
+}
+
+fn estimate_ai_request_cost_usd(input_tokens: u64, output_tokens: u64) -> f64 {
+    let input_rate = ai_input_cost_rate_per_1k_from_env();
+    let output_rate = ai_output_cost_rate_per_1k_from_env();
+    ((input_tokens as f64 / 1000.0) * input_rate) + ((output_tokens as f64 / 1000.0) * output_rate)
+}
+
+fn estimate_ai_model_tier_cost_from_tokens(
+    input_tokens: u64,
+    output_tokens: u64,
+    tier: AiModelSelectionTier,
+    policy: &AiModelSelectionPolicy,
+) -> f64 {
+    let base_cost = estimate_ai_request_cost_usd(input_tokens, output_tokens);
+    base_cost * policy.cost_multiplier_for_tier(tier)
+}
+
+fn estimate_ai_model_selection_cost_usd(
+    request: &AiRequest,
+    intent: AiIntent,
+    selection: &AiModelSelectionDecision,
+    policy: &AiModelSelectionPolicy,
+) -> f64 {
+    let input_tokens = estimate_request_input_tokens(request);
+    let output_tokens = estimate_request_expected_output_tokens(request, intent);
+    estimate_ai_model_tier_cost_from_tokens(input_tokens, output_tokens, selection.tier, policy)
+}
+
+fn evaluate_ai_model_selection_cost_guardrail(
+    request: &AiRequest,
+    intent: AiIntent,
+    selection: &AiModelSelectionDecision,
+    policy: &AiModelSelectionPolicy,
+) -> Result<f64, String> {
+    let estimated = estimate_ai_model_selection_cost_usd(request, intent, selection, policy);
+    if !policy.enabled {
+        return Ok(estimated);
+    }
+
+    let Some(cap) = policy.cost_cap_for_tier(selection.tier) else {
+        return Ok(estimated);
+    };
+
+    if estimated > cap {
+        let cap_env = match selection.tier {
+            AiModelSelectionTier::Cheap => NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV,
+            AiModelSelectionTier::Reasoning => NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV,
+        };
+        return Err(format!(
+            "model-tier `{}` cost guardrail exceeded (${estimated:.4} > ${cap:.4}); review {cap_env}",
+            selection.tier.as_label()
+        ));
+    }
+
+    Ok(estimated)
+}
+
+fn ai_model_selection_metric_tier_value(tier: AiModelSelectionTier) -> f64 {
+    match tier {
+        AiModelSelectionTier::Cheap => 1.0,
+        AiModelSelectionTier::Reasoning => 2.0,
+    }
+}
+
+fn estimate_ai_session_tokens(session: &LocalAiSessionState) -> u64 {
+    session
+        .exchanges
+        .iter()
+        .map(|exchange| {
+            estimate_token_count(&exchange.user_prompt)
+                .saturating_add(estimate_token_count(&exchange.assistant_response))
+        })
+        .sum()
+}
+
+fn truncate_text_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+
+    let marker = "... [compacted]";
+    let available = max_chars.saturating_sub(marker.chars().count());
+    let mut output = value.chars().take(available).collect::<String>();
+    output.push_str(marker);
+    output
+}
+
+fn apply_ai_prompt_compaction(
+    request: &mut AiRequest,
+    policy: AiTokenEconomyPolicy,
+    metrics: &Metrics,
+) {
+    if matches!(policy.prompt_compaction_tier, AiPromptCompactionTier::Off) {
+        return;
+    }
+
+    let mut removed_messages = 0_u64;
+    let mut truncated_user_prompt = false;
+
+    loop {
+        let input_tokens = estimate_request_input_tokens(request);
+        if input_tokens <= policy.max_input_tokens_per_request {
+            break;
+        }
+
+        let user_index = request.messages.len().saturating_sub(1);
+        let removable_index = match policy.prompt_compaction_tier {
+            AiPromptCompactionTier::Off => None,
+            AiPromptCompactionTier::Balanced => (1..user_index)
+                .find(|index| request.messages[*index].role != AiRole::System)
+                .or_else(|| (1..user_index).next()),
+            AiPromptCompactionTier::Aggressive => (1..user_index).next(),
+        };
+
+        if let Some(index) = removable_index {
+            request.messages.remove(index);
+            removed_messages = removed_messages.saturating_add(1);
+            continue;
+        }
+
+        if matches!(
+            policy.prompt_compaction_tier,
+            AiPromptCompactionTier::Aggressive
+        ) {
+            if let Some(user_message) = request.messages.last_mut() {
+                if user_message.role == AiRole::User {
+                    let max_chars = policy
+                        .max_input_tokens_per_request
+                        .saturating_mul(4)
+                        .max(128) as usize;
+                    if user_message.content.chars().count() > max_chars {
+                        user_message.content =
+                            truncate_text_chars(&user_message.content, max_chars);
+                        truncated_user_prompt = true;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        break;
+    }
+
+    metrics.set_gauge(
+        "runtime_ai_prompt_compaction_removed_messages",
+        removed_messages as f64,
+    );
+    metrics.set_gauge(
+        "runtime_ai_prompt_compaction_input_tokens",
+        estimate_request_input_tokens(request) as f64,
+    );
+    metrics.set_gauge(
+        "runtime_ai_prompt_compaction_user_prompt_truncated",
+        if truncated_user_prompt { 1.0 } else { 0.0 },
+    );
+
+    if removed_messages > 0 || truncated_user_prompt {
+        metrics.increment_counter("runtime_ai_prompt_compaction_applied_total");
+    }
+}
+
+fn evaluate_ai_request_budget(
+    request: &AiRequest,
+    intent: AiIntent,
+    active_session: &LocalAiSessionState,
+    policy: AiTokenEconomyPolicy,
+) -> Result<AiRequestBudgetEstimate, String> {
+    let input_tokens = estimate_request_input_tokens(request);
+    let output_tokens = estimate_request_expected_output_tokens(request, intent);
+    let total_tokens = input_tokens.saturating_add(output_tokens);
+    let session_tokens_before = estimate_ai_session_tokens(active_session);
+    let estimated_cost_usd = estimate_ai_request_cost_usd(input_tokens, output_tokens);
+
+    if input_tokens > policy.max_input_tokens_per_request {
+        return Err(format!(
+            "input token budget exceeded ({} > {})",
+            input_tokens, policy.max_input_tokens_per_request
+        ));
+    }
+
+    if output_tokens > policy.max_output_tokens_per_request {
+        return Err(format!(
+            "output token budget exceeded ({} > {})",
+            output_tokens, policy.max_output_tokens_per_request
+        ));
+    }
+
+    if total_tokens > policy.max_total_tokens_per_request {
+        return Err(format!(
+            "total token budget exceeded ({} > {})",
+            total_tokens, policy.max_total_tokens_per_request
+        ));
+    }
+
+    let session_projected = session_tokens_before.saturating_add(total_tokens);
+    if session_projected > policy.max_session_tokens_total {
+        return Err(format!(
+            "session token budget exceeded ({} > {})",
+            session_projected, policy.max_session_tokens_total
+        ));
+    }
+
+    if estimated_cost_usd > policy.max_cost_usd_per_request {
+        return Err(format!(
+            "request cost budget exceeded (${estimated_cost_usd:.4} > ${:.4})",
+            policy.max_cost_usd_per_request
+        ));
+    }
+
+    Ok(AiRequestBudgetEstimate {
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        session_tokens_before,
+        estimated_cost_usd,
+    })
+}
+
+fn ai_response_cache_key(intent: AiIntent, prompt: &str, provider_route: &str) -> CacheKey {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    intent.as_label().hash(&mut hasher);
+    provider_route.hash(&mut hasher);
+    prompt.trim().hash(&mut hasher);
+    let signature = format!("{}-{:016x}", intent.as_label(), hasher.finish());
+    CacheKey::ai_response(&signature)
 }
 
 fn add_gauge_value(metrics: &Metrics, name: &str, delta: f64) {
@@ -1138,10 +2344,7 @@ fn record_ai_usage_estimates(metrics: &Metrics, request: &AiRequest, output: &st
         total_tokens as f64,
     );
 
-    let input_rate = ai_input_cost_rate_per_1k_from_env();
-    let output_rate = ai_output_cost_rate_per_1k_from_env();
-    let estimated_cost = ((input_tokens as f64 / 1000.0) * input_rate)
-        + ((output_tokens as f64 / 1000.0) * output_rate);
+    let estimated_cost = estimate_ai_request_cost_usd(input_tokens, output_tokens);
 
     metrics.set_gauge("runtime_ai_last_cost_estimate_usd", estimated_cost);
     add_gauge_value(
@@ -1219,6 +2422,96 @@ async fn request_ai_stream_with_retry(
             }
         }
     }
+}
+
+async fn request_ai_stream_with_provider_fallback(
+    provider_routes: &[AiProviderRoute],
+    request: &AiRequest,
+    retry_policy: AiRetryPolicy,
+    metrics: &Metrics,
+    intent: AiIntent,
+) -> Result<AiProviderRouteSuccess, AiProviderRouteFailure> {
+    if provider_routes.is_empty() {
+        return Err(AiProviderRouteFailure {
+            provider_id: "unknown".to_string(),
+            error: AiProviderError::Unavailable("AI provider route is empty".to_string()),
+            failovers: 0,
+        });
+    }
+
+    let mut failovers = 0usize;
+    for (index, route) in provider_routes.iter().enumerate() {
+        let provider_id = route.provider.id();
+        let provider_metric = sanitize_metric_component(provider_id);
+        metrics.increment_counter(format!(
+            "runtime_ai_provider_{}_requests_total",
+            provider_metric
+        ));
+
+        let _ = nettoolskit_ui::append_footer_log(&format!(
+            "ai: provider attempt {}/{} id={} timeout={}ms",
+            index + 1,
+            provider_routes.len(),
+            provider_id,
+            route.timeout_budget.as_millis()
+        ));
+
+        let mut routed_retry_policy = retry_policy;
+        routed_retry_policy.request_timeout = route.timeout_budget;
+
+        match request_ai_stream_with_retry(
+            route.provider.as_ref(),
+            request,
+            routed_retry_policy,
+            metrics,
+            intent,
+        )
+        .await
+        {
+            Ok((chunks, retries)) => {
+                return Ok(AiProviderRouteSuccess {
+                    provider_id: provider_id.to_string(),
+                    chunks,
+                    retries,
+                    failovers,
+                });
+            }
+            Err(error) => {
+                let can_failover =
+                    (index + 1) < provider_routes.len() && is_retriable_ai_error(&error);
+                if can_failover {
+                    failovers = failovers.saturating_add(1);
+                    metrics.increment_counter(format!(
+                        "runtime_ai_provider_{}_error_total",
+                        provider_metric
+                    ));
+                    metrics.increment_counter("runtime_ai_provider_failovers_total");
+                    metrics.increment_counter(format!(
+                        "runtime_ai_intent_{}_provider_failovers_total",
+                        intent.as_label()
+                    ));
+                    set_ai_provider_health(metrics, provider_id, false);
+                    let _ = nettoolskit_ui::append_footer_log(&format!(
+                        "ai: fallback from provider={} reason={error}",
+                        provider_id
+                    ));
+                    continue;
+                }
+
+                return Err(AiProviderRouteFailure {
+                    provider_id: provider_id.to_string(),
+                    error,
+                    failovers,
+                });
+            }
+        }
+    }
+
+    Err(AiProviderRouteFailure {
+        provider_id: "unknown".to_string(),
+        error: AiProviderError::Unavailable("AI provider routing failed".to_string()),
+        failovers,
+    })
 }
 
 fn parse_ai_context_paths(value: &str) -> Vec<PathBuf> {
@@ -1307,47 +2600,167 @@ fn mocked_ai_response(intent: AiIntent, prompt: &str) -> AiResponse {
     AiResponse::new("mock-assistant", content)
 }
 
-fn ai_provider_from_env(intent: AiIntent, prompt: &str) -> Result<Box<dyn AiProvider>, String> {
-    let provider_name = std::env::var("NTK_AI_PROVIDER")
-        .unwrap_or_else(|_| "mock".to_string())
-        .trim()
-        .to_ascii_lowercase();
+fn parse_ai_provider_chain(value: &str) -> Result<Vec<AiProviderKind>, String> {
+    let mut providers = Vec::new();
 
-    if provider_name == "openai" || provider_name == "openai-compatible" {
-        let mut config = OpenAiCompatibleProviderConfig::default();
-        if let Ok(endpoint) = std::env::var("NTK_AI_ENDPOINT") {
-            if !endpoint.trim().is_empty() {
-                config.endpoint = endpoint;
-            }
-        }
-        if let Ok(api_key) = std::env::var("NTK_AI_API_KEY") {
-            if !api_key.trim().is_empty() {
-                config.api_key = Some(api_key);
-            }
-        }
-        if let Ok(model) = std::env::var("NTK_AI_MODEL") {
-            if !model.trim().is_empty() {
-                config.default_model = model;
-            }
-        }
-        if let Ok(timeout_ms) = std::env::var("NTK_AI_TIMEOUT_MS") {
-            if let Some(value) = parse_timeout_millis(&timeout_ms) {
-                config.timeout = Duration::from_millis(value);
-            }
-        }
-        if let Ok(fallback) = std::env::var("NTK_AI_FALLBACK_TEXT") {
-            if !fallback.trim().is_empty() {
-                config.fallback_output_text = Some(fallback);
-            }
+    for entry in value.split([',', ';']) {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
         }
 
-        let provider = OpenAiCompatibleProvider::new(config).map_err(|error| error.to_string())?;
-        return Ok(Box::new(provider));
+        let kind = AiProviderKind::parse(trimmed).ok_or_else(|| {
+            format!(
+                "unsupported AI provider `{trimmed}` (allowed: mock, openai, openai-compatible)"
+            )
+        })?;
+
+        if !providers.contains(&kind) {
+            providers.push(kind);
+        }
     }
 
-    Ok(Box::new(MockAiProvider::new(mocked_ai_response(
-        intent, prompt,
-    ))))
+    if providers.is_empty() {
+        return Err("AI provider chain is empty".to_string());
+    }
+
+    providers.truncate(2);
+    Ok(providers)
+}
+
+fn ai_provider_chain_from_env() -> Result<Vec<AiProviderKind>, String> {
+    let mut providers = if let Ok(raw_chain) = std::env::var(NTK_AI_PROVIDER_CHAIN_ENV) {
+        parse_ai_provider_chain(&raw_chain)?
+    } else {
+        let primary_name = std::env::var("NTK_AI_PROVIDER").unwrap_or_else(|_| "mock".to_string());
+        let primary = AiProviderKind::parse(&primary_name).ok_or_else(|| {
+            format!(
+                "unsupported NTK_AI_PROVIDER `{}` (allowed: mock, openai, openai-compatible)",
+                primary_name.trim()
+            )
+        })?;
+        vec![primary]
+    };
+
+    if providers.len() == 1 {
+        if let Ok(raw_fallback) = std::env::var(NTK_AI_FALLBACK_PROVIDER_ENV) {
+            let fallback = AiProviderKind::parse(&raw_fallback).ok_or_else(|| {
+                format!(
+                    "unsupported NTK_AI_FALLBACK_PROVIDER `{}` (allowed: mock, openai, openai-compatible)",
+                    raw_fallback.trim()
+                )
+            })?;
+            if fallback != providers[0] {
+                providers.push(fallback);
+            }
+        } else if providers[0] != AiProviderKind::Mock {
+            providers.push(AiProviderKind::Mock);
+        }
+    }
+
+    providers.truncate(2);
+    Ok(providers)
+}
+
+fn ai_provider_route_timeout_budget_from_env(
+    default_timeout: Duration,
+) -> AiProviderRouteTimeoutBudget {
+    let mut budget = AiProviderRouteTimeoutBudget {
+        primary: default_timeout,
+        secondary: default_timeout,
+    };
+
+    if let Ok(value) = std::env::var(NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS_ENV) {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            budget.primary = Duration::from_millis(parsed);
+        }
+    }
+
+    if let Ok(value) = std::env::var(NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS_ENV) {
+        if let Some(parsed) = parse_timeout_millis(&value) {
+            budget.secondary = Duration::from_millis(parsed);
+        }
+    }
+
+    budget
+}
+
+fn ai_provider_from_kind(
+    kind: AiProviderKind,
+    intent: AiIntent,
+    prompt: &str,
+) -> Result<Box<dyn AiProvider>, String> {
+    match kind {
+        AiProviderKind::Mock => Ok(Box::new(MockAiProvider::new(mocked_ai_response(
+            intent, prompt,
+        )))),
+        AiProviderKind::OpenAiCompatible => {
+            let mut config = OpenAiCompatibleProviderConfig::default();
+            if let Ok(endpoint) = std::env::var("NTK_AI_ENDPOINT") {
+                if !endpoint.trim().is_empty() {
+                    config.endpoint = endpoint;
+                }
+            }
+            if let Ok(api_key) = std::env::var("NTK_AI_API_KEY") {
+                if !api_key.trim().is_empty() {
+                    config.api_key = Some(api_key);
+                }
+            }
+            if let Ok(model) = std::env::var("NTK_AI_MODEL") {
+                if !model.trim().is_empty() {
+                    config.default_model = model;
+                }
+            }
+            if let Ok(timeout_ms) = std::env::var("NTK_AI_TIMEOUT_MS") {
+                if let Some(value) = parse_timeout_millis(&timeout_ms) {
+                    config.timeout = Duration::from_millis(value);
+                }
+            }
+            if let Ok(fallback) = std::env::var("NTK_AI_FALLBACK_TEXT") {
+                if !fallback.trim().is_empty() {
+                    config.fallback_output_text = Some(fallback);
+                }
+            }
+
+            let provider =
+                OpenAiCompatibleProvider::new(config).map_err(|error| error.to_string())?;
+            Ok(Box::new(provider))
+        }
+    }
+}
+
+fn ai_provider_routes_from_env(
+    intent: AiIntent,
+    prompt: &str,
+    retry_policy: AiRetryPolicy,
+) -> Result<Vec<AiProviderRoute>, String> {
+    let provider_chain = ai_provider_chain_from_env()?;
+    let timeout_budget = ai_provider_route_timeout_budget_from_env(retry_policy.request_timeout);
+    let mut routes = Vec::with_capacity(provider_chain.len());
+
+    for (index, provider_kind) in provider_chain.iter().enumerate() {
+        let provider = ai_provider_from_kind(*provider_kind, intent, prompt)?;
+        let timeout_budget = if index == 0 {
+            timeout_budget.primary
+        } else {
+            timeout_budget.secondary
+        };
+
+        routes.push(AiProviderRoute {
+            provider,
+            timeout_budget,
+        });
+    }
+
+    Ok(routes)
+}
+
+fn ai_provider_route_label(provider_routes: &[AiProviderRoute]) -> String {
+    provider_routes
+        .iter()
+        .map(|route| route.provider.id())
+        .collect::<Vec<_>>()
+        .join(" -> ")
 }
 
 fn build_ai_request(intent: AiIntent, prompt: &str) -> AiRequest {
@@ -1550,7 +2963,7 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
         );
         println!(
             "{}",
-            "Operational controls: NTK_AI_MAX_RETRIES, NTK_AI_REQUEST_TIMEOUT_MS, NTK_AI_RATE_LIMIT_REQUESTS, NTK_AI_RATE_LIMIT_WINDOW_SECONDS."
+            "Operational controls: NTK_AI_PROVIDER_CHAIN/NTK_AI_FALLBACK_PROVIDER, NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS, NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS, NTK_AI_MAX_RETRIES, NTK_AI_REQUEST_TIMEOUT_MS, NTK_AI_RATE_LIMIT_REQUESTS, NTK_AI_RATE_LIMIT_WINDOW_SECONDS, NTK_AI_TOKEN_BUDGET_*, NTK_AI_COST_BUDGET_USD_PER_REQUEST, NTK_AI_PROMPT_COMPACTION_TIER, NTK_AI_CACHE_FIRST_ENABLED, NTK_AI_MODEL_SELECTION_*, NTK_AI_SESSION_COMPRESSION_*, NTK_AI_SLO_*."
                 .color(Color::YELLOW)
         );
         return ExitStatus::Success;
@@ -1664,15 +3077,16 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
         }
     }
 
-    let provider = match ai_provider_from_env(intent, &prompt) {
-        Ok(provider) => provider,
+    let retry_policy = ai_retry_policy_from_env();
+    let provider_routes = match ai_provider_routes_from_env(intent, &prompt, retry_policy) {
+        Ok(routes) => routes,
         Err(error) => {
             ai_metrics.increment_counter("runtime_ai_requests_error_total");
             ai_metrics.set_gauge("runtime_ai_provider_health", 0.0);
             update_ai_request_rate_gauges(&ai_metrics);
             println!(
                 "{} {}",
-                "✗ Failed to initialize AI provider:"
+                "✗ Failed to initialize AI provider route:"
                     .color(Color::RED)
                     .bold(),
                 error.color(Color::RED)
@@ -1680,6 +3094,7 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
             return ExitStatus::Error;
         }
     };
+    let provider_route_label = ai_provider_route_label(&provider_routes);
 
     let session_id = resolve_active_ai_session_id();
     let active_session = load_or_initialize_ai_session(&session_id);
@@ -1692,31 +3107,271 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
         let _ = nettoolskit_ui::append_footer_log("ai: context bundle attached");
     }
 
-    println!(
-        "{}",
-        format!("🤖 AI {} (provider: {})", intent.as_label(), provider.id())
-            .color(Color::CYAN)
-            .bold()
+    let model_selection_policy = ai_model_selection_policy_from_env();
+    let mut model_selection = select_ai_model_for_intent(&model_selection_policy, intent);
+    apply_ai_model_selection_to_request(&mut request, &model_selection);
+    ai_metrics.increment_counter("runtime_ai_model_selection_decisions_total");
+    ai_metrics.increment_counter(format!(
+        "runtime_ai_model_selection_tier_{}_total",
+        model_selection.tier.as_label()
+    ));
+    ai_metrics.set_gauge(
+        "runtime_ai_model_selection_last_tier",
+        ai_model_selection_metric_tier_value(model_selection.tier),
     );
 
-    let provider_id = provider.id();
-    let provider_metric = sanitize_metric_component(provider_id);
-    ai_metrics.increment_counter(format!(
-        "runtime_ai_provider_{}_requests_total",
-        provider_metric
-    ));
-    let retry_policy = ai_retry_policy_from_env();
+    let token_policy = ai_token_economy_policy_from_env();
+    apply_ai_prompt_compaction(&mut request, token_policy, &ai_metrics);
+    let mut budget_estimate =
+        match evaluate_ai_request_budget(&request, intent, &active_session, token_policy) {
+            Ok(estimate) => estimate,
+            Err(reason) => {
+                ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                ai_metrics.increment_counter("runtime_ai_budget_rejected_total");
+                update_ai_request_rate_gauges(&ai_metrics);
+                println!(
+                    "{} {}",
+                    "✗ AI request rejected by token-economy policy:"
+                        .color(Color::RED)
+                        .bold(),
+                    reason.color(Color::RED)
+                );
+                println!(
+                    "{} {} | {} | {} | {} | {}",
+                    "env:".color(Color::YELLOW),
+                    NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV.color(Color::CYAN),
+                    NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV.color(Color::CYAN),
+                    NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV.color(Color::CYAN),
+                    NTK_AI_TOKEN_BUDGET_SESSION_TOTAL_ENV.color(Color::CYAN),
+                    NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV.color(Color::CYAN)
+                );
+                return ExitStatus::Error;
+            }
+        };
+
+    let selected_tier_estimated_cost = match evaluate_ai_model_selection_cost_guardrail(
+        &request,
+        intent,
+        &model_selection,
+        &model_selection_policy,
+    ) {
+        Ok(cost) => cost,
+        Err(reason) => {
+            if let Some(fallback_selection) =
+                fallback_ai_model_selection_to_cheap(&model_selection_policy, &model_selection)
+            {
+                model_selection = fallback_selection;
+                apply_ai_model_selection_to_request(&mut request, &model_selection);
+                ai_metrics.increment_counter("runtime_ai_model_selection_guardrail_fallback_total");
+                ai_metrics.increment_counter("runtime_ai_model_selection_tier_cheap_total");
+                ai_metrics.set_gauge(
+                    "runtime_ai_model_selection_last_tier",
+                    ai_model_selection_metric_tier_value(model_selection.tier),
+                );
+                budget_estimate = match evaluate_ai_request_budget(
+                    &request,
+                    intent,
+                    &active_session,
+                    token_policy,
+                ) {
+                    Ok(estimate) => estimate,
+                    Err(recheck_reason) => {
+                        ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                        ai_metrics.increment_counter("runtime_ai_budget_rejected_total");
+                        update_ai_request_rate_gauges(&ai_metrics);
+                        println!(
+                            "{} {}",
+                            "✗ AI request rejected after model-tier fallback:"
+                                .color(Color::RED)
+                                .bold(),
+                            recheck_reason.color(Color::RED)
+                        );
+                        println!(
+                            "{} {} | {} | {} | {} | {}",
+                            "env:".color(Color::YELLOW),
+                            NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV.color(Color::CYAN),
+                            NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV.color(Color::CYAN),
+                            NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV.color(Color::CYAN),
+                            NTK_AI_TOKEN_BUDGET_SESSION_TOTAL_ENV.color(Color::CYAN),
+                            NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV.color(Color::CYAN)
+                        );
+                        return ExitStatus::Error;
+                    }
+                };
+
+                match evaluate_ai_model_selection_cost_guardrail(
+                    &request,
+                    intent,
+                    &model_selection,
+                    &model_selection_policy,
+                ) {
+                    Ok(fallback_cost) => {
+                        let _ = nettoolskit_ui::append_footer_log(&format!(
+                            "ai: downgraded model tier after guardrail ({} -> {})",
+                            AiModelSelectionTier::Reasoning.as_label(),
+                            AiModelSelectionTier::Cheap.as_label()
+                        ));
+                        fallback_cost
+                    }
+                    Err(fallback_reason) => {
+                        ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                        ai_metrics.increment_counter(
+                            "runtime_ai_model_selection_guardrail_rejected_total",
+                        );
+                        update_ai_request_rate_gauges(&ai_metrics);
+                        println!(
+                            "{} {}",
+                            "✗ AI request rejected by model-selection guardrail:"
+                                .color(Color::RED)
+                                .bold(),
+                            fallback_reason.color(Color::RED)
+                        );
+                        println!(
+                            "{} {} | {} | {} | {}",
+                            "env:".color(Color::YELLOW),
+                            NTK_AI_MODEL_SELECTION_ENABLED_ENV.color(Color::CYAN),
+                            NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV.color(Color::CYAN),
+                            NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV.color(Color::CYAN),
+                            NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV
+                                .color(Color::CYAN)
+                        );
+                        return ExitStatus::Error;
+                    }
+                }
+            } else {
+                ai_metrics.increment_counter("runtime_ai_requests_error_total");
+                ai_metrics.increment_counter("runtime_ai_model_selection_guardrail_rejected_total");
+                update_ai_request_rate_gauges(&ai_metrics);
+                println!(
+                    "{} {}",
+                    "✗ AI request rejected by model-selection guardrail:"
+                        .color(Color::RED)
+                        .bold(),
+                    reason.color(Color::RED)
+                );
+                println!(
+                    "{} {} | {} | {} | {}",
+                    "env:".color(Color::YELLOW),
+                    NTK_AI_MODEL_SELECTION_ENABLED_ENV.color(Color::CYAN),
+                    NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV.color(Color::CYAN),
+                    NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV.color(Color::CYAN),
+                    NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV.color(Color::CYAN)
+                );
+                return ExitStatus::Error;
+            }
+        }
+    };
+
+    ai_metrics.set_gauge(
+        "runtime_ai_budget_input_tokens",
+        budget_estimate.input_tokens as f64,
+    );
+    ai_metrics.set_gauge(
+        "runtime_ai_budget_output_tokens",
+        budget_estimate.output_tokens as f64,
+    );
+    ai_metrics.set_gauge(
+        "runtime_ai_budget_total_tokens",
+        budget_estimate.total_tokens as f64,
+    );
+    ai_metrics.set_gauge(
+        "runtime_ai_budget_session_tokens_before",
+        budget_estimate.session_tokens_before as f64,
+    );
+    ai_metrics.set_gauge(
+        "runtime_ai_budget_estimated_cost_usd",
+        budget_estimate.estimated_cost_usd,
+    );
+    ai_metrics.set_gauge(
+        "runtime_ai_model_selection_last_estimated_cost_usd",
+        selected_tier_estimated_cost,
+    );
+    ai_metrics.set_gauge(
+        "runtime_ai_model_selection_last_cost_cap_usd",
+        model_selection_policy
+            .cost_cap_for_tier(model_selection.tier)
+            .unwrap_or(0.0),
+    );
+
+    let ai_route_signature = format!(
+        "{}|tier:{}|model:{}",
+        provider_route_label,
+        model_selection.tier.as_label(),
+        model_selection.model_label()
+    );
+    let ai_cache_key = ai_response_cache_key(intent, &prompt, &ai_route_signature);
+    if token_policy.cache_first_enabled {
+        match with_command_cache(|cache| cache.get(&ai_cache_key)) {
+            Some(CacheValue::AiResponseText(cached_output)) => {
+                ai_metrics.increment_counter("runtime_ai_cache_hits_total");
+                ai_metrics.increment_counter(format!(
+                    "runtime_ai_intent_{}_cache_hits_total",
+                    intent.as_label()
+                ));
+                ai_metrics.set_gauge("runtime_ai_cache_last_hit", 1.0);
+                ai_metrics.increment_counter("runtime_ai_requests_success_total");
+                ai_metrics.increment_counter("runtime_ai_provider_cache_success_total");
+                record_ai_usage_estimates(&ai_metrics, &request, &cached_output);
+                set_ai_provider_health(&ai_metrics, "cache", true);
+                update_ai_request_rate_gauges(&ai_metrics);
+                println!(
+                    "{}",
+                    format!(
+                        "🤖 AI {} (route: {}, tier: {}, model: {}, source: cache)",
+                        intent.as_label(),
+                        provider_route_label,
+                        model_selection.tier.as_label(),
+                        model_selection.model_label()
+                    )
+                    .color(Color::CYAN)
+                    .bold()
+                );
+                print!("{cached_output}");
+                let _ = io::stdout().flush();
+                if !cached_output.ends_with('\n') {
+                    println!();
+                }
+                persist_ai_session_exchange(&session_id, intent, "cache", &prompt, &cached_output);
+                let _ = nettoolskit_ui::append_footer_log("ai: cache hit");
+                return ExitStatus::Success;
+            }
+            Some(_) | None => {
+                ai_metrics.increment_counter("runtime_ai_cache_misses_total");
+                ai_metrics.increment_counter(format!(
+                    "runtime_ai_intent_{}_cache_misses_total",
+                    intent.as_label()
+                ));
+                ai_metrics.set_gauge("runtime_ai_cache_last_hit", 0.0);
+            }
+        }
+    }
+
+    println!(
+        "{}",
+        format!(
+            "🤖 AI {} (route: {}, tier: {}, model: {})",
+            intent.as_label(),
+            provider_route_label,
+            model_selection.tier.as_label(),
+            model_selection.model_label()
+        )
+        .color(Color::CYAN)
+        .bold()
+    );
+
     let request_started = Instant::now();
 
     let _ = nettoolskit_ui::append_footer_log(&format!(
-        "ai: mode={} provider={} stream=start",
+        "ai: mode={} provider_route={} tier={} model={} stream=start",
         intent.as_label(),
-        provider_id
+        provider_route_label,
+        model_selection.tier.as_label(),
+        model_selection.model_label()
     ));
     let _ = nettoolskit_ui::append_footer_log(&format!("ai: active_session={session_id}"));
 
-    match request_ai_stream_with_retry(
-        provider.as_ref(),
+    match request_ai_stream_with_provider_fallback(
+        &provider_routes,
         &request,
         retry_policy,
         &ai_metrics,
@@ -1724,10 +3379,16 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
     )
     .await
     {
-        Ok((chunks, retries)) => {
+        Ok(routed) => {
+            let provider_id = routed.provider_id.as_str();
+            let provider_metric = sanitize_metric_component(provider_id);
             ai_metrics.record_timing("runtime_ai_request_latency", request_started.elapsed());
-            ai_metrics.set_gauge("runtime_ai_last_retry_count", retries as f64);
-            if chunks.is_empty() {
+            ai_metrics.set_gauge("runtime_ai_last_retry_count", routed.retries as f64);
+            ai_metrics.set_gauge(
+                "runtime_ai_last_provider_failover_count",
+                routed.failovers as f64,
+            );
+            if routed.chunks.is_empty() {
                 ai_metrics.increment_counter("runtime_ai_requests_error_total");
                 ai_metrics.increment_counter("runtime_ai_requests_empty_stream_total");
                 set_ai_provider_health(&ai_metrics, provider_id, false);
@@ -1743,7 +3404,7 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
             }
 
             let mut output = String::new();
-            for chunk in chunks {
+            for chunk in routed.chunks {
                 if !chunk.content.is_empty() {
                     print!("{}", chunk.content);
                     let _ = io::stdout().flush();
@@ -1774,6 +3435,20 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
                 return ExitStatus::Error;
             }
 
+            if token_policy.cache_first_enabled {
+                let inserted = with_command_cache(|cache| {
+                    cache.insert(
+                        ai_cache_key.clone(),
+                        CacheValue::AiResponseText(output.clone()),
+                    )
+                });
+                if inserted {
+                    ai_metrics.increment_counter("runtime_ai_cache_inserts_total");
+                } else {
+                    ai_metrics.increment_counter("runtime_ai_cache_insert_rejected_total");
+                }
+            }
+
             persist_ai_session_exchange(&session_id, intent, provider_id, &prompt, &output);
             record_ai_usage_estimates(&ai_metrics, &request, &output);
             ai_metrics.increment_counter("runtime_ai_requests_success_total");
@@ -1786,13 +3461,20 @@ async fn process_ai_command(parts: &[&str], subcommand: Option<&str>) -> ExitSta
             let _ = nettoolskit_ui::append_footer_log("ai: stream completed");
             ExitStatus::Success
         }
-        Err(error) => {
+        Err(routed_error) => {
+            let provider_id = routed_error.provider_id.as_str();
+            let provider_metric = sanitize_metric_component(provider_id);
+            let error = routed_error.error;
             ai_metrics.increment_counter("runtime_ai_requests_error_total");
             ai_metrics.increment_counter(format!(
                 "runtime_ai_provider_{}_error_total",
                 provider_metric
             ));
             ai_metrics.record_timing("runtime_ai_request_latency", request_started.elapsed());
+            ai_metrics.set_gauge(
+                "runtime_ai_last_provider_failover_count",
+                routed_error.failovers as f64,
+            );
             if matches!(error, AiProviderError::Timeout { .. }) {
                 ai_metrics.increment_counter("runtime_ai_requests_timeout_total");
             }
@@ -1845,6 +3527,89 @@ fn parse_task_intent_kind(value: &str) -> Option<TaskIntentKind> {
         "repo-workflow" | "repo" | "repository-workflow" => Some(TaskIntentKind::RepoWorkflow),
         _ => None,
     }
+}
+
+fn ai_intent_from_task_intent(intent_kind: TaskIntentKind) -> Option<AiIntent> {
+    match intent_kind {
+        TaskIntentKind::AiAsk => Some(AiIntent::Ask),
+        TaskIntentKind::AiPlan => Some(AiIntent::Plan),
+        TaskIntentKind::AiExplain => Some(AiIntent::Explain),
+        TaskIntentKind::AiApplyDryRun => Some(AiIntent::ApplyDryRun),
+        TaskIntentKind::CommandExecution | TaskIntentKind::RepoWorkflow => None,
+    }
+}
+
+fn evaluate_ai_task_submit_budget(
+    intent: AiIntent,
+    payload: &str,
+    policy: AiTokenEconomyPolicy,
+    model_selection_policy: &AiModelSelectionPolicy,
+) -> Result<AiRequestBudgetEstimate, String> {
+    let input_tokens =
+        estimate_token_count(intent.system_prompt()).saturating_add(estimate_token_count(payload));
+    let output_tokens = ai_intent_default_output_tokens(intent);
+    let total_tokens = input_tokens.saturating_add(output_tokens);
+    let estimated_cost_usd = estimate_ai_request_cost_usd(input_tokens, output_tokens);
+
+    if input_tokens > policy.max_input_tokens_per_request {
+        return Err(format!(
+            "task payload token budget exceeded ({} > {})",
+            input_tokens, policy.max_input_tokens_per_request
+        ));
+    }
+
+    if output_tokens > policy.max_output_tokens_per_request {
+        return Err(format!(
+            "task output token budget exceeded ({} > {})",
+            output_tokens, policy.max_output_tokens_per_request
+        ));
+    }
+
+    if total_tokens > policy.max_total_tokens_per_request {
+        return Err(format!(
+            "task total token budget exceeded ({} > {})",
+            total_tokens, policy.max_total_tokens_per_request
+        ));
+    }
+
+    if estimated_cost_usd > policy.max_cost_usd_per_request {
+        return Err(format!(
+            "task estimated cost budget exceeded (${estimated_cost_usd:.4} > ${:.4})",
+            policy.max_cost_usd_per_request
+        ));
+    }
+
+    let model_selection = select_ai_model_for_intent(model_selection_policy, intent);
+    let selected_tier_estimated_cost = estimate_ai_model_tier_cost_from_tokens(
+        input_tokens,
+        output_tokens,
+        model_selection.tier,
+        model_selection_policy,
+    );
+    if model_selection_policy.enabled {
+        if let Some(cap) = model_selection_policy.cost_cap_for_tier(model_selection.tier) {
+            if selected_tier_estimated_cost > cap {
+                let cap_env = match model_selection.tier {
+                    AiModelSelectionTier::Cheap => NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV,
+                    AiModelSelectionTier::Reasoning => {
+                        NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV
+                    }
+                };
+                return Err(format!(
+                    "task model-tier `{}` cost guardrail exceeded (${selected_tier_estimated_cost:.4} > ${cap:.4}); review {cap_env}",
+                    model_selection.tier.as_label()
+                ));
+            }
+        }
+    }
+
+    Ok(AiRequestBudgetEstimate {
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        session_tokens_before: 0,
+        estimated_cost_usd,
+    })
 }
 
 fn task_status_label(status: TaskExecutionStatus) -> &'static str {
@@ -2130,8 +3895,9 @@ impl TaskWorkerCallbacks<QueuedTask> for ProcessorTaskWorkerCallbacks {
 
     fn execute(&self, task: &QueuedTask) -> TaskWorkerFuture {
         let intent = task.intent.clone();
+        let runtime_mode = task.runtime_mode;
         Box::pin(async move {
-            let (status, detail) = execute_task_locally(&intent).await;
+            let (status, detail) = execute_task_locally(&intent, runtime_mode).await;
             match status {
                 TaskExecutionStatus::Succeeded => TaskWorkerResult::succeeded(detail),
                 TaskExecutionStatus::Cancelled => TaskWorkerResult::cancelled(detail),
@@ -2260,8 +4026,26 @@ fn task_status_to_exit_status(status: TaskExecutionStatus) -> ExitStatus {
     }
 }
 
-async fn execute_task_locally(intent: &TaskIntent) -> (TaskExecutionStatus, String) {
+async fn execute_task_locally(
+    intent: &TaskIntent,
+    runtime_mode: RuntimeMode,
+) -> (TaskExecutionStatus, String) {
+    let metrics = runtime_metrics().clone();
     let payload = intent.payload.trim().to_string();
+    if let Err(reason) = enforce_task_tool_scope(
+        runtime_mode,
+        intent.kind,
+        payload.as_str(),
+        "task_execute",
+        &metrics,
+    ) {
+        metrics.increment_counter("runtime_tool_scope_rejected_execution_total");
+        return (
+            TaskExecutionStatus::Failed,
+            format!("Secure tool scope policy rejected execution: {reason}"),
+        );
+    }
+
     match intent.kind {
         TaskIntentKind::AiAsk => {
             let owned_parts = ["/ai".to_string(), "ask".to_string(), payload];
@@ -2393,6 +4177,42 @@ fn print_task_usage() {
         )
         .color(Color::CYAN)
     );
+    println!(
+        "  {}",
+        format!(
+            "{NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV}, {NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV}, {NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV}"
+        )
+        .color(Color::CYAN)
+    );
+    println!(
+        "  {}",
+        format!(
+            "{NTK_AI_MODEL_SELECTION_ENABLED_ENV}, {NTK_AI_MODEL_SELECTION_CHEAP_MODEL_ENV}, {NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV}, {NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV}, {NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV}"
+        )
+        .color(Color::CYAN)
+    );
+    println!(
+        "  {}",
+        format!(
+            "{NTK_AI_SESSION_COMPRESSION_MODE_ENV}, {NTK_AI_SESSION_COMPRESSION_MAX_CHARS_ENV}, {NTK_AI_SESSION_DELTA_MIN_SHARED_PREFIX_CHARS_ENV}"
+        )
+        .color(Color::CYAN)
+    );
+    println!(
+        "  {}",
+        format!(
+            "{NTK_AI_SLO_MAX_P95_LATENCY_MS_ENV}, {NTK_AI_SLO_MIN_SUCCESS_RATE_PCT_ENV}, {NTK_AI_SLO_MAX_TOKENS_PER_TASK_ENV}, {NTK_AI_SLO_MAX_COST_USD_PER_TASK_ENV}"
+        )
+        .color(Color::CYAN)
+    );
+    println!(
+        "  {}",
+        format!(
+            "{NTK_TOOL_SCOPE_ENABLED_ENV}, {NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV}, {}",
+            tool_scope_intent_env(TaskIntentKind::AiPlan)
+        )
+        .color(Color::CYAN)
+    );
 }
 
 fn print_task_list(records: &[TaskRecord]) {
@@ -2453,6 +4273,61 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
 
     let metrics = runtime_metrics().clone();
     let runtime_mode = AppConfig::load().general.runtime_mode;
+    if let Err(reason) = enforce_task_tool_scope(
+        runtime_mode,
+        intent_kind,
+        payload.trim(),
+        "task_submit",
+        &metrics,
+    ) {
+        metrics.increment_counter("runtime_tool_scope_rejected_submit_total");
+        println!(
+            "{} {}",
+            "✗ Task rejected by secure tool-scope policy:"
+                .color(Color::RED)
+                .bold(),
+            reason.color(Color::RED)
+        );
+        println!(
+            "{} {} | {} | {}",
+            "env:".color(Color::YELLOW),
+            NTK_TOOL_SCOPE_ENABLED_ENV.color(Color::CYAN),
+            NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV.color(Color::CYAN),
+            tool_scope_intent_env(intent_kind).color(Color::CYAN)
+        );
+        return ExitStatus::Error;
+    }
+
+    if let Some(ai_intent) = ai_intent_from_task_intent(intent_kind) {
+        let token_policy = ai_token_economy_policy_from_env();
+        let model_selection_policy = ai_model_selection_policy_from_env();
+        if let Err(reason) = evaluate_ai_task_submit_budget(
+            ai_intent,
+            payload.trim(),
+            token_policy,
+            &model_selection_policy,
+        ) {
+            println!(
+                "{} {}",
+                "✗ Task rejected by AI budget/model policy:"
+                    .color(Color::RED)
+                    .bold(),
+                reason.color(Color::RED)
+            );
+            println!(
+                "{} {} | {} | {} | {} | {} | {}",
+                "env:".color(Color::YELLOW),
+                NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV.color(Color::CYAN),
+                NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV.color(Color::CYAN),
+                NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV.color(Color::CYAN),
+                NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV.color(Color::CYAN),
+                NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV.color(Color::CYAN),
+                NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV.color(Color::CYAN)
+            );
+            return ExitStatus::Error;
+        }
+    }
+
     if runtime_mode == RuntimeMode::Service {
         let policy = service_automation_policy_from_env();
 
@@ -2641,7 +4516,7 @@ async fn handle_task_submit(parts: &[&str]) -> ExitStatus {
                 ),
             );
             let _ = update_task_attempt(&task_id, 1);
-            let (final_status, status_message) = execute_task_locally(&intent).await;
+            let (final_status, status_message) = execute_task_locally(&intent, runtime_mode).await;
             update_task_record_status(&task_id, final_status, status_message).unwrap_or_else(|| {
                 let mut missing = TaskRecord::new(
                     task_id.clone(),
@@ -3478,48 +5353,6 @@ pub async fn process_command_with_interrupt(
                     }
                 }
             }
-            Some(MainAction::Translate) => {
-                use nettoolskit_ui::Color;
-                match parse_translate_request(&parts) {
-                    Ok(request) => nettoolskit_translate::handle_translate(request).await,
-                    Err(reason) => {
-                        println!("{}", "🔄 Translate Command".color(Color::CYAN).bold());
-                        println!();
-                        println!(
-                            "{} {reason}",
-                            "✗ Invalid translate arguments:".color(Color::RED).bold()
-                        );
-                        println!();
-                        println!("{}", "Usage:".color(Color::WHITE).bold());
-                        println!(
-                            "  {} --from <language> --to <language> <template-path>",
-                            "/translate".color(Color::GREEN)
-                        );
-                        println!();
-                        println!("{}", "Examples:".color(Color::WHITE).bold());
-                        println!(
-                            "  {} --from dotnet --to rust ./templates/entity.cs.hbs",
-                            "/translate".color(Color::GREEN)
-                        );
-                        println!(
-                            "  {} --from python --to java ./templates/service.py.hbs",
-                            "/translate".color(Color::GREEN)
-                        );
-                        println!();
-                        println!(
-                        "{}",
-                        "Supported languages: dotnet, java, go, python, rust, clojure, typescript"
-                            .color(Color::YELLOW)
-                    );
-                        println!(
-                            "{}",
-                            "Note: clojure/typescript currently use baseline convention mapping."
-                                .color(Color::YELLOW)
-                        );
-                        ExitStatus::Error
-                    }
-                }
-            }
             Some(MainAction::Ai) => process_ai_command(&parts, subcommand).await,
             Some(MainAction::Task) => process_task_command(&parts).await,
             Some(MainAction::Config) => process_config_command(&parts),
@@ -4150,7 +5983,6 @@ fn infer_command_from_text(text: &str) -> Option<String> {
         // direct command aliases (without slash)
         "help" | "ajuda" => Some("/help".to_string()),
         "manifest" | "manifests" => Some(format!("/{}", trimmed)),
-        "translate" => Some(format!("/{}", trimmed)),
         "ai" => Some(format!("/{}", trimmed)),
         "task" => Some(format!("/{}", trimmed)),
         "tasks" | "tarefa" | "tarefas" => {
@@ -4168,13 +6000,6 @@ fn infer_command_from_text(text: &str) -> Option<String> {
             }
         }
         "clear" | "cls" | "limpar" => Some("/clear".to_string()),
-        "traduzir" => {
-            if tokens.len() > 1 {
-                Some(format!("/translate {}", tokens[1..].join(" ")))
-            } else {
-                Some("/translate".to_string())
-            }
-        }
         "perguntar" | "ask" => {
             if tokens.len() > 1 {
                 Some(format!("/ai ask {}", tokens[1..].join(" ")))
@@ -4316,6 +6141,70 @@ mod tests {
         std::env::remove_var(NTK_SERVICE_SUBMIT_BUDGET_ENV);
         std::env::remove_var(NTK_SERVICE_SUBMIT_WINDOW_SECONDS_ENV);
         std::env::remove_var(NTK_SERVICE_MAX_INFLIGHT_TASKS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_ENABLED_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_INTENT_COMMAND_EXECUTION_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_INTENT_AI_ASK_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_INTENT_AI_EXPLAIN_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_INTENT_AI_APPLY_DRY_RUN_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_INTENT_REPO_WORKFLOW_TOOLS_ENV);
+        std::env::remove_var(NTK_TOOL_SCOPE_AUDIT_PATH_ENV);
+    }
+
+    fn clear_ai_provider_route_env_vars() {
+        std::env::remove_var("NTK_AI_PROVIDER");
+        std::env::remove_var(NTK_AI_PROVIDER_CHAIN_ENV);
+        std::env::remove_var(NTK_AI_FALLBACK_PROVIDER_ENV);
+        std::env::remove_var(NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS_ENV);
+        std::env::remove_var(NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS_ENV);
+        std::env::remove_var("NTK_AI_ENDPOINT");
+        std::env::remove_var("NTK_AI_API_KEY");
+        std::env::remove_var("NTK_AI_MODEL");
+        std::env::remove_var("NTK_AI_TIMEOUT_MS");
+        std::env::remove_var("NTK_AI_FALLBACK_TEXT");
+        std::env::remove_var(NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV);
+        std::env::remove_var(NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV);
+        std::env::remove_var(NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV);
+        std::env::remove_var(NTK_AI_TOKEN_BUDGET_SESSION_TOTAL_ENV);
+        std::env::remove_var(NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV);
+        std::env::remove_var(NTK_AI_PROMPT_COMPACTION_TIER_ENV);
+        std::env::remove_var(NTK_AI_CACHE_FIRST_ENABLED_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_ENABLED_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_CHEAP_MODEL_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_CHEAP_INTENTS_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_REASONING_INTENTS_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV);
+        std::env::remove_var(NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV);
+        std::env::remove_var(NTK_AI_SLO_MAX_P95_LATENCY_MS_ENV);
+        std::env::remove_var(NTK_AI_SLO_MIN_SUCCESS_RATE_PCT_ENV);
+        std::env::remove_var(NTK_AI_SLO_MAX_TOKENS_PER_TASK_ENV);
+        std::env::remove_var(NTK_AI_SLO_MAX_COST_USD_PER_TASK_ENV);
+        std::env::remove_var("NTK_AI_RATE_LIMIT_REQUESTS");
+        std::env::remove_var("NTK_AI_RATE_LIMIT_WINDOW_SECONDS");
+        reset_ai_rate_limit_for_tests();
+        reset_command_cache_for_tests();
+    }
+
+    fn reset_ai_rate_limit_for_tests() {
+        let mut limiter = ai_rate_limiter()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *limiter = AiRateLimitState::default();
+    }
+
+    fn reset_command_cache_for_tests() {
+        with_command_cache(|cache| {
+            *cache = CommandResultCache::new(
+                COMMAND_CACHE_MAX_ENTRIES,
+                COMMAND_CACHE_MAX_SIZE_BYTES,
+                CacheTtl::default(),
+            );
+        });
     }
 
     #[test]
@@ -4435,11 +6324,420 @@ mod tests {
     }
 
     #[test]
+    fn parse_ai_provider_chain_parses_known_providers_and_deduplicates() {
+        let providers = parse_ai_provider_chain("openai, mock,openai-compatible")
+            .expect("provider chain should parse");
+        assert_eq!(
+            providers,
+            vec![AiProviderKind::OpenAiCompatible, AiProviderKind::Mock]
+        );
+    }
+
+    #[tokio::test]
+    async fn ai_provider_chain_from_env_adds_mock_fallback_for_openai_primary() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var("NTK_AI_PROVIDER", "openai");
+
+        let providers = ai_provider_chain_from_env().expect("provider chain should resolve");
+
+        clear_ai_provider_route_env_vars();
+        assert_eq!(
+            providers,
+            vec![AiProviderKind::OpenAiCompatible, AiProviderKind::Mock]
+        );
+    }
+
+    #[tokio::test]
+    async fn ai_provider_route_timeout_budget_from_env_reads_primary_and_secondary() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var(NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS_ENV, "1200");
+        std::env::set_var(NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS_ENV, "3400");
+
+        let budget = ai_provider_route_timeout_budget_from_env(Duration::from_secs(9));
+
+        clear_ai_provider_route_env_vars();
+        assert_eq!(budget.primary, Duration::from_millis(1_200));
+        assert_eq!(budget.secondary, Duration::from_millis(3_400));
+    }
+
+    #[tokio::test]
+    async fn ai_provider_routes_from_env_builds_deterministic_primary_secondary_order() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var(NTK_AI_PROVIDER_CHAIN_ENV, "openai,mock");
+        std::env::set_var(NTK_AI_PROVIDER_PRIMARY_TIMEOUT_MS_ENV, "700");
+        std::env::set_var(NTK_AI_PROVIDER_SECONDARY_TIMEOUT_MS_ENV, "900");
+
+        let retry_policy = AiRetryPolicy {
+            max_retries: 1,
+            base_delay: Duration::from_millis(10),
+            max_delay: Duration::from_millis(10),
+            request_timeout: Duration::from_secs(2),
+        };
+        let routes = ai_provider_routes_from_env(AiIntent::Ask, "hello", retry_policy)
+            .expect("provider routes should initialize");
+
+        clear_ai_provider_route_env_vars();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].provider.id(), "openai-compatible");
+        assert_eq!(routes[1].provider.id(), "mock");
+        assert_eq!(routes[0].timeout_budget, Duration::from_millis(700));
+        assert_eq!(routes[1].timeout_budget, Duration::from_millis(900));
+    }
+
+    #[test]
     fn parse_nonzero_usize_rejects_zero_and_invalid_values() {
         assert_eq!(parse_nonzero_usize("64"), Some(64));
         assert_eq!(parse_nonzero_usize("0"), None);
         assert_eq!(parse_nonzero_usize("-1"), None);
         assert_eq!(parse_nonzero_usize("abc"), None);
+    }
+
+    #[test]
+    fn parse_prompt_compaction_tier_accepts_supported_values() {
+        assert_eq!(
+            AiPromptCompactionTier::parse("off"),
+            Some(AiPromptCompactionTier::Off)
+        );
+        assert_eq!(
+            AiPromptCompactionTier::parse("balanced"),
+            Some(AiPromptCompactionTier::Balanced)
+        );
+        assert_eq!(
+            AiPromptCompactionTier::parse("aggressive"),
+            Some(AiPromptCompactionTier::Aggressive)
+        );
+        assert_eq!(AiPromptCompactionTier::parse("invalid"), None);
+    }
+
+    #[tokio::test]
+    async fn ai_token_economy_policy_from_env_applies_overrides() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var(NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV, "700");
+        std::env::set_var(NTK_AI_TOKEN_BUDGET_OUTPUT_PER_REQUEST_ENV, "800");
+        std::env::set_var(NTK_AI_TOKEN_BUDGET_TOTAL_PER_REQUEST_ENV, "900");
+        std::env::set_var(NTK_AI_TOKEN_BUDGET_SESSION_TOTAL_ENV, "1000");
+        std::env::set_var(NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV, "0.02");
+        std::env::set_var(NTK_AI_PROMPT_COMPACTION_TIER_ENV, "aggressive");
+        std::env::set_var(NTK_AI_CACHE_FIRST_ENABLED_ENV, "false");
+
+        let policy = ai_token_economy_policy_from_env();
+
+        clear_ai_provider_route_env_vars();
+        assert_eq!(policy.max_input_tokens_per_request, 700);
+        assert_eq!(policy.max_output_tokens_per_request, 800);
+        assert_eq!(policy.max_total_tokens_per_request, 900);
+        assert_eq!(policy.max_session_tokens_total, 1000);
+        assert!((policy.max_cost_usd_per_request - 0.02).abs() < f64::EPSILON);
+        assert_eq!(
+            policy.prompt_compaction_tier,
+            AiPromptCompactionTier::Aggressive
+        );
+        assert!(!policy.cache_first_enabled);
+    }
+
+    #[tokio::test]
+    async fn ai_slo_policy_from_env_applies_overrides() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var(NTK_AI_SLO_MAX_P95_LATENCY_MS_ENV, "4200");
+        std::env::set_var(NTK_AI_SLO_MIN_SUCCESS_RATE_PCT_ENV, "97.5");
+        std::env::set_var(NTK_AI_SLO_MAX_TOKENS_PER_TASK_ENV, "6400");
+        std::env::set_var(NTK_AI_SLO_MAX_COST_USD_PER_TASK_ENV, "0.33");
+
+        let policy = ai_slo_policy_from_env();
+
+        clear_ai_provider_route_env_vars();
+        assert!((policy.max_p95_latency_ms - 4200.0).abs() < f64::EPSILON);
+        assert!((policy.min_success_rate_pct - 97.5).abs() < f64::EPSILON);
+        assert!((policy.max_tokens_per_task - 6400.0).abs() < f64::EPSILON);
+        assert!((policy.max_cost_usd_per_task - 0.33).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_ai_model_selection_intents_supports_aliases_and_wildcards() {
+        let parsed = parse_ai_model_selection_intents("ai-ask;plan|apply-dry-run");
+        assert_eq!(
+            parsed,
+            vec![AiIntent::Ask, AiIntent::Plan, AiIntent::ApplyDryRun]
+        );
+        let all = parse_ai_model_selection_intents("*");
+        assert_eq!(
+            all,
+            vec![
+                AiIntent::Ask,
+                AiIntent::Plan,
+                AiIntent::Explain,
+                AiIntent::ApplyDryRun
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn ai_model_selection_policy_from_env_applies_overrides() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var(NTK_AI_MODEL_SELECTION_ENABLED_ENV, "true");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_CHEAP_MODEL_ENV, "gpt-4.1-mini");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV, "gpt-4.1");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_CHEAP_INTENTS_ENV, "ask,explain");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_INTENTS_ENV, "plan,apply");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_CHEAP_COST_MULTIPLIER_ENV, "0.8");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_COST_MULTIPLIER_ENV, "1.5");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_CHEAP_COST_CAP_USD_ENV, "0.20");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV, "0.70");
+        std::env::set_var(
+            NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV,
+            "false",
+        );
+
+        let policy = ai_model_selection_policy_from_env();
+
+        clear_ai_provider_route_env_vars();
+        assert!(policy.enabled);
+        assert_eq!(policy.cheap_model.as_deref(), Some("gpt-4.1-mini"));
+        assert_eq!(policy.reasoning_model.as_deref(), Some("gpt-4.1"));
+        assert_eq!(policy.cheap_intents, vec![AiIntent::Ask, AiIntent::Explain]);
+        assert_eq!(
+            policy.reasoning_intents,
+            vec![AiIntent::Plan, AiIntent::ApplyDryRun]
+        );
+        assert!((policy.cheap_cost_multiplier - 0.8).abs() < f64::EPSILON);
+        assert!((policy.reasoning_cost_multiplier - 1.5).abs() < f64::EPSILON);
+        assert_eq!(policy.cheap_cost_cap_usd, Some(0.20));
+        assert_eq!(policy.reasoning_cost_cap_usd, Some(0.70));
+        assert!(!policy.fallback_to_cheap_on_guardrail);
+    }
+
+    #[test]
+    fn select_ai_model_for_intent_uses_default_tier_mapping() {
+        let policy = AiModelSelectionPolicy::default();
+        let ask = select_ai_model_for_intent(&policy, AiIntent::Ask);
+        let plan = select_ai_model_for_intent(&policy, AiIntent::Plan);
+        assert_eq!(ask.tier, AiModelSelectionTier::Cheap);
+        assert_eq!(plan.tier, AiModelSelectionTier::Reasoning);
+    }
+
+    #[test]
+    fn evaluate_ai_model_selection_cost_guardrail_rejects_when_tier_cap_is_exceeded() {
+        std::env::set_var("NTK_AI_COST_PER_1K_INPUT_USD", "1.0");
+        std::env::set_var("NTK_AI_COST_PER_1K_OUTPUT_USD", "1.0");
+
+        let mut request = AiRequest::from_user_prompt("explain architecture");
+        request.max_output_tokens = Some(1400);
+        let policy = AiModelSelectionPolicy {
+            enabled: true,
+            cheap_model: Some("cheap".to_string()),
+            reasoning_model: Some("reasoning".to_string()),
+            cheap_intents: vec![AiIntent::Ask],
+            reasoning_intents: vec![AiIntent::Plan, AiIntent::Explain, AiIntent::ApplyDryRun],
+            cheap_cost_multiplier: 1.0,
+            reasoning_cost_multiplier: 1.2,
+            cheap_cost_cap_usd: None,
+            reasoning_cost_cap_usd: Some(0.1),
+            fallback_to_cheap_on_guardrail: true,
+        };
+        let selection = AiModelSelectionDecision {
+            tier: AiModelSelectionTier::Reasoning,
+            model: Some("reasoning".to_string()),
+        };
+
+        let result = evaluate_ai_model_selection_cost_guardrail(
+            &request,
+            AiIntent::Plan,
+            &selection,
+            &policy,
+        );
+
+        std::env::remove_var("NTK_AI_COST_PER_1K_INPUT_USD");
+        std::env::remove_var("NTK_AI_COST_PER_1K_OUTPUT_USD");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fallback_ai_model_selection_to_cheap_returns_expected_selection() {
+        let policy = AiModelSelectionPolicy {
+            enabled: true,
+            cheap_model: Some("gpt-4.1-mini".to_string()),
+            reasoning_model: Some("gpt-4.1".to_string()),
+            cheap_intents: vec![AiIntent::Ask],
+            reasoning_intents: vec![AiIntent::Plan, AiIntent::Explain, AiIntent::ApplyDryRun],
+            cheap_cost_multiplier: 1.0,
+            reasoning_cost_multiplier: 1.2,
+            cheap_cost_cap_usd: None,
+            reasoning_cost_cap_usd: Some(0.3),
+            fallback_to_cheap_on_guardrail: true,
+        };
+        let current = AiModelSelectionDecision {
+            tier: AiModelSelectionTier::Reasoning,
+            model: Some("gpt-4.1".to_string()),
+        };
+
+        let fallback = fallback_ai_model_selection_to_cheap(&policy, &current)
+            .expect("fallback should be available");
+        assert_eq!(fallback.tier, AiModelSelectionTier::Cheap);
+        assert_eq!(fallback.model.as_deref(), Some("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn apply_ai_prompt_compaction_removes_context_messages_when_over_budget() {
+        let mut request = AiRequest {
+            model: None,
+            messages: vec![
+                AiMessage::new(AiRole::System, "system guidance"),
+                AiMessage::new(AiRole::User, "context a ".repeat(40)),
+                AiMessage::new(AiRole::Assistant, "context b ".repeat(40)),
+                AiMessage::new(AiRole::User, "final user prompt"),
+            ],
+            max_output_tokens: Some(128),
+            temperature: None,
+            stream: true,
+        };
+        let metrics = Metrics::new();
+        let policy = AiTokenEconomyPolicy {
+            max_input_tokens_per_request: 80,
+            max_output_tokens_per_request: 1024,
+            max_total_tokens_per_request: 2048,
+            max_session_tokens_total: 4096,
+            max_cost_usd_per_request: 1.0,
+            prompt_compaction_tier: AiPromptCompactionTier::Balanced,
+            cache_first_enabled: true,
+        };
+
+        apply_ai_prompt_compaction(&mut request, policy, &metrics);
+
+        assert!(estimate_request_input_tokens(&request) <= 80);
+        assert!(request.messages.len() < 4);
+        assert_eq!(
+            request.messages.last().map(|item| item.role),
+            Some(AiRole::User)
+        );
+        assert_eq!(
+            metrics.get_counter("runtime_ai_prompt_compaction_applied_total"),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_ai_request_budget_rejects_when_estimated_cost_exceeds_cap() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var("NTK_AI_COST_PER_1K_INPUT_USD", "1.0");
+        std::env::set_var("NTK_AI_COST_PER_1K_OUTPUT_USD", "1.0");
+
+        let mut request = AiRequest::from_user_prompt("hello world");
+        request.max_output_tokens = Some(2000);
+        let session = LocalAiSessionState::new("budget-session");
+        let policy = AiTokenEconomyPolicy {
+            max_input_tokens_per_request: 20_000,
+            max_output_tokens_per_request: 20_000,
+            max_total_tokens_per_request: 40_000,
+            max_session_tokens_total: 80_000,
+            max_cost_usd_per_request: 0.10,
+            prompt_compaction_tier: AiPromptCompactionTier::Off,
+            cache_first_enabled: true,
+        };
+
+        let budget = evaluate_ai_request_budget(&request, AiIntent::Ask, &session, policy);
+
+        std::env::remove_var("NTK_AI_COST_PER_1K_INPUT_USD");
+        std::env::remove_var("NTK_AI_COST_PER_1K_OUTPUT_USD");
+        clear_ai_provider_route_env_vars();
+        assert!(budget.is_err());
+    }
+
+    #[test]
+    fn evaluate_ai_task_submit_budget_accepts_when_within_limits() {
+        let policy = AiTokenEconomyPolicy {
+            max_input_tokens_per_request: 20_000,
+            max_output_tokens_per_request: 20_000,
+            max_total_tokens_per_request: 40_000,
+            max_session_tokens_total: 80_000,
+            max_cost_usd_per_request: 5.0,
+            prompt_compaction_tier: AiPromptCompactionTier::Off,
+            cache_first_enabled: true,
+        };
+
+        let estimate = evaluate_ai_task_submit_budget(
+            AiIntent::Plan,
+            "prepare release checklist",
+            policy,
+            &AiModelSelectionPolicy::default(),
+        )
+        .expect("task submit budget should pass");
+
+        assert!(estimate.input_tokens > 0);
+        assert!(estimate.output_tokens > 0);
+        assert_eq!(
+            estimate.total_tokens,
+            estimate.input_tokens.saturating_add(estimate.output_tokens)
+        );
+    }
+
+    #[test]
+    fn evaluate_ai_task_submit_budget_rejects_when_input_cap_is_exceeded() {
+        let policy = AiTokenEconomyPolicy {
+            max_input_tokens_per_request: 4,
+            max_output_tokens_per_request: 20_000,
+            max_total_tokens_per_request: 40_000,
+            max_session_tokens_total: 80_000,
+            max_cost_usd_per_request: 5.0,
+            prompt_compaction_tier: AiPromptCompactionTier::Off,
+            cache_first_enabled: true,
+        };
+
+        let error = evaluate_ai_task_submit_budget(
+            AiIntent::Plan,
+            "this payload is intentionally long enough to exceed the tiny budget",
+            policy,
+            &AiModelSelectionPolicy::default(),
+        )
+        .expect_err("task submit budget should fail");
+
+        assert!(error.contains("task payload token budget exceeded"));
+    }
+
+    #[test]
+    fn evaluate_ai_task_submit_budget_rejects_when_model_tier_cost_guardrail_is_exceeded() {
+        std::env::set_var("NTK_AI_COST_PER_1K_INPUT_USD", "1.0");
+        std::env::set_var("NTK_AI_COST_PER_1K_OUTPUT_USD", "1.0");
+
+        let policy = AiTokenEconomyPolicy {
+            max_input_tokens_per_request: 20_000,
+            max_output_tokens_per_request: 20_000,
+            max_total_tokens_per_request: 40_000,
+            max_session_tokens_total: 80_000,
+            max_cost_usd_per_request: 10.0,
+            prompt_compaction_tier: AiPromptCompactionTier::Off,
+            cache_first_enabled: true,
+        };
+        let model_selection_policy = AiModelSelectionPolicy {
+            enabled: true,
+            cheap_model: Some("cheap".to_string()),
+            reasoning_model: Some("reasoning".to_string()),
+            cheap_intents: vec![AiIntent::Ask],
+            reasoning_intents: vec![AiIntent::Plan, AiIntent::Explain, AiIntent::ApplyDryRun],
+            cheap_cost_multiplier: 1.0,
+            reasoning_cost_multiplier: 1.2,
+            cheap_cost_cap_usd: None,
+            reasoning_cost_cap_usd: Some(0.1),
+            fallback_to_cheap_on_guardrail: true,
+        };
+
+        let error = evaluate_ai_task_submit_budget(
+            AiIntent::Plan,
+            "generate a rollout and migration plan with edge cases and backout strategy",
+            policy,
+            &model_selection_policy,
+        )
+        .expect_err("task submit budget should fail when model guardrail is exceeded");
+
+        std::env::remove_var("NTK_AI_COST_PER_1K_INPUT_USD");
+        std::env::remove_var("NTK_AI_COST_PER_1K_OUTPUT_USD");
+        assert!(error.contains("model-tier"));
     }
 
     #[test]
@@ -4547,6 +6845,69 @@ mod tests {
     }
 
     #[test]
+    fn update_ai_request_rate_gauges_updates_slo_indicators() {
+        let metrics = Metrics::new();
+
+        for _ in 0..4 {
+            metrics.increment_counter("runtime_ai_requests_total");
+            metrics.increment_counter("runtime_ai_requests_success_total");
+        }
+
+        metrics.record_timing("runtime_ai_request_latency", Duration::from_millis(80));
+        metrics.record_timing("runtime_ai_request_latency", Duration::from_millis(100));
+        metrics.record_timing("runtime_ai_request_latency", Duration::from_millis(120));
+        metrics.record_timing("runtime_ai_request_latency", Duration::from_millis(140));
+
+        metrics.set_gauge("runtime_ai_tokens_estimated_total", 4_000.0);
+        metrics.set_gauge("runtime_ai_cost_estimate_total_usd", 0.20);
+
+        update_ai_request_rate_gauges(&metrics);
+
+        assert_eq!(
+            metrics.get_gauge("runtime_ai_success_rate_pct"),
+            Some(100.0)
+        );
+        assert_eq!(
+            metrics.get_gauge("runtime_ai_request_latency_p95_ms"),
+            Some(140.0)
+        );
+        assert_eq!(
+            metrics.get_gauge("runtime_ai_tokens_per_task"),
+            Some(1000.0)
+        );
+        assert_eq!(
+            metrics.get_gauge("runtime_ai_cost_per_task_usd"),
+            Some(0.05)
+        );
+        assert_eq!(metrics.get_gauge("runtime_ai_slo_compliant"), Some(1.0));
+        assert_eq!(
+            metrics.get_gauge("runtime_ai_slo_violations_count"),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn evaluate_ai_slo_budget_compliance_detects_violations() {
+        let metrics = Metrics::new();
+        metrics.increment_counter("runtime_ai_requests_total");
+        metrics.set_gauge("runtime_ai_success_rate_pct", 80.0);
+        metrics.set_gauge("runtime_ai_request_latency_p95_ms", 2_000.0);
+        metrics.set_gauge("runtime_ai_tokens_per_task", 3_000.0);
+        metrics.set_gauge("runtime_ai_cost_per_task_usd", 0.50);
+
+        let policy = AiSloPolicy {
+            max_p95_latency_ms: 500.0,
+            min_success_rate_pct: 95.0,
+            max_tokens_per_task: 2_000.0,
+            max_cost_usd_per_task: 0.20,
+        };
+
+        let violations = evaluate_ai_slo_budget_compliance(&metrics, policy);
+
+        assert_eq!(violations.len(), 4);
+    }
+
+    #[test]
     fn ai_error_guidance_message_is_available_for_transient_failures() {
         let timeout = AiProviderError::Timeout {
             timeout: Duration::from_secs(1),
@@ -4584,6 +6945,123 @@ mod tests {
         assert_eq!(retries, 1);
         assert_eq!(metrics.get_counter("runtime_ai_retries_total"), 1);
         assert_eq!(chunks.last().map(|item| item.content.as_str()), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn request_ai_stream_with_provider_fallback_switches_to_secondary_on_timeout() {
+        let request = build_ai_request(AiIntent::Ask, "fallback test");
+        let retry_policy = AiRetryPolicy {
+            max_retries: 0,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+            request_timeout: Duration::from_secs(1),
+        };
+        let metrics = Metrics::new();
+        let primary = MockAiProvider::with_scripted(
+            mocked_ai_response(AiIntent::Ask, "fallback test"),
+            vec![crate::execution::ai::MockAiOutcome::Error(
+                AiProviderError::Timeout {
+                    timeout: Duration::from_millis(10),
+                },
+            )],
+        );
+        let secondary = MockAiProvider::with_scripted(
+            mocked_ai_response(AiIntent::Ask, "fallback test"),
+            vec![crate::execution::ai::MockAiOutcome::Complete(
+                AiResponse::new("mock", "fallback-ok"),
+            )],
+        );
+        let routes = vec![
+            AiProviderRoute {
+                provider: Box::new(primary),
+                timeout_budget: Duration::from_millis(50),
+            },
+            AiProviderRoute {
+                provider: Box::new(secondary),
+                timeout_budget: Duration::from_millis(50),
+            },
+        ];
+
+        let result = request_ai_stream_with_provider_fallback(
+            &routes,
+            &request,
+            retry_policy,
+            &metrics,
+            AiIntent::Ask,
+        )
+        .await
+        .expect("fallback route should recover");
+
+        assert_eq!(result.failovers, 1);
+        assert_eq!(result.retries, 0);
+        assert_eq!(result.provider_id, "mock");
+        assert_eq!(
+            result.chunks.last().map(|item| item.content.as_str()),
+            Some("fallback-ok")
+        );
+        assert_eq!(
+            metrics.get_counter("runtime_ai_provider_failovers_total"),
+            1
+        );
+        assert_eq!(
+            metrics.get_counter("runtime_ai_provider_mock_requests_total"),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn request_ai_stream_with_provider_fallback_does_not_failover_on_invalid_request_error() {
+        let request = build_ai_request(AiIntent::Ask, "fail-closed test");
+        let retry_policy = AiRetryPolicy {
+            max_retries: 0,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+            request_timeout: Duration::from_secs(1),
+        };
+        let metrics = Metrics::new();
+        let primary = MockAiProvider::with_scripted(
+            mocked_ai_response(AiIntent::Ask, "fail-closed test"),
+            vec![crate::execution::ai::MockAiOutcome::Error(
+                AiProviderError::InvalidRequest("blocked".to_string()),
+            )],
+        );
+        let secondary = MockAiProvider::with_scripted(
+            mocked_ai_response(AiIntent::Ask, "fail-closed test"),
+            vec![crate::execution::ai::MockAiOutcome::Complete(
+                AiResponse::new("mock", "should-not-run"),
+            )],
+        );
+        let routes = vec![
+            AiProviderRoute {
+                provider: Box::new(primary),
+                timeout_budget: Duration::from_millis(50),
+            },
+            AiProviderRoute {
+                provider: Box::new(secondary),
+                timeout_budget: Duration::from_millis(50),
+            },
+        ];
+
+        let error = request_ai_stream_with_provider_fallback(
+            &routes,
+            &request,
+            retry_policy,
+            &metrics,
+            AiIntent::Ask,
+        )
+        .await
+        .expect_err("invalid request should not failover");
+
+        assert_eq!(error.failovers, 0);
+        assert!(matches!(error.error, AiProviderError::InvalidRequest(_)));
+        assert_eq!(
+            metrics.get_counter("runtime_ai_provider_failovers_total"),
+            0
+        );
+        assert_eq!(
+            metrics.get_counter("runtime_ai_provider_mock_requests_total"),
+            1
+        );
     }
 
     #[tokio::test]
@@ -4798,10 +7276,6 @@ mod tests {
             infer_command_from_text("manifest check sample.yaml").as_deref(),
             Some("/manifest check sample.yaml")
         );
-        assert_eq!(
-            infer_command_from_text("translate --from dotnet --to rust a.cs.hbs").as_deref(),
-            Some("/translate --from dotnet --to rust a.cs.hbs")
-        );
     }
 
     #[test]
@@ -4864,16 +7338,114 @@ mod tests {
 
     #[tokio::test]
     async fn process_ai_command_apply_without_dry_run_returns_error() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
         let parts = vec!["/ai", "apply", "update", "service"];
         let status = process_ai_command(&parts, Some("apply")).await;
+        clear_ai_provider_route_env_vars();
         assert_eq!(status, ExitStatus::Error);
     }
 
     #[tokio::test]
     async fn process_ai_command_apply_with_explicit_write_approval_succeeds() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
         let parts = vec!["/ai", "apply", "--approve-write", "update", "service"];
         let status = process_ai_command(&parts, Some("apply")).await;
+        clear_ai_provider_route_env_vars();
         assert_eq!(status, ExitStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_cache_first_reuses_response_on_repeat_prompt() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var("NTK_AI_PROVIDER", "mock");
+        std::env::set_var(NTK_AI_CACHE_FIRST_ENABLED_ENV, "true");
+
+        let metrics = runtime_metrics().clone();
+        let baseline_cache_success = metrics.get_counter("runtime_ai_provider_cache_success_total");
+        let baseline_cache_hits = metrics.get_counter("runtime_ai_cache_hits_total");
+        let baseline_cache_misses = metrics.get_counter("runtime_ai_cache_misses_total");
+
+        let parts = vec!["/ai", "ask", "cache-first repeat prompt"];
+        let first_status = process_ai_command(&parts, Some("ask")).await;
+        let second_status = process_ai_command(&parts, Some("ask")).await;
+
+        clear_ai_provider_route_env_vars();
+
+        assert_eq!(first_status, ExitStatus::Success);
+        assert_eq!(second_status, ExitStatus::Success);
+        assert!(metrics.get_counter("runtime_ai_cache_misses_total") > baseline_cache_misses);
+        assert!(metrics.get_counter("runtime_ai_cache_hits_total") > baseline_cache_hits);
+        assert!(
+            metrics.get_counter("runtime_ai_provider_cache_success_total") > baseline_cache_success
+        );
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_rejects_when_reasoning_model_cost_guardrail_is_exceeded() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var("NTK_AI_PROVIDER", "mock");
+        std::env::set_var("NTK_AI_COST_PER_1K_INPUT_USD", "1.0");
+        std::env::set_var("NTK_AI_COST_PER_1K_OUTPUT_USD", "1.0");
+        std::env::set_var(NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV, "10.0");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV, "gpt-reasoning");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV, "0.20");
+        std::env::set_var(
+            NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV,
+            "false",
+        );
+
+        let parts = vec![
+            "/ai",
+            "plan",
+            "prepare",
+            "detailed",
+            "migration",
+            "strategy",
+        ];
+        let status = process_ai_command(&parts, Some("plan")).await;
+
+        std::env::remove_var("NTK_AI_COST_PER_1K_INPUT_USD");
+        std::env::remove_var("NTK_AI_COST_PER_1K_OUTPUT_USD");
+        clear_ai_provider_route_env_vars();
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_ai_command_guardrail_fallback_downgrades_to_cheap_tier() {
+        let _guard = env_test_guard().await;
+        clear_ai_provider_route_env_vars();
+        std::env::set_var("NTK_AI_PROVIDER", "mock");
+        std::env::set_var("NTK_AI_COST_PER_1K_INPUT_USD", "1.0");
+        std::env::set_var("NTK_AI_COST_PER_1K_OUTPUT_USD", "1.0");
+        std::env::set_var(NTK_AI_COST_BUDGET_USD_PER_REQUEST_ENV, "10.0");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_CHEAP_MODEL_ENV, "gpt-cheap");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_MODEL_ENV, "gpt-reasoning");
+        std::env::set_var(NTK_AI_MODEL_SELECTION_REASONING_COST_CAP_USD_ENV, "0.20");
+        std::env::set_var(
+            NTK_AI_MODEL_SELECTION_FALLBACK_TO_CHEAP_ON_GUARDRAIL_ENV,
+            "true",
+        );
+
+        let metrics = runtime_metrics().clone();
+        let baseline_fallbacks =
+            metrics.get_counter("runtime_ai_model_selection_guardrail_fallback_total");
+
+        let parts = vec!["/ai", "plan", "prepare", "service", "hardening", "plan"];
+        let status = process_ai_command(&parts, Some("plan")).await;
+
+        std::env::remove_var("NTK_AI_COST_PER_1K_INPUT_USD");
+        std::env::remove_var("NTK_AI_COST_PER_1K_OUTPUT_USD");
+        clear_ai_provider_route_env_vars();
+
+        assert_eq!(status, ExitStatus::Success);
+        assert!(
+            metrics.get_counter("runtime_ai_model_selection_guardrail_fallback_total")
+                > baseline_fallbacks
+        );
     }
 
     #[tokio::test]
@@ -4909,6 +7481,100 @@ mod tests {
             Some(TaskIntentKind::RepoWorkflow)
         );
         assert_eq!(parse_task_intent_kind("unknown"), None);
+    }
+
+    #[test]
+    fn parse_tool_capability_set_supports_aliases_and_wildcards() {
+        let parsed = parse_tool_capability_set("ai-plan;repo.workflow.push|*");
+        assert!(parsed.contains(&ToolCapability::AiPlan));
+        assert!(parsed.contains(&ToolCapability::RepoWorkflowPush));
+        assert!(parsed.contains(&ToolCapability::CommandExecution));
+        assert!(parsed.contains(&ToolCapability::RepoWorkflowPullRequest));
+    }
+
+    #[test]
+    fn required_tool_capabilities_for_repo_workflow_include_push_and_pr_when_requested() {
+        let payload = "repo=https://github.com/acme/demo.git;branch=feature/hardening;command=cargo test;push=true;open_pr=true;dry_run=true";
+        let required = required_tool_capabilities_for_intent(TaskIntentKind::RepoWorkflow, payload);
+
+        assert!(required.contains(&ToolCapability::RepoWorkflowExecute));
+        assert!(required.contains(&ToolCapability::RepoWorkflowPush));
+        assert!(required.contains(&ToolCapability::RepoWorkflowPullRequest));
+    }
+
+    #[tokio::test]
+    async fn tool_scope_policy_service_mode_is_deny_by_default_without_allowlist() {
+        let _guard = env_test_guard().await;
+        clear_service_policy_env_vars();
+        let policy = tool_scope_policy_from_env(RuntimeMode::Service);
+        assert!(policy.enabled);
+        assert!(policy.allowed_tools.is_empty());
+        let evaluation =
+            evaluate_tool_scope_policy(&policy, TaskIntentKind::AiPlan, &[ToolCapability::AiPlan]);
+        clear_service_policy_env_vars();
+        assert!(evaluation.is_err());
+    }
+
+    #[tokio::test]
+    async fn enforce_task_tool_scope_allows_when_global_and_intent_scope_match() {
+        let _guard = env_test_guard().await;
+        clear_service_policy_env_vars();
+        std::env::set_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV, "ai.plan");
+        std::env::set_var(NTK_TOOL_SCOPE_INTENT_AI_PLAN_TOOLS_ENV, "ai.plan");
+        let metrics = Metrics::new();
+
+        let decision = enforce_task_tool_scope(
+            RuntimeMode::Service,
+            TaskIntentKind::AiPlan,
+            "prepare deployment",
+            "tests",
+            &metrics,
+        );
+
+        clear_service_policy_env_vars();
+        assert!(decision.is_ok());
+        assert_eq!(metrics.get_counter("runtime_tool_scope_approved_total"), 1);
+    }
+
+    #[tokio::test]
+    async fn enforce_task_tool_scope_rejects_when_global_allowlist_is_missing() {
+        let _guard = env_test_guard().await;
+        clear_service_policy_env_vars();
+        let metrics = Metrics::new();
+
+        let decision = enforce_task_tool_scope(
+            RuntimeMode::Service,
+            TaskIntentKind::AiPlan,
+            "prepare deployment",
+            "tests",
+            &metrics,
+        );
+
+        clear_service_policy_env_vars();
+        assert!(decision.is_err());
+        assert_eq!(metrics.get_counter("runtime_tool_scope_denied_total"), 1);
+    }
+
+    #[test]
+    fn append_tool_scope_audit_to_writes_jsonl_entry() {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let file_path = dir.path().join("tool-scope-audit.jsonl");
+        let record = ToolScopeAuditRecord {
+            timestamp_unix_ms: 1_737_000_000_000,
+            runtime_mode: "service".to_string(),
+            intent: "ai-plan".to_string(),
+            required_tools: vec!["ai.plan".to_string()],
+            decision: "approved".to_string(),
+            reason: "tests".to_string(),
+            source: "unit-test".to_string(),
+        };
+
+        append_tool_scope_audit_to(file_path.as_path(), &record).expect("audit write should pass");
+
+        let content = std::fs::read_to_string(file_path).expect("audit file should be readable");
+        assert!(content.contains("\"intent\":\"ai-plan\""));
+        assert!(content.contains("\"decision\":\"approved\""));
+        assert!(content.contains("\"required_tools\":[\"ai.plan\"]"));
     }
 
     #[tokio::test]
@@ -5009,8 +7675,15 @@ mod tests {
 
     #[tokio::test]
     async fn process_task_command_submit_ai_plan_succeeds() {
+        let _guard = env_test_guard().await;
+        std::env::remove_var("NTK_RUNTIME_MODE");
+        clear_service_policy_env_vars();
+        reset_service_submission_budget_for_tests();
+
         let parts = vec!["/task", "submit", "ai-plan", "prepare", "deployment"];
         let status = process_task_command(&parts).await;
+
+        clear_service_policy_env_vars();
         assert_eq!(status, ExitStatus::Success);
     }
 
@@ -5021,6 +7694,7 @@ mod tests {
         std::env::set_var("NTK_AI_PROVIDER", "mock");
         clear_service_policy_env_vars();
         reset_service_submission_budget_for_tests();
+        std::env::set_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV, "ai.plan");
 
         let payload_marker = format!("service-queue-test-{}", current_unix_timestamp_ms());
         let parts = vec!["/task", "submit", "ai-plan", payload_marker.as_str()];
@@ -5055,11 +7729,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn process_task_command_submit_service_mode_rejects_when_tool_scope_is_not_allowlisted() {
+        let _guard = env_test_guard().await;
+        std::env::set_var("NTK_RUNTIME_MODE", "service");
+        clear_service_policy_env_vars();
+        reset_service_submission_budget_for_tests();
+
+        let status =
+            process_task_command(&["/task", "submit", "ai-plan", "blocked-by-tool-scope"]).await;
+
+        clear_service_policy_env_vars();
+        std::env::remove_var("NTK_RUNTIME_MODE");
+
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
     async fn process_task_command_submit_service_mode_rejects_intent_not_allowed_by_profile() {
         let _guard = env_test_guard().await;
         std::env::set_var("NTK_RUNTIME_MODE", "service");
         std::env::set_var(NTK_SERVICE_AUTOMATION_PROFILE_ENV, "strict");
         std::env::remove_var(NTK_SERVICE_ALLOWED_INTENTS_ENV);
+        std::env::set_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV, "repo.workflow.execute");
         reset_service_submission_budget_for_tests();
 
         let status = process_task_command(&[
@@ -5082,12 +7773,37 @@ mod tests {
         std::env::set_var("NTK_RUNTIME_MODE", "service");
         std::env::set_var(NTK_SERVICE_AUTOMATION_PROFILE_ENV, "open");
         std::env::set_var(NTK_SERVICE_MAX_PAYLOAD_BYTES_ENV, "8");
+        std::env::set_var(NTK_TOOL_SCOPE_ALLOWED_TOOLS_ENV, "ai.plan");
         reset_service_submission_budget_for_tests();
 
         let status =
             process_task_command(&["/task", "submit", "ai-plan", "payload-over-budget"]).await;
 
         clear_service_policy_env_vars();
+        std::env::remove_var("NTK_RUNTIME_MODE");
+
+        assert_eq!(status, ExitStatus::Error);
+    }
+
+    #[tokio::test]
+    async fn process_task_command_submit_ai_plan_rejects_when_ai_token_budget_is_exceeded() {
+        let _guard = env_test_guard().await;
+        std::env::remove_var("NTK_RUNTIME_MODE");
+        clear_service_policy_env_vars();
+        clear_ai_provider_route_env_vars();
+        reset_service_submission_budget_for_tests();
+        std::env::set_var(NTK_AI_TOKEN_BUDGET_INPUT_PER_REQUEST_ENV, "8");
+
+        let parts = vec![
+            "/task",
+            "submit",
+            "ai-plan",
+            "this payload should exceed the configured input token budget",
+        ];
+        let status = process_task_command(&parts).await;
+
+        clear_service_policy_env_vars();
+        clear_ai_provider_route_env_vars();
         std::env::remove_var("NTK_RUNTIME_MODE");
 
         assert_eq!(status, ExitStatus::Error);

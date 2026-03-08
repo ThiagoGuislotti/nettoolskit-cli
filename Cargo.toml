@@ -9,7 +9,6 @@ members = [
     "crates/commands",
     "crates/commands/templating",
     "crates/commands/manifest",
-    "crates/commands/translate",
     "crates/commands/help",
     "benchmarks",
 ]

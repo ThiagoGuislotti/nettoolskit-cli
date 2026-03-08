@@ -1785,7 +1785,6 @@ dependencies = [
  "nettoolskit-core",
  "nettoolskit-orchestrator",
  "nettoolskit-otel",
- "nettoolskit-translate",
  "nettoolskit-ui",
  "owo-colors",
  "predicates",
@@ -1811,7 +1810,6 @@ version = "1.0.0"
 dependencies = [
  "nettoolskit-help",
  "nettoolskit-manifest",
- "nettoolskit-translate",
  "tempfile",
 ]
 
@@ -1885,7 +1883,6 @@ dependencies = [
  "nettoolskit-manifest",
  "nettoolskit-otel",
  "nettoolskit-task-worker",
- "nettoolskit-translate",
  "nettoolskit-ui",
  "owo-colors",
  "reqwest 0.11.27",
@@ -1939,21 +1936,6 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "walkdir",
-]
-
-[[package]]
-name = "nettoolskit-translate"
-version = "1.0.0"
-dependencies = [
- "nettoolskit-core",
- "nettoolskit-otel",
- "nettoolskit-templating",
- "nettoolskit-ui",
- "owo-colors",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -107,15 +107,6 @@ fn help_shows_manifest_subcommand() {
 }
 
 #[test]
-fn help_shows_translate_subcommand() {
-    ntk()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("translate"));
-}
-
-#[test]
 fn service_help_subcommand_returns_zero() {
     ntk()
         .args(["service", "--help"])
@@ -123,25 +114,6 @@ fn service_help_subcommand_returns_zero() {
         .success()
         .stdout(predicate::str::contains("service"))
         .stdout(predicate::str::contains("--port"));
-}
-
-// ─── translate subcommand ────────────────────────────────────────────────
-
-#[test]
-fn translate_without_args_fails() {
-    ntk()
-        .arg("translate")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("error"));
-}
-
-#[test]
-fn translate_missing_path_fails() {
-    ntk()
-        .args(["translate", "--from", "csharp", "--to", "rust"])
-        .assert()
-        .failure();
 }
 
 // ─── 4.2.6 — unknown subcommand / bad args ──────────────────────────────

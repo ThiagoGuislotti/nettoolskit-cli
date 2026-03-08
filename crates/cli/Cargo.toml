@@ -34,9 +34,6 @@ nettoolskit-ui = { path = "../ui" }
 nettoolskit-core = { path = "../core" }
 nettoolskit-otel = { path = "../otel" }
 
-# Commands for main.rs
-nettoolskit-translate = { path = "../commands/translate" }
-
 # Async and standard dependencies
 clap = { workspace = true }
 clap_complete = { workspace = true }

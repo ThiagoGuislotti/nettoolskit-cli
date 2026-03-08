@@ -114,7 +114,10 @@ async fn main() {
 pub enum MainAction {
       Help,
       Manifest,
-      Translate,
+      Ai,
+      Task,
+      Config,
+      Clear,
       Quit,
 }
 

@@ -15,6 +15,8 @@ pub(crate) enum CacheKind {
     Help,
     /// Cache entry for manifest discovery results in a specific root.
     ManifestList,
+    /// Cache entry for AI response reuse.
+    AiResponse,
 }
 
 /// Cache key composed of command partition + discriminator.
@@ -45,6 +47,14 @@ impl CacheKey {
         }
     }
 
+    /// Build key for AI cache reuse entries.
+    pub(crate) fn ai_response(signature: &str) -> Self {
+        Self {
+            kind: CacheKind::AiResponse,
+            discriminator: signature.trim().to_string(),
+        }
+    }
+
     /// Return partition for this cache key.
     pub(crate) fn kind(&self) -> CacheKind {
         self.kind
@@ -58,6 +68,8 @@ pub(crate) enum CacheValue {
     HelpMarkdown(String),
     /// Discovered manifest paths for `manifest list`.
     ManifestListEntries(Vec<PathBuf>),
+    /// Cached AI response text.
+    AiResponseText(String),
 }
 
 impl CacheValue {
@@ -70,6 +82,7 @@ impl CacheValue {
                     .map(|path| 24 + path.to_string_lossy().len())
                     .sum::<usize>()
             }
+            Self::AiResponseText(text) => 32 + text.len(),
         }
     }
 }
@@ -81,6 +94,8 @@ pub(crate) struct CacheTtl {
     pub(crate) help: Duration,
     /// TTL for manifest list cache entries.
     pub(crate) manifest_list: Duration,
+    /// TTL for AI response cache entries.
+    pub(crate) ai_response: Duration,
 }
 
 impl CacheTtl {
@@ -88,6 +103,7 @@ impl CacheTtl {
         match kind {
             CacheKind::Help => self.help,
             CacheKind::ManifestList => self.manifest_list,
+            CacheKind::AiResponse => self.ai_response,
         }
     }
 }
@@ -97,6 +113,7 @@ impl Default for CacheTtl {
         Self {
             help: Duration::from_secs(300),
             manifest_list: Duration::from_secs(20),
+            ai_response: Duration::from_secs(180),
         }
     }
 }
@@ -267,6 +284,7 @@ mod tests {
         CacheTtl {
             help: Duration::from_millis(20),
             manifest_list: Duration::from_millis(80),
+            ai_response: Duration::from_millis(80),
         }
     }
 

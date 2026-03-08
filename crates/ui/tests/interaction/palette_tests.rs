@@ -74,7 +74,7 @@ fn test_palette_chained_builder() {
     let entries = vec![
         TestEntry::new("/help", "Show help"),
         TestEntry::new("/manifest", "Manage manifests"),
-        TestEntry::new("/translate", "Translate files"),
+        TestEntry::new("/ai", "AI assistant commands"),
     ];
     let _palette = CommandPalette::new(entries)
         .with_title("Commands")
@@ -90,7 +90,7 @@ fn test_palette_reload_entries() {
 
     let updated = vec![
         TestEntry::new("/manifest", "Manifests"),
-        TestEntry::new("/translate", "Translate"),
+        TestEntry::new("/task", "Task manager"),
         TestEntry::new("/quit", "Exit"),
     ];
     palette.reload_entries(updated);

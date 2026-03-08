@@ -3,9 +3,7 @@
 //! Tests for command processor and text processor functionality.
 
 use nettoolskit_orchestrator::{process_command, process_text, ExitStatus};
-use std::fs;
 use std::sync::OnceLock;
-use tempfile::tempdir;
 use tokio::sync::Mutex;
 
 static ENV_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -95,43 +93,6 @@ async fn test_process_invalid_command() {
 }
 
 #[tokio::test]
-async fn test_process_translate_missing_arguments() {
-    let result = process_command("/translate").await;
-    assert_eq!(
-        result,
-        ExitStatus::Error,
-        "Translate without required args should fail"
-    );
-}
-
-#[tokio::test]
-async fn test_process_translate_with_valid_args_executes_handler() {
-    let dir = tempdir().expect("failed to create temporary directory");
-    let input_path = dir.path().join("sample.cs.hbs");
-    fs::write(&input_path, "public class {{class_name}} {}")
-        .expect("failed to write input template");
-
-    let command = format!(
-        "/translate --from dotnet --to rust {}",
-        input_path.display()
-    );
-    let result = process_command(&command).await;
-
-    assert_eq!(
-        result,
-        ExitStatus::Success,
-        "Translate with valid args should succeed"
-    );
-
-    let output_path = dir.path().join("sample.rs");
-    assert!(
-        output_path.exists(),
-        "Expected translated output file at {}",
-        output_path.display()
-    );
-}
-
-#[tokio::test]
 async fn test_process_ai_ask_with_mock_provider_succeeds() {
     let result = process_command("/ai ask explain command cache").await;
     assert_eq!(
@@ -176,9 +137,11 @@ async fn test_process_task_submit_ai_plan_in_service_mode_queues_successfully() 
     let _guard = env_test_guard().await;
     std::env::set_var("NTK_RUNTIME_MODE", "service");
     std::env::set_var("NTK_AI_PROVIDER", "mock");
+    std::env::set_var("NTK_TOOL_SCOPE_ALLOWED_TOOLS", "ai.plan");
 
     let result = process_command("/task submit ai-plan queue service mode task").await;
 
+    std::env::remove_var("NTK_TOOL_SCOPE_ALLOWED_TOOLS");
     std::env::remove_var("NTK_AI_PROVIDER");
     std::env::remove_var("NTK_RUNTIME_MODE");
 
@@ -304,30 +267,6 @@ async fn test_process_text_routes_clear_alias() {
     assert!(
         matches!(result, ExitStatus::Success | ExitStatus::Error),
         "Clear alias should route to /clear command"
-    );
-}
-
-#[tokio::test]
-async fn test_process_text_routes_translate_without_slash() {
-    let dir = tempdir().expect("failed to create temporary directory");
-    let input_path = dir.path().join("text-mode.cs.hbs");
-    fs::write(&input_path, "public class {{class_name}} {}")
-        .expect("failed to write input template");
-
-    let command = format!("translate --from dotnet --to rust {}", input_path.display());
-    let result = process_text(&command).await;
-
-    assert_eq!(
-        result,
-        ExitStatus::Success,
-        "Free-text translate should route and succeed"
-    );
-
-    let output_path = dir.path().join("text-mode.rs");
-    assert!(
-        output_path.exists(),
-        "Expected translated output file at {}",
-        output_path.display()
     );
 }
 

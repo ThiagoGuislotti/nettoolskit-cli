@@ -89,6 +89,25 @@ jobs:
           cargo test -p nettoolskit-orchestrator --lib request_ai_stream_with_retry_
           cargo test -p nettoolskit-orchestrator --lib evaluate_ai_rate_limit_
 
+  # ─── Agent SLO Budget Regression Gate ─────────────────────────
+  ai-slo-gate:
+    name: Agent SLO Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ai-slo-gate
+      - name: Run AI SLO regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p nettoolskit-otel --test telemetry_tests test_get_timing_percentile_
+          cargo test -p nettoolskit-orchestrator --lib ai_slo_policy_from_env_
+          cargo test -p nettoolskit-orchestrator --lib update_ai_request_rate_gauges_updates_slo_indicators
+          cargo test -p nettoolskit-orchestrator --lib evaluate_ai_slo_budget_compliance_detects_violations
+
   # ─── Dual Runtime Validation Gate ─────────────────────────────
   dual-runtime-gate:
     name: Dual Runtime Gate
