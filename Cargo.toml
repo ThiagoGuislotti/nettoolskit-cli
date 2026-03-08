@@ -68,7 +68,7 @@ opentelemetry-otlp = { version = "0.31", features = ["trace", "metrics", "grpc-t
 
 # Configuration
 toml = "0.8"
-dirs = "5.0"
+dirs = "6.0"
 
 # File system
 walkdir = "2.4"
