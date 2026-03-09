@@ -59,7 +59,7 @@ ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 
 # Additional dependencies
-ctrlc = "3.4"
+ctrlc = "3.5"
 
 [dev-dependencies]
 tokio-test = "0.4"
