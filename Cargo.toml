@@ -69,7 +69,7 @@ opentelemetry_sdk = { version = "0.31", features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.31", features = ["trace", "metrics", "grpc-tonic", "http-proto"] }
 
 # Configuration
-toml = "0.8"
+toml = "1.0"
 
 # File system
 walkdir = "2.4"
