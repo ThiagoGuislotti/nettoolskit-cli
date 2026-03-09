@@ -39,7 +39,7 @@ strum_macros = "0.26"
 heck = "0.5"
 
 # Color support
-owo-colors = "3.5"
+owo-colors = "4.3"
 supports-color = "2.1"
 
 # Interactive prompts
