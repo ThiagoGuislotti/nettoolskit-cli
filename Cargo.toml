@@ -40,7 +40,7 @@ heck = "0.5"
 
 # Color support
 owo-colors = "3.5"
-supports-color = "2.1"
+supports-color = "3.0"
 
 # Interactive prompts
 inquire = "0.9"
