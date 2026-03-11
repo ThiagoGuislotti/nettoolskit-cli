@@ -20,7 +20,7 @@ nettoolskit-help = { path = "help" }
 nettoolskit-manifest = { path = "manifest" }
 
 [dev-dependencies]
-tempfile = "3.8"
+tempfile = "3.27"
 
 [lints]
 workspace = true
